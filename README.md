@@ -49,8 +49,15 @@ Reanimator automatisiert diesen Prozess und bietet dir ein zentrales Dashboard f
    npm run build
    npm start
    ```
-
+   
+###  Anmeldung
+Initiale Anmeldedaten:
+***N: admin
+PW: admin***
 ### ⚙️ Konfiguration
+***Initiale Anmeldedaten:
+N: admin
+PW: admin***
 Gehe im Dashboard auf Server -> New Server. Du benötigst:
 * Hostname/IP des Nodes.
 * Einen autorisierten SSH-Key (empfohlen).
@@ -98,7 +105,11 @@ Reanimator automates this process and provides a centralized dashboard for your 
    npm run build
    npm start
    ```
-
+   
+###  Registration
+Initial Login:
+***N: admin
+PW: admin***
 ### ⚙️ Configuration
 Navigate to Server -> New Server in the dashboard. You will need:
 * Hostname or IP of the node.
