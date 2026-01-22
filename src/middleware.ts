@@ -22,16 +22,34 @@ export function middleware(request: NextRequest) {
 
     // Check for session cookie
     const sessionCookie = request.cookies.get('session');
+    const expiresAtCookie = request.cookies.get('session_expires');
 
-    if (!sessionCookie) {
+    if (!sessionCookie || !expiresAtCookie) {
         // No session - redirect to login
         const loginUrl = new URL('/login', request.url);
         return NextResponse.redirect(loginUrl);
     }
 
-    // Session exists - allow access
+    // Check if session expired
+    try {
+        const expiresAt = new Date(expiresAtCookie.value);
+        if (expiresAt < new Date()) {
+            // Session expired - redirect to login
+            const loginUrl = new URL('/login', request.url);
+            const response = NextResponse.redirect(loginUrl);
+            // Clear expired cookies
+            response.cookies.delete('session');
+            response.cookies.delete('session_expires');
+            return response;
+        }
+    } catch {
+        // Invalid date - redirect to login
+        const loginUrl = new URL('/login', request.url);
+        return NextResponse.redirect(loginUrl);
+    }
+
+    // Session exists and is valid - allow access
     // Note: Full session validation happens in server actions
-    // Middleware only checks for cookie presence for performance
     return NextResponse.next();
 }
 

@@ -132,6 +132,15 @@ export async function login(username: string, password: string): Promise<{ succe
             path: '/',
         });
 
+        // Add expiration timestamp cookie (readable by middleware for client-side validation)
+        cookieStore.set('session_expires', expiresAt, {
+            httpOnly: false,
+            secure: false,
+            sameSite: 'lax',
+            maxAge: SESSION_DURATION_HOURS * 60 * 60,
+            path: '/',
+        });
+
         db.prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?").run(user.id);
 
         if (user.force_password_change) {
@@ -153,6 +162,7 @@ export async function logout(): Promise<void> {
         if (sessionId) {
             deleteSession(sessionId);
             cookieStore.delete('session');
+            cookieStore.delete('session_expires');
         }
     } catch (e) {
         // Ignore

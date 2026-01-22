@@ -37,7 +37,7 @@ export function Sidebar() {
     useEffect(() => {
         getCurrentUser().then(setUser);
         getAISettings().then(s => setAiEnabled(s.enabled));
-    }, []);
+    }, [pathname]); // Re-fetch user on route change to sync after login
 
     const handleLogout = async () => {
         await logout();
@@ -120,7 +120,7 @@ export function Sidebar() {
                         <span className="font-mono text-[10px] uppercase tracking-wider">Beta</span>
                     )}
                     <a
-                        href="https://github.com/jahartmann/Reanimator"
+                        href="https://github.com/jahartmann/TheReanimator"
                         target="_blank"
                         rel="noreferrer"
                         className="hover:text-foreground transition-colors"
