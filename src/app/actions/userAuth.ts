@@ -123,6 +123,7 @@ export async function login(username: string, password: string): Promise<{ succe
 
         const sessionId = await createSession(user.id);
         const cookieStore = await cookies();
+        const expiresAt = new Date(Date.now() + SESSION_DURATION_HOURS * 60 * 60 * 1000).toISOString();
 
         cookieStore.set('session', sessionId, {
             httpOnly: true,
