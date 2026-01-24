@@ -63,17 +63,22 @@ export function Sidebar() {
     return (
         <div className="flex flex-col w-64 border-r border-border bg-card h-screen fixed left-0 top-0 z-30">
             <div className="p-6 pb-2">
+                {/* Language switcher in top-right corner */}
+                <div className="flex justify-end mb-2">
+                    <LanguageSwitcher />
+                </div>
+
                 <div className="flex items-center gap-2 mb-1">
                     <div className="bg-primary/10 p-2 rounded-lg">
                         <Activity className="h-6 w-6 text-primary" />
                     </div>
                     <div>
                         <h1 className="text-lg font-bold tracking-tight text-white uppercase">Reanimator</h1>
-                        {IS_BETA && (
-                            <span className="text-[10px] bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded-full font-bold ml-[-2px] border border-amber-500/20">BETA</span>
-                        )}
                     </div>
                 </div>
+                {IS_BETA && (
+                    <span className="text-[10px] bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded-full font-bold border border-amber-500/20 inline-block">BETA</span>
+                )}
                 <p className="text-xs text-muted-foreground ml-1">Proxmox Management System</p>
             </div>
             <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
@@ -116,16 +121,11 @@ export function Sidebar() {
                 </div>
             </nav>
 
-            {/* User info, language switcher and footer */}
-            <div className="p-4 border-t border-border space-y-4">
+            {/* User info and footer */}
+            <div className="p-4 border-t border-border">
                 {user && <UserNav user={user} />}
 
-                {/* Language switcher - separate from UserNav */}
-                <div className="flex items-center justify-center">
-                    <LanguageSwitcher />
-                </div>
-
-                <div className="px-2 flex items-center justify-between text-xs text-muted-foreground opacity-60 hover:opacity-100 transition-opacity">
+                <div className="mt-4 px-2 flex items-center justify-between text-xs text-muted-foreground opacity-60 hover:opacity-100 transition-opacity">
                     <span>v{APP_VERSION}</span>
                     {IS_BETA && (
                         <span className="font-mono text-[10px] uppercase tracking-wider">Beta</span>
