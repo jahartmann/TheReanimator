@@ -1,14 +1,14 @@
 'use client';
 
 import { getAISettings } from '@/app/actions/ai';
-import { Link } from 'next-intl/link';
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { LayoutDashboard, Server, FolderCog, ArrowRightLeft, Tag as TagIcon, HardDrive, Users, Terminal, Activity, ListTodo, Calendar, TrendingUp, Disc } from 'lucide-react';
 import { getCurrentUser, logout, User as UserType } from '@/app/actions/userAuth';
 import { APP_VERSION, IS_BETA } from '@/lib/constants';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 
 // Keep navItems outside component as const (like original)
 const navItems = [
@@ -34,6 +34,7 @@ export function Sidebar() {
     const [user, setUser] = useState<UserType | null>(null);
     const [aiEnabled, setAiEnabled] = useState(false);
     const t = useTranslations('nav');
+    const locale = useLocale();
 
     useEffect(() => {
         getCurrentUser().then(setUser);
@@ -54,6 +55,9 @@ export function Sidebar() {
         if (item.key === 'optimizer' && !aiEnabled) return false;
         return true;
     });
+
+    // Remove locale prefix from pathname for comparison
+    const pathnameWithoutLocale = pathname.replace(new RegExp(`^/${locale}`), '') || '/';
 
     return (
         <div className="flex flex-col w-64 border-r border-border bg-card h-screen fixed left-0 top-0 z-30">
@@ -76,7 +80,7 @@ export function Sidebar() {
                     <Link
                         key={item.href}
                         href={item.href}
-                        className={`flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors ${pathname === item.href || pathname.startsWith(item.href + '/')
+                        className={`flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors ${pathnameWithoutLocale === item.href || pathnameWithoutLocale.startsWith(item.href + '/')
                             ? 'text-foreground bg-white/10'
                             : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
                             }`}
@@ -94,7 +98,7 @@ export function Sidebar() {
                             <Link
                                 key={item.href}
                                 href={item.href}
-                                className={`flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors ${pathname === item.href
+                                className={`flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors ${pathnameWithoutLocale === item.href
                                     ? 'text-foreground bg-white/10'
                                     : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
                                     }`}
