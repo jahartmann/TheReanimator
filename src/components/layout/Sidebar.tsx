@@ -15,7 +15,6 @@ export function Sidebar() {
   const [user, setUser] = useState<UserType | null>(null);
   const [aiEnabled, setAiEnabled] = useState(false);
   const t = useTranslations('nav');
-  const tCommon = useTranslations('common');
 
   useEffect(() => {
     getCurrentUser().then(setUser);
@@ -31,29 +30,36 @@ export function Sidebar() {
     return null;
   }
 
+  // Get pathname without locale prefix
+  const pathnameWithoutLocale = pathname.replace(/^\/[a-z]{2}(\/|$)/, '/');
+
   const navItems = [
-    { name: t('dashboard'), href: '/', icon: LayoutDashboard },
-    { name: t('optimizer'), href: '/optimizer', icon: TrendingUp },
-    { name: t('servers'), href: '/servers', icon: Server },
-    { name: t('migrations'), href: '/migrations', icon: ArrowRightLeft },
-    { name: t('tasks'), href: '/tasks', icon: ListTodo },
-    { name: t('jobs'), href: '/jobs', icon: Calendar },
-    { name: t('library'), href: '/library', icon: Disc },
-    { name: t('tags'), href: '/tags', icon: TagIcon },
-    { name: t('storage'), href: '/storage', icon: HardDrive },
-    { name: t('configs'), href: '/configs', icon: FolderCog },
+    { key: 'dashboard', href: '/', icon: LayoutDashboard },
+    { key: 'optimizer', href: '/optimizer', icon: TrendingUp },
+    { key: 'servers', href: '/servers', icon: Server },
+    { key: 'migrations', href: '/migrations', icon: ArrowRightLeft },
+    { key: 'tasks', href: '/tasks', icon: ListTodo },
+    { key: 'jobs', href: '/jobs', icon: Calendar },
+    { key: 'library', href: '/library', icon: Disc },
+    { key: 'tags', href: '/tags', icon: TagIcon },
+    { key: 'storage', href: '/storage', icon: HardDrive },
+    { key: 'configs', href: '/configs', icon: FolderCog },
   ];
 
   const adminNavItems = [
-    { name: t('bulkCommands'), href: '/tools/bulk-command', icon: Terminal },
-    { name: t('users'), href: '/users', icon: Users },
+    { key: 'bulkCommands', href: '/tools/bulk-command', icon: Terminal },
+    { key: 'users', href: '/users', icon: Users },
   ];
 
   // Filter nav items based on AI settings
   const filteredNavItems = navItems.filter(item => {
-    if (item.name === 'Optimizer' && !aiEnabled) return false;
+    if (item.key === 'optimizer' && !aiEnabled) return false;
     return true;
   });
+
+  const isActive = (href: string) => {
+    return pathnameWithoutLocale === href || pathnameWithoutLocale.startsWith(href + '/');
+  };
 
   return (
     <div className="flex flex-col w-64 border-r border-border bg-card h-screen fixed left-0 top-0 z-30">
@@ -76,13 +82,13 @@ export function Sidebar() {
           <Link
             key={item.href}
             href={item.href}
-            className={`flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors ${pathname === item.href || pathname.startsWith(item.href + '/')
+            className={`flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors ${isActive(item.href)
               ? 'text-foreground bg-white/10'
               : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
               }`}
           >
             <item.icon className="h-4 w-4" />
-            {item.name}
+            {t(item.key as any)}
           </Link>
         ))}
 
@@ -94,13 +100,13 @@ export function Sidebar() {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors ${pathname === item.href
+                className={`flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors ${isActive(item.href)
                   ? 'text-foreground bg-white/10'
                   : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
                   }`}
               >
                 <item.icon className="h-4 w-4" />
-                {item.name}
+                {t(item.key as any)}
               </Link>
             ))}
           </div>
