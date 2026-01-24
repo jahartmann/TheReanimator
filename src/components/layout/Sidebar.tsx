@@ -9,6 +9,7 @@ import { getCurrentUser, logout, User as UserType } from '@/app/actions/userAuth
 import { APP_VERSION, IS_BETA } from '@/lib/constants';
 import { UserNav } from './UserNav';
 import { useTranslations, useLocale } from 'next-intl';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 
 // Keep navItems outside component as const (like original)
 const navItems = [
@@ -62,16 +63,19 @@ export function Sidebar() {
     return (
         <div className="flex flex-col w-64 border-r border-border bg-card h-screen fixed left-0 top-0 z-30">
             <div className="p-6 pb-2">
-                <div className="flex items-center gap-2 mb-1">
-                    <div className="bg-primary/10 p-2 rounded-lg">
-                        <Activity className="h-6 w-6 text-primary" />
+                <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                        <div className="bg-primary/10 p-2 rounded-lg">
+                            <Activity className="h-6 w-6 text-primary" />
+                        </div>
+                        <div>
+                            <h1 className="text-lg font-bold tracking-tight text-white uppercase">Reanimator</h1>
+                            {IS_BETA && (
+                                <span className="text-[10px] bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded-full font-bold ml-[-2px] border border-amber-500/20">BETA</span>
+                            )}
+                        </div>
                     </div>
-                    <div>
-                        <h1 className="text-lg font-bold tracking-tight text-white uppercase">Reanimator</h1>
-                        {IS_BETA && (
-                            <span className="text-[10px] bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded-full font-bold ml-[-2px] border border-amber-500/20">BETA</span>
-                        )}
-                    </div>
+                    <LanguageSwitcher />
                 </div>
                 <p className="text-xs text-muted-foreground ml-1">Proxmox Management System</p>
             </div>
@@ -115,7 +119,7 @@ export function Sidebar() {
                 </div>
             </nav>
 
-            {/* User info and language switcher */}
+            {/* User info and footer */}
             <div className="p-4 border-t border-border">
                 {user && <UserNav user={user} />}
 

@@ -16,7 +16,6 @@ import { User as UserType, logout } from "@/app/actions/userAuth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from 'next-intl';
-import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 
 interface UserNavProps {
     user: UserType;
@@ -45,12 +44,12 @@ export function UserNav({ user }: UserNavProps) {
                     <div className="flex flex-col items-start text-left space-y-1 overflow-hidden flex-1">
                         <span className="text-sm font-semibold leading-none truncate w-full">{user.username}</span>
                         <span className="text-xs text-muted-foreground truncate w-full">
-                            {user.is_admin ? t('settings') : 'User'}
+                            {user.is_admin ? 'Administrator' : 'User'}
                         </span>
                     </div>
-                    {/* Language switcher */}
-                    <div className="ml-auto">
-                        <LanguageSwitcher />
+                    {/* Visual indicator for dropdown */}
+                    <div className="ml-auto text-muted-foreground/50">
+                        <User className="h-4 w-4" />
                     </div>
                 </Button>
             </DropdownMenuTrigger>
