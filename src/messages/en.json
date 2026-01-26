@@ -31,7 +31,7 @@
     "required": "Required",
     "url": "URL",
     "deeplTest": "This is an automatic test of DeepL translation.",
-    "hashTestKey": "This is a test for hash tracking"
+    "hashTestKey": "This is a MODIFIED test for hash tracking"
   },
   "nav": {
     "dashboard": "Dashboard",
