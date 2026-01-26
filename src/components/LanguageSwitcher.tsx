@@ -34,11 +34,11 @@ export function LanguageSwitcher() {
 
   const languages = [
     { code: 'de', name: 'Deutsch', flag: '🇩🇪' },
-    { code: 'ru', name: 'Русский', flag: '🇷🇺' },
     { code: 'en', name: 'English', flag: '🇺🇸' },
     { code: 'es', name: 'Español', flag: '🇪🇸' },
     { code: 'fr', name: 'Français', flag: '🇫🇷' },
-  ];
+    { code: 'ru', name: 'Русский', flag: '🇷🇺' },
+  ].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <DropdownMenu>
