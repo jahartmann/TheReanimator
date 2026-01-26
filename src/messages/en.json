@@ -29,7 +29,8 @@
     "no": "No",
     "optional": "Optional",
     "required": "Required",
-    "url": "URL"
+    "url": "URL",
+    "deeplTest": "This is an automatic test of DeepL translation."
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -244,7 +245,7 @@
     "taskCompleted": "Task completed",
     "taskCenter": "Task Center",
     "refresh": "Refresh",
-    "description": "Manage all background processes (migrations, scans, synchronization)",
+    "description": "Description",
     "stopConfirm": "Really stop task \"{description}\"?",
     "stopSignalSent": "Stop signal sent",
     "stopError": "Error stopping task",
@@ -260,7 +261,6 @@
     "time": "Time",
     "node": "Node",
     "activity": "Activity",
-    "description": "Description",
     "duration": "Duration",
     "noTasksFound": "No tasks found",
     "noActiveTasks": "No active tasks",
@@ -1005,7 +1005,7 @@
     "intervalHourly": "Hourly",
     "cronExpression": "Cron expression (manual)",
     "cronPlaceholder": "* * * * *",
-    "name": "Name (optional)",
+    "name": "Name",
     "namePlaceholder": "Auto-{type}",
     "namePlaceholderScan": "Scan",
     "namePlaceholderBackup": "Backup",
@@ -1013,7 +1013,6 @@
     "create": "Create",
     "noScheduledTasks": "No scheduled tasks.",
     "type": "Type",
-    "name": "Name",
     "schedule": "Schedule",
     "active": "Active",
     "actions": "Actions",

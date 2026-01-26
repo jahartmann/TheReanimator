@@ -29,7 +29,8 @@
     "no": "Нет",
     "optional": "Опционально",
     "required": "Обязательно",
-    "url": "URL"
+    "url": "URL",
+    "deeplTest": "Это автоматическое тестирование перевода DeepL."
   },
   "nav": {
     "dashboard": "Дашборд",
@@ -141,7 +142,6 @@
     "clusterNodesFound": "+ найдено {count} узлов кластера",
     "tagsNotFoundOnSource": "Теги не найдены на источнике.",
     "aiAnalysisFailed": "AI-анализ не удался:",
-    "serverNotFound": "Сервер не найден",
     "sshTrustSuccess": "SSH Trust успешно настроен!",
     "targetConnectionFailed": "Подключение к целевому серверу не удалось: {error}"
   },
@@ -247,7 +247,7 @@
     "taskCompleted": "Задача выполнена",
     "taskCenter": "Центр задач",
     "refresh": "Обновить",
-    "description": "Управление всеми фоновыми процессами (миграции, сканирование, синхронизация)",
+    "description": "Описание",
     "stopConfirm": "Действительно остановить задачу \"{description}\"?",
     "stopSignalSent": "Сигнал остановки отправлен",
     "stopError": "Ошибка при остановке",
@@ -263,7 +263,6 @@
     "time": "Время",
     "node": "Нода",
     "activity": "Активность",
-    "description": "Описание",
     "duration": "Длительность",
     "noTasksFound": "Задач не найдено",
     "noActiveTasks": "Нет активных задач",
@@ -794,7 +793,8 @@
   "actionsTrust": {
     "serverNotFound": "Сервер не найден",
     "sshTrustSetupSuccess": "SSH Trust успешно настроен!",
-    "targetConnectionFailed": "Подключение к целевому серверу не удалось: "
+    "targetConnectionFailed": "Подключение к целевому серверу не удалось: ",
+    "sshTrustSuccess": "Доверие SSH успешно установлено!"
   },
   "actionsConfigBackup": {
     "sshDataMissing": "SSH данные отсутствуют",
@@ -1009,7 +1009,7 @@
     "intervalHourly": "Ежечасно",
     "cronExpression": "Cron выражение (вручную)",
     "cronPlaceholder": "* * * * *",
-    "name": "Название (необязательно)",
+    "name": "Название",
     "namePlaceholder": "Авто-{type}",
     "namePlaceholderScan": "Сканирование",
     "namePlaceholderBackup": "Бэкап",
@@ -1017,7 +1017,6 @@
     "create": "Создать",
     "noScheduledTasks": "Нет запланированных задач.",
     "type": "Тип",
-    "name": "Название",
     "schedule": "Расписание",
     "active": "Активна",
     "actions": "Действия",
