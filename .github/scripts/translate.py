@@ -6,12 +6,13 @@ Automatically translates new keys from default locale to all other locales.
 Reads supported languages from src/i18n/routing.ts
 
 Features:
-- Uses official DeepL Python library
+- Uses requests library for speed (faster than official deepl lib)
 - Tracks value changes with MD5 hashes
 - Only translates missing or changed keys
 - Preserves existing translations
+- Proper error handling
 
-Uses official DeepL Python library: https://pypi.org/project/deepl/
+API Documentation: https://developers.deepl.com/docs/api-reference/translate
 """
 import hashlib
 import json
@@ -21,10 +22,10 @@ import sys
 from pathlib import Path
 
 try:
-    import deepl
+    import requests
 except ImportError:
-    print("❌ Error: deepl module not found")
-    print("   Run: pip install deepl")
+    print("❌ Error: requests module not found")
+    print("   Run: pip install requests")
     sys.exit(1)
 
 # Configuration
@@ -34,19 +35,14 @@ if not DEEPL_API_KEY:
     print("   Set it in GitHub Secrets: DEEPL_API_KEY")
     sys.exit(1)
 
-# Use free API endpoint for keys ending with ':fx' or set server URL explicitly
-if ":fx" in DEEPL_API_KEY:
-    deepl_client = deepl.DeepLClient(DEEPL_API_KEY)
-else:
-    # For backward compatibility with old free keys
-    deepl_client = deepl.DeepLClient(DEEPL_API_KEY, server_url="https://api-free.deepl.com")
-
+# Use free API endpoint
+DEEPL_URL = "https://api-free.deepl.com/v2/translate"
 LOCALES_DIR = Path("src/messages")
 ROUTING_FILE = Path("src/i18n/routing.ts")
 HASHES_FILE = Path("src/messages/.translation_hashes.json")
 
-# DeepL language code mapping (target languages only)
-# Full list: https://developers.deepl.com/docs/api-reference/languages
+# DeepL language code mapping (from official API docs)
+# Source: https://developers.deepl.com/docs/api-reference/languages
 DEEPL_LANG_CODES = {
     "en": "EN-US",  # English (American)
     "ru": "RU",     # Russian
@@ -128,7 +124,7 @@ def get_all_namespaces():
     return ["messages"]
 
 def translate_text(text: str, target_lang: str, source_lang: str = None) -> str:
-    """Translate text using DeepL API (official library)"""
+    """Translate text using DeepL REST API (requests library for speed)"""
     if not text.strip():
         return text
 
@@ -137,27 +133,32 @@ def translate_text(text: str, target_lang: str, source_lang: str = None) -> str:
         return text
 
     try:
-        # Build translation parameters
-        params = {
+        # Build request data according to API docs
+        data = {
             "text": text,
             "target_lang": target_lang,
-            "preserve_formatting": True,
-            "tag_handling": "xml"
         }
 
-        # Only set source_lang if provided (DeepL can auto-detect)
+        # Optionally set source language
         if source_lang:
-            params["source_lang"] = source_lang
+            data["source_lang"] = source_lang
 
-        # Use official DeepL library
-        result = deepl_client.translate_text(**params)
-        return result.text
+        # Only set tag_handling if text contains HTML/XML tags
+        if "<" in text and ">" in text:
+            data["tag_handling"] = "xml"
+            data["preserve_formatting"] = True
 
-    except deepl.DeepLException as e:
+        response = requests.post(
+            DEEPL_URL,
+            headers={"Authorization": f"DeepL-Auth-Key {DEEPL_API_KEY}"},
+            data=data,
+            timeout=30
+        )
+        response.raise_for_status()
+        return response.json()["translations"][0]["text"]
+
+    except requests.exceptions.RequestException as e:
         print(f"      ❌ Translation error: {e}")
-        return text  # Return original on error
-    except Exception as e:
-        print(f"      ❌ Unexpected error: {e}")
         return text  # Return original on error
 
 def collect_all_keys(data: dict, prefix: str = "") -> dict:
@@ -172,7 +173,7 @@ def collect_all_keys(data: dict, prefix: str = "") -> dict:
     return result
 
 def main():
-    print("🌍 Starting DeepL Auto-Translation (using official library with hash tracking)...")
+    print("🌍 Starting DeepL Auto-Translation (using requests with hash tracking)...")
 
     # Get locales from routing.ts
     all_locales = get_locales_from_routing()
