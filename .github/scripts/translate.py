@@ -50,7 +50,7 @@ HASHES_FILE = Path("src/messages/.translation_hashes.json")
 DEEPL_LANG_CODES = {
     "en": "EN-US",  # English (American)
     "ru": "RU",     # Russian
-    "es": "ES-ES",  # Spanish (Iberian)
+    "es": "ES",     # Spanish
     "fr": "FR",     # French
     "it": "IT",     # Italian
     "pt": "PT-BR",  # Portuguese (Brazilian)
