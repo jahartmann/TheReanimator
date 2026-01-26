@@ -1,6 +1,5 @@
 {
   "common": {
-    "hashTestKey": "Dies ist ein MODIFIZIERTER Test für die Hash-Verfolgung",
     "save": "Speichern",
     "cancel": "Abbrechen",
     "delete": "Löschen",
