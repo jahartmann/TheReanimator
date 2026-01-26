@@ -1117,5 +1117,7 @@
   "backupLogic.invalidPath": "1c1038ed",
   "backupLogic.fileNotFound": "4142f1e0",
   "backupLogic.fileRestored": "a15fa267",
-  "common.hashTestKey": "485a7633"
+  "common.hashTestKey": "485a7633",
+  "actionsConfig.aiAnalysisFailed": "8fa52788",
+  "actionsTrust.sshTrustSetupSuccess": "74de1243"
 }

@@ -785,12 +785,14 @@
     "hereIsConfig": "Here is the config:\n"
   },
   "actionsConfig": {
-    "tagsNotFoundOnSource": "Tags not found on source."
+    "tagsNotFoundOnSource": "Tags not found on source.",
+    "aiAnalysisFailed": "AI analysis failed"
   },
   "actionsTrust": {
     "serverNotFound": "Server not found",
     "sshTrustSuccess": "SSH Trust successfully set up!",
-    "targetConnectionFailed": "Target server connection failed: {error}"
+    "targetConnectionFailed": "Target server connection failed: {error}",
+    "sshTrustSetupSuccess": "SSH trust setup successful!"
   },
   "actionsConfigBackup": {
     "sshDataMissing": "SSH data missing",

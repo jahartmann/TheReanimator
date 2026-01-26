@@ -785,12 +785,14 @@
     "hereIsConfig": "Aquí está la configuración:\n"
   },
   "actionsConfig": {
-    "tagsNotFoundOnSource": "Etiquetas no encontradas en la fuente."
+    "tagsNotFoundOnSource": "Etiquetas no encontradas en la fuente.",
+    "aiAnalysisFailed": "Análisis de IA fallido"
   },
   "actionsTrust": {
     "serverNotFound": "No se ha encontrado el servidor",
     "sshTrustSuccess": "¡Confianza SSH establecida correctamente!",
-    "targetConnectionFailed": "Error al conectarse al servidor de destino: {error}"
+    "targetConnectionFailed": "Error al conectarse al servidor de destino: {error}",
+    "sshTrustSetupSuccess": "Configuración de confianza SSH correcta."
   },
   "actionsConfigBackup": {
     "sshDataMissing": "Faltan datos SSH",
