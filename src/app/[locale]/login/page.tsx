@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, Lock, User, Key, AlertCircle, Shield, Zap, Eye, EyeOff } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 
 export default function LoginPage() {
     const t = useTranslations('login');
@@ -166,7 +167,12 @@ export default function LoginPage() {
             </div>
 
             {/* Right Side - Login Form */}
-            <div className="flex-1 flex items-center justify-center p-8 bg-background">
+            <div className="flex-1 flex items-center justify-center p-8 bg-background relative">
+                {/* Language Switcher */}
+                <div className="absolute top-6 right-6">
+                    <LanguageSwitcher />
+                </div>
+
                 <div className="w-full max-w-md space-y-8">
                     {/* Mobile Logo */}
                     <div className="lg:hidden text-center space-y-2">
