@@ -191,7 +191,7 @@ export async function GET() {
                 // For now, backups for linux hosts are 0.
 
                 return {
-                    id: host.id, // ID collision possible between tables? Yes.
+
                     // Ideally we should prefix ID or have unified table. 
                     // For dashboard display, let's make ID negative for Linux hosts to avoid collision in React keys? 
                     // Or actually, duplicate IDs might break keys if we don't mix them carefully.
