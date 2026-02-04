@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Settings, RefreshCw, Download, CheckCircle2, AlertCircle, Loader2, Terminal, GitBranch, Copy, Database, Server, Info, Power, HardDrive, Sparkles, BrainCircuit } from "lucide-react";
+import { Settings, RefreshCw, Download, CheckCircle2, AlertCircle, Loader2, Terminal, GitBranch, Copy, Database, Server, Info, Power, HardDrive, Sparkles, BrainCircuit, FileCode } from "lucide-react";
+import Link from 'next/link';
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -299,6 +300,30 @@ export default function SettingsClient() {
                                     <Info className="h-3 w-3" /> {t('manualUpdateDesc')}
                                 </p>
                             </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Provisioning Profiles */}
+                    <Card className="border-muted/60 shadow-sm">
+                        <CardHeader className="pb-3">
+                            <CardTitle className="flex items-center gap-2 text-base">
+                                <FileCode className="h-5 w-5 text-purple-500" />
+                                Provisioning Profiles
+                            </CardTitle>
+                            <CardDescription>
+                                Manage reusable setup scripts for server onboarding
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <p className="text-sm text-muted-foreground mb-4">
+                                Create and manage pre-configured profiles (Docker, Monitoring, Security, etc.) that run automatically when onboarding new servers.
+                            </p>
+                            <Link href="/settings/provisioning">
+                                <Button className="w-full bg-purple-600 hover:bg-purple-700">
+                                    <FileCode className="mr-2 h-4 w-4" />
+                                    Manage Profiles
+                                </Button>
+                            </Link>
                         </CardContent>
                     </Card>
 
