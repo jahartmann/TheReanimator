@@ -55,5 +55,12 @@ data/config-backups/
 
 # IDE & AI
 .claude/
+.gemini/
 .idea/
 TRANSLATION_PLAN.md
+
+# Planning & Concept Files
+task.md
+implementation_plan.md
+walkthrough.md
+CONCEPT.md
