@@ -127,7 +127,7 @@ db.exec(`
     username TEXT DEFAULT 'root',
     ssh_key_path TEXT, -- Optional specific key path, fallback to default if null
     description TEXT,
-    description TEXT,
+
     tags TEXT DEFAULT '[]', -- JSON array of tags
     mac_address TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
