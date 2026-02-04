@@ -40,6 +40,7 @@ db.exec(`
     -- Status
     status TEXT DEFAULT 'unknown',
     last_check DATETIME,
+    mac_address TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -116,6 +117,21 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(server_id) REFERENCES servers(id)
   );
+
+  -- Generic Linux Hosts table
+  CREATE TABLE IF NOT EXISTS linux_hosts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    hostname TEXT NOT NULL, -- IP or Domain
+    port INTEGER DEFAULT 22,
+    username TEXT DEFAULT 'root',
+    ssh_key_path TEXT, -- Optional specific key path, fallback to default if null
+    description TEXT,
+    description TEXT,
+    tags TEXT DEFAULT '[]', -- JSON array of tags
+    mac_address TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // Run migrations for existing databases
@@ -145,6 +161,12 @@ try {
 } catch (e) { /* Column exists */ }
 try {
   db.exec(`ALTER TABLE jobs ADD COLUMN options TEXT`);
+} catch (e) { /* Column exists */ }
+try {
+  db.exec(`ALTER TABLE servers ADD COLUMN mac_address TEXT`);
+} catch (e) { /* Column exists */ }
+try {
+  db.exec(`ALTER TABLE linux_hosts ADD COLUMN mac_address TEXT`);
 } catch (e) { /* Column exists */ }
 
 // Migration tasks table for full server migrations

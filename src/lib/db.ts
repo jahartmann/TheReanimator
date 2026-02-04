@@ -79,6 +79,9 @@ try {
 }
 
 export default db;
+export function getDb() {
+  return db;
+}
 export function getBackupDir() {
   // Return relative path string to avoid Turbopack resolving it as a glob
   return BACKUP_DIR;

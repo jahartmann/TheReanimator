@@ -357,6 +357,64 @@ export class ProxmoxClient {
         const data = await res.json() as { data: { t: string }[] };
         return data.data.map(l => l.t);
     }
+
+    // --- LXC & Templates ---
+
+    async getTemplates(node: string, storage: string): Promise<VztmplContent[]> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/storage/${storage}/content?content=vztmpl`, { headers });
+        if (!res.ok) throw new Error('Failed to get templates');
+        const data = await res.json() as { data: VztmplContent[] };
+        return data.data;
+    }
+
+    async createLXC(node: string, params: LXCCreationParams): Promise<string> {
+        const headers = await this.getHeaders();
+        const url = `${this.config.url}/api2/json/nodes/${node}/lxc`;
+
+        const body = new URLSearchParams({
+            vmid: params.vmid.toString(),
+            ostemplate: params.ostemplate,
+            hostname: params.hostname,
+            cores: params.cores.toString(),
+            memory: params.memory.toString(),
+            swap: '512',
+            storage: params.storage,
+            password: params.password,
+            'net0': `name=eth0,bridge=vmbr0,ip=dhcp,type=veth` // Default basic net
+        });
+
+        // Add ssh key if provided
+        if (params.ssh_public_keys) {
+            // PVE API expects "ssh-public-keys" (plural) with content (encoded? standard form handled by body)
+            body.append('ssh-public-keys', params.ssh_public_keys);
+        }
+
+        const res = await this.secureFetch(url, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+        });
+
+        if (!res.ok) {
+            const err = await res.text();
+            throw new Error(`Failed to create LXC: ${res.status} - ${err}`);
+        }
+
+        const data = await res.json() as { data: string }; // UPID
+        return data.data;
+    }
+
+    async startLXC(node: string, vmid: number): Promise<string> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/lxc/${vmid}/status/start`, {
+            method: 'POST',
+            headers
+        });
+        if (!res.ok) throw new Error('Failed to start LXC');
+        const data = await res.json() as { data: string };
+        return data.data;
+    }
 }
 
 // Type definitions
@@ -472,4 +530,22 @@ export interface TaskStatus {
     type: string;
     upid: string;
     user: string;
+}
+
+export interface VztmplContent {
+    volid: string;
+    size: number;
+    format: string;
+    content: string;
+}
+
+export interface LXCCreationParams {
+    vmid: number;
+    ostemplate: string; // "local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst"
+    hostname: string;
+    cores: number;
+    memory: number; // MB
+    storage: string;
+    password: string;
+    ssh_public_keys?: string;
 }
