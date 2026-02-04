@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { getDb } from '@/lib/db';
 import { removeLinuxHost } from '@/lib/actions/linux';
+import { ApplyProfileButton } from '@/components/ui/ApplyProfileButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -72,6 +73,25 @@ export default async function LinuxServerDetailPage({
                                 Begin Ritual
                             </Button>
                         </Link>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Provisioning</CardTitle>
+                        <CardDescription>
+                            Apply a configuration profile to this server.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <p className="text-sm text-muted-foreground mb-4">
+                            Run pre-configured setup scripts (Docker, monitoring, security hardening, etc.)
+                        </p>
+                        <ApplyProfileButton
+                            serverId={hostId}
+                            serverType="linux"
+                            serverName={host.name}
+                        />
                     </CardContent>
                 </Card>
 

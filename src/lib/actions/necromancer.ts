@@ -2,6 +2,7 @@
 
 import { getDb } from '@/lib/db';
 import { addLinuxHost } from '@/lib/actions/linux';
+import { applyProfile } from '@/lib/actions/provisioning';
 import dgram from 'dgram';
 import { Client } from 'ssh2';
 import * as fs from 'fs';
@@ -75,8 +76,8 @@ export async function raiseUndead(params: {
     username: string;
     description?: string;
     rootPassword?: string;
-    // We assume we install the key located at:
     publicKeyPath?: string;
+    profileId?: number; // Provisioning profile to apply after key installation
 }) {
     // 1. Validate inputs
     if (!params.rootPassword) {
@@ -134,7 +135,17 @@ export async function raiseUndead(params: {
                     });
 
                     if (res.success) {
-                        resolve({ success: true, message: `Server ${params.hostname} has been successfully reanimated and added to the fleet.` });
+                        // Apply provisioning profile if specified
+                        if (params.profileId && res.hostId) {
+                            const profileResult = await applyProfile(res.hostId, params.profileId, 'linux');
+                            if (profileResult.success) {
+                                resolve({ success: true, message: `Server ${params.hostname} reanimated and profile applied successfully.` });
+                            } else {
+                                resolve({ success: true, message: `Server ${params.hostname} reanimated, but profile had issues: ${profileResult.error || 'Some steps failed'}` });
+                            }
+                        } else {
+                            resolve({ success: true, message: `Server ${params.hostname} has been successfully reanimated and added to the fleet.` });
+                        }
                     } else {
                         resolve({ success: false, error: 'Key installed but failed to add host: ' + res.error });
                     }

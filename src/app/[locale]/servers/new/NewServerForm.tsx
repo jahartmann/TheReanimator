@@ -16,6 +16,7 @@ interface NewServerFormProps {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { addLinuxHost } from "@/lib/actions/linux";
 import { raiseUndead } from "@/lib/actions/necromancer";
+import { getProfiles, type ProvisioningProfile } from "@/lib/actions/provisioning";
 import { toast } from "sonner";
 import { useRouter } from 'next/navigation';
 
@@ -40,6 +41,10 @@ export default function NewServerForm({ existingGroups }: NewServerFormProps) {
     const [linuxSubmitting, setLinuxSubmitting] = useState(false);
     const [undeadSubmitting, setUndeadSubmitting] = useState(false);
 
+    // Provisioning Profiles (for Raise Undead)
+    const [profiles, setProfiles] = useState<ProvisioningProfile[]>([]);
+    const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
+
 
 
 
@@ -55,6 +60,11 @@ export default function NewServerForm({ existingGroups }: NewServerFormProps) {
     const [selectedGroup, setSelectedGroup] = useState('');
     const [isNewGroup, setIsNewGroup] = useState(false);
     const [newGroupName, setNewGroupName] = useState('');
+
+    // Load provisioning profiles on mount
+    useEffect(() => {
+        getProfiles().then(setProfiles);
+    }, []);
 
     async function handleTestSSH(formData: FormData) {
         setSSHStatus('none');
@@ -168,7 +178,8 @@ export default function NewServerForm({ existingGroups }: NewServerFormProps) {
                 port,
                 username,
                 rootPassword,
-                description
+                description,
+                profileId: selectedProfileId || undefined
             });
 
             if (res.success) {
@@ -550,6 +561,26 @@ export default function NewServerForm({ existingGroups }: NewServerFormProps) {
                                     <label className="text-sm font-medium">Description</label>
                                     <Input name="description" placeholder="Resurrected Node..." />
                                 </div>
+
+                                {/* Provisioning Profile Selector */}
+                                {profiles.length > 0 && (
+                                    <div className="grid gap-2">
+                                        <label className="text-sm font-medium">Provisioning Profile (Optional)</label>
+                                        <select
+                                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                            value={selectedProfileId || ''}
+                                            onChange={(e) => setSelectedProfileId(e.target.value ? parseInt(e.target.value) : null)}
+                                        >
+                                            <option value="">No profile - just install SSH key</option>
+                                            {profiles.map(p => (
+                                                <option key={p.id} value={p.id}>{p.name}</option>
+                                            ))}
+                                        </select>
+                                        <p className="text-xs text-muted-foreground">
+                                            Run setup scripts after SSH key installation. Manage profiles in Settings.
+                                        </p>
+                                    </div>
+                                )}
 
                                 <div className="flex justify-end gap-2 pt-4">
                                     <Link href="/servers">

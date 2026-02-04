@@ -64,7 +64,7 @@ export async function addLinuxHost(data: {
             VALUES (?, ?, ?, ?, ?, ?, ?)
         `);
 
-        stmt.run(
+        const result = stmt.run(
             data.name,
             data.hostname,
             data.port,
@@ -76,7 +76,7 @@ export async function addLinuxHost(data: {
 
         revalidatePath('/');
         revalidatePath('/dashboard');
-        return { success: true };
+        return { success: true, hostId: result.lastInsertRowid as number };
     } catch (e: any) {
         return { success: false, error: e.message };
     }
