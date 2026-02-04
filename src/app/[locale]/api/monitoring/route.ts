@@ -115,7 +115,7 @@ async function getServerMetrics(server: ServerItem): Promise<{ online: boolean; 
             clearTimeout(timeout);
             resolve({ online: false, metrics: null });
         }).connect({
-            host: server.ssh_host || new URL(server.url).hostname,
+            host: server.ssh_host || (server.url ? new URL(server.url).hostname : ''),
             port: server.ssh_port || 22,
             username: server.ssh_user || 'root',
             password: server.ssh_key,
