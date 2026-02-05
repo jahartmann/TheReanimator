@@ -297,14 +297,28 @@ export async function performFullBackup(serverId: number, server: Server) {
 
         // Get translations for success message
         const tSuccess = await getTranslations({ locale: await getServerLocale(), namespace: 'backupLogic' });
+        const successMsg = tSuccess('backupSuccess', { files: totalFiles, size: formatBytes(totalSize) });
+
+        // Notification
+        try {
+            const { broadcastMessage } = await import('@/lib/agent/telegram');
+            const notifyMsg = `✅ *Reanimator Backup*\n\nServer: ${server.name}\nFiles: ${totalFiles}\nSize: ${formatBytes(totalSize)}\nStatus: Success`;
+            await broadcastMessage(notifyMsg);
+        } catch (e) {
+            console.error('[BackupLogic] Notification failed:', e);
+        }
 
         return {
             success: true,
-            message: tSuccess('backupSuccess', { files: totalFiles, size: formatBytes(totalSize) }),
+            message: successMsg,
             backupId: result.lastInsertRowid as number
         };
 
     } catch (err) {
+        try {
+            const { broadcastMessage } = await import('@/lib/agent/telegram');
+            await broadcastMessage(`❌ *Reanimator Backup Failed*\n\nServer: ${server.name}\nError: ${err instanceof Error ? err.message : String(err)}`);
+        } catch { }
         ssh.disconnect();
         throw err;
     }

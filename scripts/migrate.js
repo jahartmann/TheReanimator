@@ -300,6 +300,20 @@ db.exec(`
   );
 `);
 
+// ====== TELEGRAM INTEGRATION ======
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS telegram_users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL UNIQUE,
+    username TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    is_blocked BOOLEAN DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
 // ====== PROVISIONING PROFILES ======
 
 // Provisioning Profiles table

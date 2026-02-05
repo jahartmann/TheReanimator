@@ -11,8 +11,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getAISettings, saveAISettings, checkOllamaConnection, type OllamaModel } from "@/lib/actions/ai";
-import { getNotificationSettings, saveNotificationSettings } from "@/lib/actions/settings";
+import { getNotificationSettings, saveNotificationSettings, getTelegramUsers, addTelegramUser, deleteTelegramUser, toggleTelegramUserBlock } from "@/lib/actions/settings";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { useTranslations } from 'next-intl';
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -37,12 +40,105 @@ export default function SettingsClient() {
     const [updateConfirmOpen, setUpdateConfirmOpen] = useState(false);
     const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
 
+
+
+    // Telegram & Notifications State
+    const [telegramUsers, setTelegramUsers] = useState<any[]>([]);
+    const [notificationSettings, setNotificationSettings] = useState<any>({ telegram: { botToken: '', notificationsEnabled: false } });
+    const [isAddingUser, setIsAddingUser] = useState(false);
+    const [newUserId, setNewUserId] = useState('');
+    const [newUserName, setNewUserName] = useState('');
+    const [loadingSettings, setLoadingSettings] = useState(true);
+
     useEffect(() => {
-        checkForUpdates();
+        const init = async () => {
+            setChecking(true);
+            await Promise.all([
+                checkForUpdates(),
+                fetchSettings()
+            ]);
+            setChecking(false);
+        };
+        init();
     }, []);
 
+    async function fetchSettings() {
+        setLoadingSettings(true);
+        try {
+            const [settings, users] = await Promise.all([
+                getNotificationSettings(),
+                getTelegramUsers()
+            ]);
+            setNotificationSettings(settings);
+            setTelegramUsers(users);
+        } catch (error) {
+            console.error('Failed to fetch settings:', error);
+            toast.error(t('failedToLoadSettings'));
+        }
+        setLoadingSettings(false);
+    }
+
+    async function handleAddTelegramUser() {
+        if (!newUserId || !newUserName) return;
+
+        try {
+            const result = await addTelegramUser(newUserId, newUserName);
+            if (result.success) {
+                toast.success(t('userAdded'));
+                setIsAddingUser(false);
+                setNewUserId('');
+                setNewUserName('');
+                fetchSettings(); // Refresh list
+            } else {
+                toast.error(result.error || t('errorAddingUser'));
+            }
+        } catch (e) {
+            toast.error(t('errorAddingUser'));
+        }
+    }
+
+    async function handleDeleteTelegramUser(id: number) {
+        if (!confirm(t('confirmDeleteUser'))) return;
+
+        try {
+            const result = await deleteTelegramUser(id);
+            if (result.success) {
+                toast.success(t('userDeleted'));
+                fetchSettings();
+            } else {
+                toast.error(result.error);
+            }
+        } catch (e) {
+            toast.error(t('errorDeletingUser'));
+        }
+    }
+
+    async function handleToggleBlockUser(id: number, currentBlocked: boolean) {
+        try {
+            const result = await toggleTelegramUserBlock(id, !currentBlocked);
+            if (result.success) {
+                toast.success(currentBlocked ? t('userUnblocked') : t('userBlocked'));
+                fetchSettings();
+            } else {
+                toast.error(result.error);
+            }
+        } catch (e) {
+            toast.error(t('errorUpdatingUser'));
+        }
+    }
+
+    async function handleSaveTelegramSettings() {
+        try {
+            await saveNotificationSettings({
+                telegram: notificationSettings.telegram
+            });
+            toast.success(t('settingsSaved'));
+        } catch (e) {
+            toast.error(t('errorSavingSettings'));
+        }
+    }
+
     async function checkForUpdates() {
-        setChecking(true);
         try {
             const res = await fetch('/api/update');
             const data = await res.json();
@@ -50,7 +146,6 @@ export default function SettingsClient() {
         } catch (err) {
             console.error('Failed to check for updates:', err);
         }
-        setChecking(false);
     }
 
     async function performUpdate() {
@@ -376,7 +471,11 @@ export default function SettingsClient() {
                 </TabsContent>
 
                 <TabsContent value="notifications">
-                    <NotificationsCard />
+                    <NotificationsCard
+                        telegramUsers={telegramUsers}
+                        notificationSettings={notificationSettings}
+                        onRefresh={fetchSettings}
+                    />
                 </TabsContent>
 
             </Tabs>
@@ -541,36 +640,78 @@ function AICard() {
     );
 }
 
-function NotificationsCard() {
-    const [loading, setLoading] = useState(true);
+interface NotificationsCardProps {
+    telegramUsers: any[];
+    notificationSettings: any;
+    onRefresh: () => void;
+}
+
+function NotificationsCard({ telegramUsers, notificationSettings, onRefresh }: NotificationsCardProps) {
+    const t = useTranslations('notifications');
     const [saving, setSaving] = useState(false);
 
-    const [smtp, setSmtp] = useState({
-        host: '',
-        port: 587,
-        user: '',
-        password: '',
-        from: ''
-    });
+    // Local form state
+    const [smtp, setSmtp] = useState({ host: '', port: 587, user: '', password: '', from: '' });
+    const [telegram, setTelegram] = useState({ botToken: '', chatId: '', notificationsEnabled: false });
 
-    const [telegram, setTelegram] = useState({
-        botToken: '',
-        chatId: ''
-    });
+    // Add User State
+    const [isAddUserOpen, setIsAddUserOpen] = useState(false);
+    const [newUserId, setNewUserId] = useState('');
+    const [newUserName, setNewUserName] = useState('');
 
     useEffect(() => {
-        getNotificationSettings().then(data => {
-            if (data.smtp) setSmtp(data.smtp as any);
-            if (data.telegram) setTelegram(data.telegram as any);
-            setLoading(false);
-        });
-    }, []);
+        if (notificationSettings?.smtp) setSmtp(notificationSettings.smtp);
+        if (notificationSettings?.telegram) setTelegram(notificationSettings.telegram);
+    }, [notificationSettings]);
 
     async function handleSave() {
         setSaving(true);
-        await saveNotificationSettings({ smtp, telegram });
+        try {
+            await saveNotificationSettings({ smtp, telegram });
+            toast.success(t('settingsSaved') || 'Settings saved');
+            onRefresh();
+        } catch (e) {
+            toast.error('Error saving settings');
+        }
         setSaving(false);
-        toast.success('Gespeichert');
+    }
+
+    async function handleAddUser() {
+        try {
+            const res = await addTelegramUser(newUserId, newUserName);
+            if (res.success) {
+                toast.success('User added');
+                setIsAddUserOpen(false);
+                setNewUserId('');
+                setNewUserName('');
+                onRefresh();
+            } else {
+                toast.error(res.error);
+            }
+        } catch (e: any) {
+            toast.error(e.message);
+        }
+    }
+
+    async function handleDeleteUser(id: number) {
+        if (!confirm('Delete this user?')) return;
+        try {
+            await deleteTelegramUser(id);
+            toast.success('User deleted');
+            onRefresh();
+        } catch (e) {
+            toast.error('Error deleting user');
+        }
+    }
+
+    async function handleToggleBlock(id: number, currentBlocked: boolean) {
+        try {
+            await toggleTelegramUserBlock(id, !currentBlocked);
+            toast.success(currentBlocked ? 'User unblocked' : 'User blocked');
+            onRefresh();
+        } catch (e) {
+            toast.error('Error updating status');
+        }
     }
 
     return (
@@ -582,7 +723,7 @@ function NotificationsCard() {
                         <Mail className="h-5 w-5 text-blue-500" />
                         E-Mail (SMTP)
                     </CardTitle>
-                    <CardDescription>Für klassische E-Mail-Alarme.</CardDescription>
+                    <CardDescription>Classic email alerts configuration.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
@@ -596,51 +737,159 @@ function NotificationsCard() {
                         </div>
                     </div>
                     <div className="space-y-2">
-                        <Label>Benutzer</Label>
+                        <Label>User</Label>
                         <Input value={smtp.user} onChange={e => setSmtp({ ...smtp, user: e.target.value })} placeholder="user@example.com" />
                     </div>
                     <div className="space-y-2">
-                        <Label>Passwort</Label>
+                        <Label>Password</Label>
                         <Input type="password" value={smtp.password} onChange={e => setSmtp({ ...smtp, password: e.target.value })} placeholder="••••••••" />
                     </div>
                     <div className="space-y-2">
-                        <Label>Absender</Label>
+                        <Label>From Address</Label>
                         <Input value={smtp.from} onChange={e => setSmtp({ ...smtp, from: e.target.value })} placeholder="noreply@reanimator.local" />
+                    </div>
+                    <div className="pt-2 flex justify-end">
+                        <Button onClick={handleSave} disabled={saving} variant="outline" size="sm">
+                            <Save className="mr-2 h-4 w-4" /> Save SMTP
+                        </Button>
                     </div>
                 </CardContent>
             </Card>
 
             {/* Telegram Config */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <Send className="h-5 w-5 text-sky-500" />
-                        Telegram
-                    </CardTitle>
-                    <CardDescription>Erhalten Sie Watchdog-Alarme direkt auf Ihr Smartphone.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                        <Label>Bot Token</Label>
-                        <Input value={telegram.botToken} onChange={e => setTelegram({ ...telegram, botToken: e.target.value })} placeholder="123456789:ABC..." className="font-mono text-sm" />
-                        <p className="text-[10px] text-muted-foreground whitespace-pre-line">
-                            1. Suche &apos;@BotFather&apos; auf Telegram.{'\n'}
-                            2. Sende &apos;/newbot&apos; und folge den Anweisungen.{'\n'}
-                            3. Kopiere den Token hierher.
-                        </p>
-                    </div>
-                    <div className="space-y-2">
-                        <Label>Chat ID</Label>
-                        <Input value={telegram.chatId} onChange={e => setTelegram({ ...telegram, chatId: e.target.value })} placeholder="-100..." className="font-mono text-sm" />
-                    </div>
-                    <div className="pt-4 flex justify-end">
-                        <Button onClick={handleSave} disabled={saving} className="w-full sm:w-auto">
-                            <Save className="mr-2 h-4 w-4" />
-                            Speichern
-                        </Button>
-                    </div>
-                </CardContent>
-            </Card>
+            <div className="space-y-6">
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                            <Send className="h-5 w-5 text-sky-500" />
+                            Telegram Bot
+                        </CardTitle>
+                        <CardDescription>Configure your bot for notifications and control.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="space-y-2">
+                            <Label>Bot Token</Label>
+                            <Input
+                                value={telegram.botToken}
+                                onChange={e => setTelegram({ ...telegram, botToken: e.target.value })}
+                                placeholder="123456...:ABC..."
+                                className="font-mono text-sm"
+                            />
+                            <p className="text-[10px] text-muted-foreground">
+                                Get this from @BotFather via /newbot
+                            </p>
+                        </div>
+
+                        <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/20">
+                            <div>
+                                <Label className="text-base">Enable Notifications</Label>
+                                <p className="text-xs text-muted-foreground">Send alerts to all authorized users</p>
+                            </div>
+                            <Switch
+                                checked={telegram.notificationsEnabled}
+                                onCheckedChange={(checked) => setTelegram({ ...telegram, notificationsEnabled: checked })}
+                            />
+                        </div>
+
+                        <div className="pt-2 flex justify-end">
+                            <Button onClick={handleSave} disabled={saving} className="bg-sky-600 hover:bg-sky-700 text-white">
+                                <Save className="mr-2 h-4 w-4" /> Save Configuration
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* Authorized Users */}
+                <Card>
+                    <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                            <CardTitle className="text-base text-muted-foreground">Authorized Users</CardTitle>
+                            <Dialog open={isAddUserOpen} onOpenChange={setIsAddUserOpen}>
+                                <DialogTrigger asChild>
+                                    <Button variant="outline" size="sm">
+                                        + Add User
+                                    </Button>
+                                </DialogTrigger>
+                                <DialogContent>
+                                    <DialogHeader>
+                                        <DialogTitle>Add Telegram User</DialogTitle>
+                                        <DialogDescription>
+                                            Enter the Chat ID and a name for the user.
+                                            User can get ID by sending /id to the bot.
+                                        </DialogDescription>
+                                    </DialogHeader>
+                                    <div className="space-y-4 py-4">
+                                        <div className="space-y-2">
+                                            <Label>Name</Label>
+                                            <Input value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="John Doe" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Chat ID</Label>
+                                            <Input value={newUserId} onChange={e => setNewUserId(e.target.value)} placeholder="123456789" />
+                                        </div>
+                                    </div>
+                                    <DialogFooter>
+                                        <Button onClick={handleAddUser}>Add User</Button>
+                                    </DialogFooter>
+                                </DialogContent>
+                            </Dialog>
+                        </div>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Name</TableHead>
+                                    <TableHead>Chat ID</TableHead>
+                                    <TableHead className="w-[100px]">Status</TableHead>
+                                    <TableHead className="text-right">Actions</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {telegramUsers.length === 0 ? (
+                                    <TableRow>
+                                        <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                                            No users authorized yet.
+                                        </TableCell>
+                                    </TableRow>
+                                ) : (
+                                    telegramUsers.map((user) => (
+                                        <TableRow key={user.id}>
+                                            <TableCell className="font-medium">{user.first_name || user.username || 'User'}</TableCell>
+                                            <TableCell className="font-mono text-xs">{user.chat_id}</TableCell>
+                                            <TableCell>
+                                                <Badge variant={user.is_blocked ? "destructive" : "secondary"} className="text-[10px]">
+                                                    {user.is_blocked ? 'Blocked' : 'Active'}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell className="text-right space-x-1">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-6 w-6"
+                                                    onClick={() => handleToggleBlock(user.id, user.is_blocked)}
+                                                    title={user.is_blocked ? "Unblock" : "Block"}
+                                                >
+                                                    <Bell className={`h-3 w-3 ${user.is_blocked ? 'text-green-500' : 'text-orange-500'}`} />
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-6 w-6 hover:text-red-500"
+                                                    onClick={() => handleDeleteUser(user.id)}
+                                                    title="Delete"
+                                                >
+                                                    <Bell className="h-3 w-3 rotate-45" />
+                                                </Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))
+                                )}
+                            </TableBody>
+                        </Table>
+                    </CardContent>
+                </Card>
+            </div>
         </div>
     );
 }

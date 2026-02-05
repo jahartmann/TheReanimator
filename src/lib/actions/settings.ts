@@ -14,7 +14,9 @@ export async function getNotificationSettings() {
 
     // Telegram
     const telegramToken = db.prepare("SELECT value FROM settings WHERE key = 'telegram_bot_token'").get() as { value: string } | undefined;
+    // Keeping this for backward compatibility or single-user mode fallback
     const telegramChatId = db.prepare("SELECT value FROM settings WHERE key = 'telegram_chat_id'").get() as { value: string } | undefined;
+    const telegramNotifications = db.prepare("SELECT value FROM settings WHERE key = 'telegram_notifications_enabled'").get() as { value: string } | undefined;
 
     return {
         smtp: {
@@ -26,7 +28,8 @@ export async function getNotificationSettings() {
         },
         telegram: {
             botToken: telegramToken?.value || '',
-            chatId: telegramChatId?.value || ''
+            chatId: telegramChatId?.value || '',
+            notificationsEnabled: telegramNotifications?.value === '1'
         }
     };
 }
@@ -47,7 +50,46 @@ export async function saveNotificationSettings(data: any) {
     if (data.telegram) {
         upsert.run('telegram_bot_token', data.telegram.botToken);
         upsert.run('telegram_chat_id', data.telegram.chatId);
+        upsert.run('telegram_notifications_enabled', data.telegram.notificationsEnabled ? '1' : '0');
     }
 
     return { success: true };
+}
+
+// --- Telegram User Management ---
+
+export async function getTelegramUsers() {
+    try {
+        return db.prepare('SELECT * FROM telegram_users ORDER BY created_at DESC').all();
+    } catch (e) {
+        console.error('Failed to get telegram users:', e);
+        return [];
+    }
+}
+
+export async function addTelegramUser(chatId: string, name: string) {
+    try {
+        db.prepare('INSERT INTO telegram_users (chat_id, first_name) VALUES (?, ?)').run(chatId, name);
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+}
+
+export async function deleteTelegramUser(id: number) {
+    try {
+        db.prepare('DELETE FROM telegram_users WHERE id = ?').run(id);
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+}
+
+export async function toggleTelegramUserBlock(id: number, blocked: boolean) {
+    try {
+        db.prepare('UPDATE telegram_users SET is_blocked = ? WHERE id = ?').run(blocked ? 1 : 0, id);
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
 }
