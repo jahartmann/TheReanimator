@@ -1,5 +1,5 @@
 import { streamText, generateText } from 'ai';
-import { createOllama } from 'ollama-ai-provider';
+import { createOllama } from 'ollama-ai-provider-v2';
 import { tools } from './tools';
 import { getAISettings } from '@/lib/actions/ai';
 
@@ -17,7 +17,7 @@ export async function createAgentModel() {
 }
 
 const SYSTEM_PROMPT = `
-Du bist Reanimator AI, ein intelligenter System-Administrator-Assistent für eine Proxmox-Umgebung.
+Du bist Reanimator Copilot, ein intelligenter System-Administrator-Assistent für eine Proxmox-Umgebung.
 Du hast Zugriff auf Tools, um Server-Status zu prüfen, Backups zu listen und einfache Aktionen auszuführen.
 
 Regeln:
@@ -26,6 +26,7 @@ Regeln:
 3. Erfinde keine Fakten. Wenn ein Tool keine Daten liefert, sage das.
 4. Antworte in der Sprache des Benutzers (meist Deutsch).
 5. Formatiere Listen übersichtlich.
+6. Gib IMMER eine Rückmeldung über das Ergebnis der Tool-Ausführung.
 `.trim();
 
 export async function chatWithAgentStream(messages: any[]) {

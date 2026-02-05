@@ -542,7 +542,6 @@ function AICard() {
 }
 
 function NotificationsCard() {
-    const t = useTranslations('notifications');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
@@ -571,7 +570,7 @@ function NotificationsCard() {
         setSaving(true);
         await saveNotificationSettings({ smtp, telegram });
         setSaving(false);
-        toast.success(t('saved'));
+        toast.success('Gespeichert');
     }
 
     return (
@@ -581,32 +580,32 @@ function NotificationsCard() {
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                         <Mail className="h-5 w-5 text-blue-500" />
-                        {t('smtp')}
+                        E-Mail (SMTP)
                     </CardTitle>
-                    <CardDescription>{t('smtpDesc')}</CardDescription>
+                    <CardDescription>Für klassische E-Mail-Alarme.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                         <div className="col-span-1 space-y-2">
-                            <Label>{t('host')}</Label>
+                            <Label>Host</Label>
                             <Input value={smtp.host} onChange={e => setSmtp({ ...smtp, host: e.target.value })} placeholder="smtp.gmail.com" />
                         </div>
                         <div className="col-span-1 space-y-2">
-                            <Label>{t('port')}</Label>
+                            <Label>Port</Label>
                             <Input type="number" value={smtp.port} onChange={e => setSmtp({ ...smtp, port: parseInt(e.target.value) })} placeholder="587" />
                         </div>
                     </div>
                     <div className="space-y-2">
-                        <Label>{t('user')}</Label>
+                        <Label>Benutzer</Label>
                         <Input value={smtp.user} onChange={e => setSmtp({ ...smtp, user: e.target.value })} placeholder="user@example.com" />
                     </div>
                     <div className="space-y-2">
-                        <Label>{t('password')}</Label>
+                        <Label>Passwort</Label>
                         <Input type="password" value={smtp.password} onChange={e => setSmtp({ ...smtp, password: e.target.value })} placeholder="••••••••" />
                     </div>
                     <div className="space-y-2">
-                        <Label>{t('from')}</Label>
-                        <Input value={smtp.from} onChange={e => setSmtp({ ...smtp, from: e.target.value })} placeholder="alert@reanimator.local" />
+                        <Label>Absender</Label>
+                        <Input value={smtp.from} onChange={e => setSmtp({ ...smtp, from: e.target.value })} placeholder="noreply@reanimator.local" />
                     </div>
                 </CardContent>
             </Card>
@@ -616,24 +615,28 @@ function NotificationsCard() {
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                         <Send className="h-5 w-5 text-sky-500" />
-                        {t('telegram')}
+                        Telegram
                     </CardTitle>
-                    <CardDescription>{t('telegramDesc')}</CardDescription>
+                    <CardDescription>Erhalten Sie Watchdog-Alarme direkt auf Ihr Smartphone.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div className="space-y-2">
-                        <Label>{t('botToken')}</Label>
+                        <Label>Bot Token</Label>
                         <Input value={telegram.botToken} onChange={e => setTelegram({ ...telegram, botToken: e.target.value })} placeholder="123456789:ABC..." className="font-mono text-sm" />
-                        <p className="text-[10px] text-muted-foreground">{t('telegramHelp')}</p>
+                        <p className="text-[10px] text-muted-foreground whitespace-pre-line">
+                            1. Suche &apos;@BotFather&apos; auf Telegram.{'\n'}
+                            2. Sende &apos;/newbot&apos; und folge den Anweisungen.{'\n'}
+                            3. Kopiere den Token hierher.
+                        </p>
                     </div>
                     <div className="space-y-2">
-                        <Label>{t('chatId')}</Label>
+                        <Label>Chat ID</Label>
                         <Input value={telegram.chatId} onChange={e => setTelegram({ ...telegram, chatId: e.target.value })} placeholder="-100..." className="font-mono text-sm" />
                     </div>
                     <div className="pt-4 flex justify-end">
                         <Button onClick={handleSave} disabled={saving} className="w-full sm:w-auto">
                             <Save className="mr-2 h-4 w-4" />
-                            {t('save')}
+                            Speichern
                         </Button>
                     </div>
                 </CardContent>
@@ -641,3 +644,4 @@ function NotificationsCard() {
         </div>
     );
 }
+
