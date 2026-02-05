@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { Client } from 'ssh2';
+import { getLinuxHosts, getLinuxHostStats } from '@/lib/actions/linux';
 
 export const dynamic = 'force-dynamic';
 
 interface ServerItem {
     id: number;
     name: string;
-    type: 'pve' | 'pbs';
-    url: string;
+    type: 'pve' | 'pbs' | 'linux';
+    url?: string;
     ssh_host?: string;
     ssh_port?: number;
     ssh_user?: string;
@@ -37,7 +38,7 @@ interface ServerMetrics {
 interface ServerStatus {
     id: number;
     name: string;
-    type: 'pve' | 'pbs';
+    type: 'pve' | 'pbs' | 'linux';
     group_name: string | null;
     online: boolean;
     lastBackup: string | null;
@@ -46,6 +47,7 @@ interface ServerStatus {
     totalBackups: number;
     totalSize: number;
     metrics: ServerMetrics | null;
+    mac_address?: string; // Phase 3: Wol
 }
 
 async function getServerMetrics(server: ServerItem): Promise<{ online: boolean; metrics: ServerMetrics | null }> {
@@ -113,7 +115,7 @@ async function getServerMetrics(server: ServerItem): Promise<{ online: boolean; 
             clearTimeout(timeout);
             resolve({ online: false, metrics: null });
         }).connect({
-            host: server.ssh_host || new URL(server.url).hostname,
+            host: server.ssh_host || (server.url ? new URL(server.url).hostname : ''),
             port: server.ssh_port || 22,
             username: server.ssh_user || 'root',
             password: server.ssh_key,
@@ -143,6 +145,7 @@ function getBackupHealth(backupDate: string | null): { health: 'good' | 'warning
 export async function GET() {
     try {
         const servers = db.prepare('SELECT * FROM servers ORDER BY group_name, name').all() as ServerItem[];
+        const linuxHosts = await getLinuxHosts(); // These are "server items" effectively
         const allBackups = db.prepare('SELECT * FROM config_backups ORDER BY backup_date DESC').all() as ConfigBackup[];
 
         // Group backups by server
@@ -173,19 +176,68 @@ export async function GET() {
                     backupHealth: health,
                     totalBackups: serverBackups.length,
                     totalSize: serverBackups.reduce((sum, b) => sum + b.total_size, 0),
-                    metrics
+                    metrics,
+                    mac_address: (server as any).mac_address
                 };
             })
         );
 
+        // Fetch Linux Statuses
+        const linuxStatuses: ServerStatus[] = await Promise.all(
+            linuxHosts.map(async (host) => {
+                const stats = await getLinuxHostStats(host.id);
+                // Linux hosts don"t have backups in the same way yet, or we assume none for now
+                // or we check if there are "config backups" associated if we change schema later.
+                // For now, backups for linux hosts are 0.
+
+                return {
+
+                    // Ideally we should prefix ID or have unified table. 
+                    // For dashboard display, let's make ID negative for Linux hosts to avoid collision in React keys? 
+                    // Or actually, duplicate IDs might break keys if we don't mix them carefully.
+                    // But `servers/{id}` route will need to know which table to look up. 
+                    // Hack: Multiplier? Or string ID?
+                    // Let's keep ID as is, but in frontend we rely on type. 
+                    // Actually, collision in `serverStatuses` array is fine if we keys are unique.
+                    // In frontend Link href=`/matrix/${id}` might be ambiguous.
+                    // For Phase 1: We will use a dedicated Linux detail page or reuse /servers/[id] with a query param?
+                    // Let's use a huge offset for now or just hope frontend keys use `${type}-${id}`?
+                    // Looking at frontend: key={server.id}. That's bad.
+                    // Let's assign negative IDs for linux hosts temporarily to avoid react key collisions.
+                    id: -host.id,
+                    name: host.name,
+                    type: 'linux',
+                    group_name: null, // Tags could go here?
+                    online: !!stats,
+                    lastBackup: null,
+                    backupAge: null,
+                    backupHealth: 'none',
+                    totalBackups: 0,
+                    totalSize: 0,
+                    metrics: stats ? {
+                        cpuUsage: stats.cpu_usage,
+                        memoryUsage: stats.ram_usage,
+                        memoryTotal: 0, // generic Linux stats didn't return total in bytes easily yet
+                        memoryUsed: 0,
+                        loadAvg: "0.00",
+                        diskUsage: stats.disk_usage,
+                        uptime: stats.uptime,
+                    } : null,
+                    mac_address: (host as any).mac_address
+                };
+            })
+        );
+
+        const allServerStatuses = [...serverStatuses, ...linuxStatuses];
+
         // Calculate aggregates
-        const totalServers = servers.length;
-        const onlineServers = serverStatuses.filter(s => s.online).length;
+        const totalServers = servers.length + linuxHosts.length;
+        const onlineServers = allServerStatuses.filter(s => s.online).length;
         const totalBackups = allBackups.length;
         const totalSize = allBackups.reduce((sum, b) => sum + b.total_size, 0);
 
         // Calculate average CPU and memory usage
-        const onlineWithMetrics = serverStatuses.filter(s => s.metrics);
+        const onlineWithMetrics = allServerStatuses.filter(s => s.metrics);
         const avgCpuUsage = onlineWithMetrics.length > 0
             ? onlineWithMetrics.reduce((sum, s) => sum + (s.metrics?.cpuUsage || 0), 0) / onlineWithMetrics.length
             : 0;
@@ -202,10 +254,10 @@ export async function GET() {
         const highDiskServers = serverStatuses.filter(s => s.metrics && s.metrics.diskUsage > 80);
 
         const healthCounts = {
-            good: serverStatuses.filter(s => s.backupHealth === 'good').length,
-            warning: serverStatuses.filter(s => s.backupHealth === 'warning').length,
-            critical: serverStatuses.filter(s => s.backupHealth === 'critical').length,
-            none: serverStatuses.filter(s => s.backupHealth === 'none').length
+            good: allServerStatuses.filter(s => s.backupHealth === 'good').length,
+            warning: allServerStatuses.filter(s => s.backupHealth === 'warning').length,
+            critical: allServerStatuses.filter(s => s.backupHealth === 'critical').length,
+            none: allServerStatuses.filter(s => s.backupHealth === 'none').length
         };
 
         // Get groups
@@ -222,7 +274,7 @@ export async function GET() {
         });
 
         return NextResponse.json({
-            servers: serverStatuses,
+            servers: allServerStatuses,
             summary: {
                 totalServers,
                 onlineServers,
@@ -241,7 +293,7 @@ export async function GET() {
             },
             // Alerts for dashboard
             alerts: [
-                ...serverStatuses.filter(s => !s.online).map(s => ({
+                ...allServerStatuses.filter(s => !s.online).map(s => ({
                     type: 'offline' as const,
                     severity: 'critical' as const,
                     server: s.name,

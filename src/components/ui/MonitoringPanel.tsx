@@ -4,9 +4,15 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Server, HardDrive, CheckCircle2, AlertCircle, XCircle, Clock, RefreshCw, Activity, Wifi, WifiOff, ChevronRight, Cpu, MemoryStick, AlertTriangle, Bell, TrendingUp } from "lucide-react";
+import { Server, HardDrive, CheckCircle2, AlertCircle, XCircle, Clock, RefreshCw, Activity, Wifi, WifiOff, ChevronRight, Cpu, MemoryStick, AlertTriangle, Bell, TrendingUp, Zap } from "lucide-react";
 import { motion } from 'framer-motion';
+<<<<<<< HEAD
 import { useTranslations, useLocale } from 'next-intl';
+=======
+import { useTranslations } from 'next-intl';
+import { wakeOnLan } from "@/lib/actions/necromancer";
+import { toast } from "sonner";
+>>>>>>> e3ba1ec35311d5ad6e38d5d79dc8110d17877677
 
 interface ServerMetrics {
     cpuUsage: number;
@@ -21,7 +27,7 @@ interface ServerMetrics {
 interface ServerStatus {
     id: number;
     name: string;
-    type: 'pve' | 'pbs';
+    type: 'pve' | 'pbs' | 'linux';
     group_name: string | null;
     online: boolean;
     lastBackup: string | null;
@@ -30,6 +36,7 @@ interface ServerStatus {
     totalBackups: number;
     totalSize: number;
     metrics: ServerMetrics | null;
+    mac_address?: string;
 }
 
 interface Alert {
@@ -145,6 +152,29 @@ export function MonitoringPanel() {
             console.error('Failed to fetch monitoring data:', err);
         }
         setLoading(false);
+        setLoading(false);
+    }
+
+    async function handleWakeUp(e: React.MouseEvent, server: ServerStatus) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Calculate REAL ID (handling the negative ones for Linux)
+        const realId = Math.abs(server.id);
+        const type = server.type === 'linux' ? 'linux' : 'pve';
+
+        const toastId = toast.loading(`Waking up ${server.name}...`);
+
+        try {
+            const res = await wakeOnLan(realId, type);
+            if (res.success) {
+                toast.success(res.message, { id: toastId });
+            } else {
+                toast.error(res.error, { id: toastId });
+            }
+        } catch (error) {
+            toast.error('Failed to cast spell', { id: toastId });
+        }
     }
 
     useEffect(() => {
@@ -354,13 +384,35 @@ export function MonitoringPanel() {
                         {displayedServers.map((server) => (
                             <Link
                                 key={server.id}
-                                href={`/servers/${server.id}`}
+                                href={server.type === 'linux' ? `/linux-servers/${Math.abs(server.id)}` : `/servers/${server.id}`}
                                 className="flex flex-col p-4 rounded-lg border hover:border-primary/30 transition-colors bg-muted/5 hover:bg-muted/10 group"
                             >
                                 <div className="flex items-center gap-3 mb-3">
                                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${server.online ? 'bg-green-500/10' : 'bg-red-500/10'
                                         }`}>
-                                        {server.online ? (
+                                        {server.type === 'linux' ? (
+                                            // Generic Linux Icon
+                                            <div className={server.online ? "text-green-500" : "text-red-500"}>
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    width="20"
+                                                    height="20"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    strokeWidth="2"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                >
+                                                    <rect width="20" height="16" x="2" y="4" rx="2" />
+                                                    <path d="M6 8h.01" />
+                                                    <path d="M10 8h.01" />
+                                                    <path d="M14 8h.01" />
+                                                    <path d="M12 16v-4" />
+                                                    <path d="M12 12h4" />
+                                                </svg>
+                                            </div>
+                                        ) : server.online ? (
                                             <Wifi className="h-5 w-5 text-green-500" />
                                         ) : (
                                             <WifiOff className="h-5 w-5 text-red-500" />
@@ -369,7 +421,9 @@ export function MonitoringPanel() {
                                     <div className="flex-1 min-w-0">
                                         <p className="font-medium truncate">{server.name}</p>
                                         <div className="flex items-center gap-2">
-                                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${server.type === 'pve' ? 'bg-orange-500/10 text-orange-500' : 'bg-blue-500/10 text-blue-500'
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${server.type === 'pve' ? 'bg-orange-500/10 text-orange-500' :
+                                                server.type === 'pbs' ? 'bg-blue-500/10 text-blue-500' :
+                                                    'bg-zinc-500/10 text-zinc-500' // Linux
                                                 }`}>
                                                 {server.type.toUpperCase()}
                                             </span>
@@ -380,6 +434,20 @@ export function MonitoringPanel() {
                                     </div>
                                     <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                                 </div>
+
+                                { /* WOL Button when Offline */}
+                                {!server.online && server.mac_address && (
+                                    <div className="mb-3 flex justify-end">
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-7 text-xs gap-1 border-yellow-500/50 hover:bg-yellow-500/10 hover:text-yellow-600"
+                                            onClick={(e) => handleWakeUp(e, server)}
+                                        >
+                                            <Zap className="h-3 w-3" /> Wake Up
+                                        </Button>
+                                    </div>
+                                )}
 
                                 {server.metrics && (
                                     <div className="grid grid-cols-3 gap-2 mb-3">
