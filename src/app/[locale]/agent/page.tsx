@@ -11,7 +11,8 @@ import { Input } from "@/components/ui/input";
 
 export default function AgentPage() {
     const t = useTranslations('common');
-    const { messages, sendMessage, status } = useChat();
+    const chatHelpers = useChat() as any; // Cast to any to avoid strict type issues
+    const { messages, sendMessage, status } = chatHelpers;
     const [input, setInput] = useState('');
     const bottomRef = useRef<HTMLDivElement>(null);
     const isLoading = status === 'streaming' || status === 'submitted';

@@ -7,8 +7,7 @@ export async function POST(req: Request) {
 
     try {
         const result = await chatWithAgentStream(messages);
-        // @ts-ignore
-        return result.toDataStreamResponse();
+        return (result as any).toDataStreamResponse();
     } catch (error: any) {
         return new Response(error.message, { status: 500 });
     }

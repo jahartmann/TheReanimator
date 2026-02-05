@@ -13,7 +13,7 @@ export async function createAgentModel() {
         baseURL: settings.url.replace(/\/$/, '') + '/api',
     });
 
-    return ollama(settings.model) as any;
+    return ollama(settings.model);
 }
 
 const SYSTEM_PROMPT = `
@@ -32,11 +32,10 @@ export async function chatWithAgentStream(messages: any[]) {
     const model = await createAgentModel();
 
     return streamText({
-        model,
+        model: model as any,
         messages,
         system: SYSTEM_PROMPT,
         tools: tools as any,
-        maxSteps: 5, // @ts-ignore
     });
 }
 
@@ -49,11 +48,10 @@ export async function chatWithAgent(message: string, history: any[] = []) {
     ];
 
     const result = await generateText({
-        model,
+        model: model as any,
         messages: messages as any,
         system: SYSTEM_PROMPT,
         tools: tools as any,
-        maxSteps: 5, // @ts-ignore
     });
 
     return result.text;
