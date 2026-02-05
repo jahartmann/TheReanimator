@@ -11,33 +11,46 @@ import { Input } from "@/components/ui/input";
 
 export default function AgentPage() {
     const t = useTranslations('common');
-    const { messages, append, status } = useChat({
-        api: '/api/chat',
-    });
+    const { messages, sendMessage, status } = useChat();
     const [input, setInput] = useState('');
-    const isLoading = status === 'streaming' || status === 'submitted';
-
-    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-        setInput(e.target.value);
-    };
-
-    const handleSubmit = async (e?: React.FormEvent) => {
-        e?.preventDefault();
-        if (!input.trim()) return;
-
-        const currentInput = input;
-        setInput('');
-
-        await append({
-            role: 'user',
-            content: currentInput,
-        });
-    };
     const bottomRef = useRef<HTMLDivElement>(null);
+    const isLoading = status === 'streaming' || status === 'submitted';
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
+
+    const handleSubmit = async (e?: React.FormEvent) => {
+        e?.preventDefault();
+        if (!input.trim() || isLoading) return;
+
+        const currentInput = input;
+        setInput('');
+
+        await sendMessage({
+            role: 'user',
+            content: currentInput,
+        });
+    };
+
+    const sendQuickMessage = async (content: string) => {
+        await sendMessage({
+            role: 'user',
+            content,
+        });
+    };
+
+    // Helper to get message text content
+    const getMessageContent = (m: any) => {
+        if (typeof m.content === 'string') return m.content;
+        if (Array.isArray(m.parts)) {
+            return m.parts
+                .filter((p: any) => p.type === 'text')
+                .map((p: any) => p.text)
+                .join('');
+        }
+        return '';
+    };
 
     return (
         <div className="h-[calc(100vh-2rem)] flex flex-col gap-4 p-4 max-w-5xl mx-auto w-full">
@@ -59,17 +72,17 @@ export default function AgentPage() {
                                 <Bot className="h-16 w-16 mx-auto text-muted-foreground/50" />
                                 <p>Wie kann ich Ihnen heute helfen?</p>
                                 <div className="flex flex-wrap gap-2 justify-center max-w-md mx-auto">
-                                    <Button variant="outline" className="text-xs" onClick={() => append({ role: 'user', content: 'Zeige Server Status' })}>
+                                    <Button variant="outline" className="text-xs" onClick={() => sendQuickMessage('Zeige Server Status')}>
                                         Zeige Server Status
                                     </Button>
-                                    <Button variant="outline" className="text-xs" onClick={() => append({ role: 'user', content: 'Habe ich fehlgeschlagene Backups?' })}>
+                                    <Button variant="outline" className="text-xs" onClick={() => sendQuickMessage('Habe ich fehlgeschlagene Backups?')}>
                                         Fehlgeschlagene Backups?
                                     </Button>
                                 </div>
                             </div>
                         )}
 
-                        {messages.map(m => (
+                        {messages.map((m: any) => (
                             <div key={m.id} className={`flex gap-4 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                                 {m.role !== 'user' && (
                                     <div className="w-8 h-8 rounded-full bg-purple-500/10 flex items-center justify-center shrink-0 border border-purple-500/20">
@@ -80,27 +93,23 @@ export default function AgentPage() {
                                     ? 'bg-primary text-primary-foreground rounded-tr-none'
                                     : 'bg-muted/80 border rounded-tl-none'
                                     }`}>
-                                    <div className="whitespace-pre-wrap font-sans">{m.content}</div>
-                                    {m.toolInvocations?.map((toolInvocation: any) => {
-                                        const toolCallId = toolInvocation.toolCallId;
-                                        const addResult = toolInvocation.result;
+                                    <div className="whitespace-pre-wrap font-sans">{getMessageContent(m)}</div>
+                                    {m.parts?.filter((p: any) => p.type === 'tool-invocation').map((toolPart: any) => {
+                                        const toolCallId = toolPart.toolInvocation?.toolCallId || toolPart.toolCallId;
+                                        const toolResult = toolPart.toolInvocation?.result;
 
-                                        // render confirmation attempt (tool not executed yet)
-                                        if (!addResult) {
+                                        if (!toolResult) {
                                             return (
                                                 <div key={toolCallId} className="mt-2 p-2 bg-background/50 rounded border text-xs font-mono text-muted-foreground flex items-center gap-2">
                                                     <Terminal className="h-3 w-3" />
-                                                    Calling {toolInvocation.toolName}...
+                                                    Calling {toolPart.toolInvocation?.toolName || 'tool'}...
                                                 </div>
                                             );
                                         }
 
-                                        // render result
                                         return (
                                             <div key={toolCallId} className="mt-2 p-2 bg-green-500/10 rounded border border-green-500/20 text-xs font-mono text-green-600 dark:text-green-400 overflow-x-auto">
-                                                {'result' in toolInvocation ? (
-                                                    <pre>{JSON.stringify(toolInvocation.result, null, 2)}</pre>
-                                                ) : null}
+                                                <pre>{JSON.stringify(toolResult, null, 2)}</pre>
                                             </div>
                                         );
                                     })}
@@ -131,7 +140,7 @@ export default function AgentPage() {
                     <form onSubmit={handleSubmit} className="relative max-w-3xl mx-auto flex gap-2">
                         <Input
                             value={input}
-                            onChange={handleInputChange}
+                            onChange={(e) => setInput(e.target.value)}
                             placeholder="Fragen Sie etwas..."
                             className="bg-background shadow-sm border-muted-foreground/20 focus-visible:ring-purple-500"
                         />
