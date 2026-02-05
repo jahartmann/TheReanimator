@@ -8,6 +8,7 @@ import TaskManager from "@/components/TaskManager";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { notFound } from 'next/navigation';
 import { routing } from '@/i18n/routing';
+import { AgentOverlay } from '@/components/ai/AgentOverlay';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -45,6 +46,7 @@ export default async function LocaleLayout({
             <div className="container mx-auto p-8">
               {children}
             </div>
+            <AgentOverlay />
           </main>
         </body>
       </html>
