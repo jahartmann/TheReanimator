@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Server, HardDrive, CheckCircle2, AlertCircle, XCircle, Clock, RefreshCw, Activity, Wifi, WifiOff, ChevronRight, Cpu, MemoryStick, AlertTriangle, Bell, TrendingUp } from "lucide-react";
 import { motion } from 'framer-motion';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 
 interface ServerMetrics {
     cpuUsage: number;
@@ -128,6 +128,7 @@ function UsageGauge({ value, label, color, icon: Icon }: { value: number; label:
 
 export function MonitoringPanel() {
     const t = useTranslations('monitoringPanel');
+    const locale = useLocale();
     const [data, setData] = useState<MonitoringData | null>(null);
     const [loading, setLoading] = useState(true);
     const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
@@ -298,7 +299,7 @@ export function MonitoringPanel() {
                                 <p className="text-sm text-muted-foreground">{t('backupStorage')}</p>
                                 <p className="text-2xl font-bold">{formatBytes(summary.totalSize)}</p>
                                 <p className="text-xs text-muted-foreground mt-1">
-                                    {summary.totalBackups} {t('totalBackups')}
+                                    {t('backupsUnit', { count: summary.totalBackups })}
                                 </p>
                             </div>
                             <div className="w-12 h-12 rounded-full bg-orange-500/10 flex items-center justify-center">
@@ -340,7 +341,7 @@ export function MonitoringPanel() {
                     <div className="flex items-center gap-2">
                         {lastUpdate && (
                             <span className="text-xs text-muted-foreground">
-                                {lastUpdate.toLocaleTimeString('ru-RU')}
+                                {lastUpdate.toLocaleTimeString(locale)}
                             </span>
                         )}
                         <Button variant="ghost" size="sm" onClick={fetchData} disabled={loading}>
@@ -384,7 +385,7 @@ export function MonitoringPanel() {
                                     <div className="grid grid-cols-3 gap-2 mb-3">
                                         <div className="text-center p-2 rounded bg-background/50">
                                             <p className={`text-sm font-bold ${server.metrics.cpuUsage > 80 ? 'text-red-500' :
-                                                    server.metrics.cpuUsage > 50 ? 'text-amber-500' : 'text-green-500'
+                                                server.metrics.cpuUsage > 50 ? 'text-amber-500' : 'text-green-500'
                                                 }`}>
                                                 {server.metrics.cpuUsage.toFixed(0)}%
                                             </p>
@@ -392,7 +393,7 @@ export function MonitoringPanel() {
                                         </div>
                                         <div className="text-center p-2 rounded bg-background/50">
                                             <p className={`text-sm font-bold ${server.metrics.memoryUsage > 80 ? 'text-red-500' :
-                                                    server.metrics.memoryUsage > 50 ? 'text-amber-500' : 'text-green-500'
+                                                server.metrics.memoryUsage > 50 ? 'text-amber-500' : 'text-green-500'
                                                 }`}>
                                                 {server.metrics.memoryUsage.toFixed(0)}%
                                             </p>
@@ -400,7 +401,7 @@ export function MonitoringPanel() {
                                         </div>
                                         <div className="text-center p-2 rounded bg-background/50">
                                             <p className={`text-sm font-bold ${server.metrics.diskUsage > 80 ? 'text-red-500' :
-                                                    server.metrics.diskUsage > 50 ? 'text-amber-500' : 'text-green-500'
+                                                server.metrics.diskUsage > 50 ? 'text-amber-500' : 'text-green-500'
                                                 }`}>
                                                 {server.metrics.diskUsage.toFixed(0)}%
                                             </p>
@@ -416,15 +417,15 @@ export function MonitoringPanel() {
                                         {server.backupHealth === 'critical' && <XCircle className="h-3.5 w-3.5 text-red-500" />}
                                         {server.backupHealth === 'none' && <Clock className="h-3.5 w-3.5 text-muted-foreground" />}
                                         <span className={`${server.backupHealth === 'good' ? 'text-green-500' :
-                                                server.backupHealth === 'warning' ? 'text-yellow-500' :
-                                                    server.backupHealth === 'critical' ? 'text-red-500' :
-                                                        'text-muted-foreground'
+                                            server.backupHealth === 'warning' ? 'text-yellow-500' :
+                                                server.backupHealth === 'critical' ? 'text-red-500' :
+                                                    'text-muted-foreground'
                                             }`}>
                                             {formatBackupAgeI18n(server.backupAge, t)}
                                         </span>
                                     </div>
                                     <span className="text-muted-foreground">
-                                        {server.totalBackups} {t('backups')}
+                                        {t('backupsUnit', { count: server.totalBackups })}
                                     </span>
                                 </div>
                             </Link>
@@ -470,14 +471,14 @@ export function MonitoringPanel() {
                                     <div className="flex-1 min-w-0">
                                         <p className="text-sm font-medium truncate">{backup.serverName}</p>
                                         <p className="text-xs text-muted-foreground">
-                                            {new Date(backup.backup_date).toLocaleString('ru-RU', {
+                                            {new Date(backup.backup_date).toLocaleString(locale, {
                                                 dateStyle: 'medium',
                                                 timeStyle: 'short'
                                             })}
                                         </p>
                                     </div>
                                     <div className="text-right text-xs text-muted-foreground">
-                                        <p>{backup.file_count} {t('files')}</p>
+                                        <p>{t('filesUnit', { count: backup.file_count })}</p>
                                         <p>{formatBytes(backup.total_size)}</p>
                                     </div>
                                 </Link>

@@ -61,7 +61,8 @@
     "recentBackups": "Recent Backups",
     "noBackups": "No backups yet",
     "show": "Show",
-    "files": "files"
+    "files": "files",
+    "filesUnit": "{count, plural, =1 {file} other {files}}"
   },
   "login": {
     "title": "Login",
@@ -567,6 +568,7 @@
     "loadError": "Failed to load monitoring data.",
     "criticalIssues": "Critical Issues ({count})",
     "andMore": "... and {count} more",
+    "backupsUnit": "{count, plural, =1 {backup} other {backups}}",
     "serversStatus": "Server Status",
     "allOnline": "All online",
     "offline": "offline",
@@ -581,7 +583,8 @@
     "showLess": "Show less",
     "showAll": "Show all {count} servers",
     "recentBackups": "Recent Backups",
-    "files": "files"
+    "files": "files",
+    "filesUnit": "{count, plural, =1 {file} other {files}}"
   },
   "newMigration": {
     "title": "Create Migration",

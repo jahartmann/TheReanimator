@@ -59,9 +59,11 @@
     "monitoring": "Monitoring",
     "storage": "Speicher",
     "recentBackups": "Letzte Backups",
-    "noBackups": "Bückups noch nicht vorhanden",
+    "noBackups": "Backups noch nicht vorhanden",
     "show": "Zeigen",
-    "files": "Dateien"
+    "files": "Dateien",
+    "filesUnit": "{count, plural, =1 {Datei} other {Dateien}}",
+    "backupsUnit": "{count, plural, =1 {Backup} other {Backups}}"
   },
   "login": {
     "title": "Anmeldung",
@@ -261,7 +263,7 @@
     "time": "Zeit",
     "node": "Node",
     "activity": "Aktivität",
-    "description": "Beschreibung",
+    "descriptionHeader": "Beschreibung",
     "duration": "Dauer",
     "noTasksFound": "Keine Aufgaben gefunden",
     "noActiveTasks": "Keine aktiven Aufgaben",
@@ -582,7 +584,9 @@
     "showLess": "Weniger anzeigen",
     "showAll": "Alle {count} Server anzeigen",
     "recentBackups": "Letzte Backups",
-    "files": "Dateien"
+    "files": "Dateien",
+    "filesUnit": "{count, plural, =1 {Datei} other {Dateien}}",
+    "backupsUnit": "{count, plural, =1 {Backup} other {Backups}}"
   },
   "newMigration": {
     "title": "Migration erstellen",
@@ -1008,7 +1012,7 @@
     "intervalHourly": "Stündlich",
     "cronExpression": "Cron-Ausdruck (manuell)",
     "cronPlaceholder": "* * * * *",
-    "name": "Name (optional)",
+    "nameOptional": "Name (optional)",
     "namePlaceholder": "Auto-{type}",
     "namePlaceholderScan": "Scan",
     "namePlaceholderBackup": "Backup",
@@ -1056,7 +1060,8 @@
     "noBackups": "Noch keine Backups",
     "files": "Dateien",
     "moreDetails": "Mehr Details",
-    "andMore": "und {count} weitere Backups..."
+    "andMore": "und {count} weitere Backups...",
+    "backupsUnit": "{count, plural, =1 {Backup} other {Backups}}"
   },
   "tagManagement": {
     "errorLoading": "Fehler beim Laden der Tags",

@@ -132,7 +132,7 @@ export default function Dashboard() {
                   <div>
                     <p className="font-medium">{backup.server_name}</p>
                     <p className="text-sm text-muted-foreground">
-                      {formatDate(backup.backup_date)} · {backup.file_count} {t('files')}
+                      {formatDate(backup.backup_date)} · {t('filesUnit', { count: backup.file_count })}
                     </p>
                   </div>
                   <Link href={`/configs/${backup.id}`}>

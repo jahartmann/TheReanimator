@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,6 +50,7 @@ async function handleDelete(itemId: number) {
 
 export default function ConfigList({ servers, backupsByServer, groups }: ConfigListProps) {
     const t = useTranslations('configList');
+    const locale = useLocale();
     const [searchTerm, setSearchTerm] = useState('');
     const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['ungrouped', ...groups]));
 
@@ -67,7 +68,7 @@ export default function ConfigList({ servers, backupsByServer, groups }: ConfigL
             const matchesUrl = server.url.toLowerCase().includes(term);
             const matchesGroup = server.group_name?.toLowerCase().includes(term);
             const hasMatchingBackup = backupsByServer[server.id]?.some(backup =>
-                new Date(backup.backup_date).toLocaleString('ru-RU').toLowerCase().includes(term)
+                new Date(backup.backup_date).toLocaleString(locale).toLowerCase().includes(term)
             );
             return matchesName || matchesType || matchesUrl || matchesGroup || hasMatchingBackup;
         });
@@ -187,7 +188,7 @@ export default function ConfigList({ servers, backupsByServer, groups }: ConfigL
                                         <div className="flex items-center gap-4 text-sm text-muted-foreground">
                                             <span>{groupServers.length} {t('servers')}</span>
                                             <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 text-xs font-medium">
-                                                {stats.totalBackups} {t('backups')}
+                                                {t('backupsUnit', { count: stats.totalBackups })}
                                             </span>
                                             <span className="text-xs">{formatBytes(stats.totalSize)}</span>
                                         </div>
@@ -236,7 +237,7 @@ export default function ConfigList({ servers, backupsByServer, groups }: ConfigL
                                     <div className="flex items-center gap-4 text-sm text-muted-foreground">
                                         <span>{groupedServers['ungrouped'].length} {t('servers')}</span>
                                         <span className="px-2 py-0.5 rounded-full bg-muted text-muted-foreground text-xs">
-                                            {getGroupStats(groupedServers['ungrouped']).totalBackups} {t('backups')}
+                                            {t('backupsUnit', { count: getGroupStats(groupedServers['ungrouped']).totalBackups })}
                                         </span>
                                     </div>
                                 </div>
@@ -303,7 +304,7 @@ function ServerBackupCard({
                 </div>
                 <div className="flex items-center gap-4" onClick={e => e.stopPropagation()}>
                     <span className="text-sm text-muted-foreground">
-                        {backups.length} {t('backups')}
+                        {t('backupsUnit', { count: backups.length })}
                     </span>
                     <BackupButton serverId={server.id} />
                 </div>
@@ -325,13 +326,13 @@ function ServerBackupCard({
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <p className="font-medium text-sm">
-                                            {new Date(backup.backup_date).toLocaleString('ru-RU', {
+                                            {new Date(backup.backup_date).toLocaleString(locale, {
                                                 dateStyle: 'medium',
                                                 timeStyle: 'short'
                                             })}
                                         </p>
                                         <p className="text-xs text-muted-foreground flex items-center gap-2">
-                                            <span>{backup.file_count} {t('files')}</span>
+                                            <span>{t('filesUnit', { count: backup.file_count })}</span>
                                             <span>•</span>
                                             <span>{formatBytes(backup.total_size)}</span>
                                         </p>
