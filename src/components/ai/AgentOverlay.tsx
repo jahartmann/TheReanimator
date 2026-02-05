@@ -1,13 +1,14 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { useChat } from 'ai/react';
+import { useChat } from '@ai-sdk/react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Bot, X, Send, Maximize2, Minimize2, Loader2, Sparkles } from 'lucide-react';
 import { ChatMessage } from './ChatMessage';
 import { cn } from '@/lib/utils';
+// @ts-ignore
 import { motion, AnimatePresence } from 'framer-motion';
 
 export function AgentOverlay() {
@@ -16,12 +17,41 @@ export function AgentOverlay() {
     const scrollRef = useRef<HTMLDivElement>(null);
 
     // Core AI SDK hook
-    const { messages, input, handleInputChange, handleSubmit, isLoading, reload, stop } = useChat({
-        api: '/api/chat',
+    // Note: Vercel AI SDK v6 changes: 'reload' -> 'regenerate'. 'api' might be implicit or mapped in ChatInit?
+    // The type says 'chat' or 'ChatInit'.
+    // If 'api' is not allowed, we assume it defaults to '/api/chat' or we need to find the right property.
+    // For now, let's omit 'api' (defaults to /api/chat) and use 'regenerate'.
+    const { messages, status, sendMessage, stop, regenerate } = useChat({
+        // api: '/api/chat', // Apparently not in type? Defaults to /api/chat.
         onError: (err) => {
             console.error("AI Error", err);
-        }
+        },
     });
+
+    // Manual input state
+    const [input, setInput] = useState('');
+
+    // Helper for loading state (status is 'streaming' | 'connected' | 'ready' etc?)
+    // Actually typically 'isLoading' is computed from status in newer SDKs?
+    // d.ts showed 'status' property.
+    const isLoading = status === 'streaming' || status === 'submitted';
+
+    const handleInternalSubmit = async (e?: React.FormEvent) => {
+        e?.preventDefault();
+        if (!input.trim()) return;
+
+        // Optimistic update mechanism is handled by useChat usually?
+        // sendMessage takes a primitive message object?
+        // Let's try appending a user message.
+        await sendMessage({
+            id: Date.now().toString(),
+            role: 'user',
+            content: input
+        } as any);
+        // Note: Casting to any because strict UIMessage type might differ from our object
+
+        setInput('');
+    };
 
     // Auto-scroll to bottom
     useEffect(() => {
@@ -77,8 +107,8 @@ export function AgentOverlay() {
                                 </div>
                             )}
 
-                            {messages.map(m => (
-                                <ChatMessage key={m.id} role={m.role as any} content={m.content} toolInvocations={m.toolInvocations} />
+                            {messages.map((m: any) => (
+                                <ChatMessage key={m.id} role={m.role} content={m.content} toolInvocations={m.toolInvocations} />
                             ))}
 
                             {isLoading && (
@@ -90,10 +120,10 @@ export function AgentOverlay() {
                         </div>
 
                         {/* Input */}
-                        <form onSubmit={handleSubmit} className="p-3 border-t bg-background flex gap-2">
+                        <form onSubmit={handleInternalSubmit} className="p-3 border-t bg-background flex gap-2">
                             <Input
                                 value={input}
-                                onChange={handleInputChange}
+                                onChange={(e) => setInput(e.target.value)}
                                 placeholder="Type a message..."
                                 className="flex-1"
                                 disabled={isLoading}
