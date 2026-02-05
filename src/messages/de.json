@@ -50,7 +50,7 @@
     "tags": "Tags",
     "storage": "Speicher",
     "configs": "Konfigurationen",
-    "agent": "AI Assistent",
+    "agent": "Copilot",
     "bulkCommands": "Bulk Commands",
     "users": "Benutzer",
     "administration": "Administration"
@@ -201,7 +201,9 @@
     "restartInitiated": "Neustart initiiert",
     "commandCopied": "Befehl kopiert!",
     "github": "GitHub",
-    "notifications": "Benachrichtigungen"
+    "notifications": "Benachrichtigungen",
+    "general": "Allgemein",
+    "agent": "Copilot"
   },
   "notifications": {
     "title": "Benachrichtigungen",

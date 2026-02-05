@@ -1,61 +1,145 @@
 'use client';
 
-import { useChat } from '@ai-sdk/react';
+import { useState, useRef, useEffect } from 'react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Terminal, Send, Bot, User, Sparkles } from "lucide-react";
-import { useEffect, useRef, useState } from 'react';
+import { Terminal, Send, Bot, User, Sparkles, Loader2 } from "lucide-react";
 import { useTranslations } from 'next-intl';
 import { Input } from "@/components/ui/input";
 
-export default function AgentPage() {
+interface Message {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+}
+
+export default function CopilotPage() {
     const t = useTranslations('common');
-    const chatHelpers = useChat() as any; // Cast to any to avoid strict type issues
-    const { messages, sendMessage, status } = chatHelpers;
+    const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
     const bottomRef = useRef<HTMLDivElement>(null);
-    const isLoading = status === 'streaming' || status === 'submitted';
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
-    const handleSubmit = async (e?: React.FormEvent) => {
-        e?.preventDefault();
-        if (!input.trim() || isLoading) return;
+    const sendMessage = async (text: string) => {
+        if (!text.trim() || isLoading) return;
 
-        const currentInput = input;
+        const userMessage: Message = {
+            id: Date.now().toString(),
+            role: 'user',
+            content: text.trim()
+        };
+
+        setMessages(prev => [...prev, userMessage]);
         setInput('');
+        setIsLoading(true);
 
-        await sendMessage({ text: currentInput });
-    };
+        try {
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    messages: [...messages, userMessage].map(m => ({
+                        role: m.role,
+                        content: m.content
+                    }))
+                })
+            });
 
-    const sendQuickMessage = async (content: string) => {
-        await sendMessage({ text: content });
-    };
+            if (!res.ok) {
+                const errorText = await res.text();
+                throw new Error(errorText || 'Anfrage fehlgeschlagen');
+            }
 
-    // Helper to get message text content
-    const getMessageContent = (m: any) => {
-        if (typeof m.content === 'string') return m.content;
-        if (Array.isArray(m.parts)) {
-            return m.parts
-                .filter((p: any) => p.type === 'text')
-                .map((p: any) => p.text)
-                .join('');
+            // Handle streaming response
+            const reader = res.body?.getReader();
+            const decoder = new TextDecoder();
+            let assistantContent = '';
+
+            const assistantMessage: Message = {
+                id: (Date.now() + 1).toString(),
+                role: 'assistant',
+                content: ''
+            };
+
+            setMessages(prev => [...prev, assistantMessage]);
+
+            if (reader) {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    // Parse SSE data
+                    const lines = chunk.split('\n').filter(line => line.startsWith('0:'));
+                    for (const line of lines) {
+                        try {
+                            const text = JSON.parse(line.slice(2));
+                            if (typeof text === 'string') {
+                                assistantContent += text;
+                                setMessages(prev =>
+                                    prev.map(m =>
+                                        m.id === assistantMessage.id
+                                            ? { ...m, content: assistantContent }
+                                            : m
+                                    )
+                                );
+                            }
+                        } catch {
+                            // Try plain text
+                            assistantContent += line.slice(2);
+                            setMessages(prev =>
+                                prev.map(m =>
+                                    m.id === assistantMessage.id
+                                        ? { ...m, content: assistantContent }
+                                        : m
+                                )
+                            );
+                        }
+                    }
+                }
+            }
+
+            // If no content was streamed, show error
+            if (!assistantContent) {
+                setMessages(prev =>
+                    prev.map(m =>
+                        m.id === assistantMessage.id
+                            ? { ...m, content: 'Keine Antwort erhalten. Bitte überprüfen Sie die Ollama-Verbindung in den Einstellungen.' }
+                            : m
+                    )
+                );
+            }
+        } catch (error: any) {
+            const errorMessage: Message = {
+                id: (Date.now() + 1).toString(),
+                role: 'assistant',
+                content: `Fehler: ${error.message || 'Verbindung zum AI-Service fehlgeschlagen. Bitte überprüfen Sie die Einstellungen.'}`
+            };
+            setMessages(prev => [...prev, errorMessage]);
+        } finally {
+            setIsLoading(false);
         }
-        return '';
+    };
+
+    const handleSubmit = (e?: React.FormEvent) => {
+        e?.preventDefault();
+        sendMessage(input);
     };
 
     return (
         <div className="h-[calc(100vh-2rem)] flex flex-col gap-4 p-4 max-w-5xl mx-auto w-full">
             <div className="flex items-center gap-4 mb-2">
-                <div className="bg-purple-500/10 p-3 rounded-xl">
+                <div className="bg-gradient-to-br from-purple-500/20 to-blue-500/20 p-3 rounded-xl border border-purple-500/10">
                     <Sparkles className="h-8 w-8 text-purple-500" />
                 </div>
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Reanimator AI</h1>
-                    <p className="text-muted-foreground">Ihr persönlicher System-Administrator Assistent.</p>
+                    <h1 className="text-3xl font-bold tracking-tight">Copilot</h1>
+                    <p className="text-muted-foreground">Intelligente Unterstützung für Ihre Infrastruktur</p>
                 </div>
             </div>
 
@@ -65,22 +149,28 @@ export default function AgentPage() {
                         {messages.length === 0 && (
                             <div className="text-center py-20 opacity-50 space-y-4">
                                 <Bot className="h-16 w-16 mx-auto text-muted-foreground/50" />
-                                <p>Wie kann ich Ihnen heute helfen?</p>
-                                <div className="flex flex-wrap gap-2 justify-center max-w-md mx-auto">
-                                    <Button variant="outline" className="text-xs" onClick={() => sendQuickMessage('Zeige Server Status')}>
-                                        Zeige Server Status
+                                <p className="text-lg">Wie kann ich Ihnen helfen?</p>
+                                <p className="text-sm text-muted-foreground max-w-md mx-auto">
+                                    Ich kann Server-Status abfragen, Backups überprüfen und bei der Fehlerbehebung unterstützen.
+                                </p>
+                                <div className="flex flex-wrap gap-2 justify-center max-w-md mx-auto pt-4">
+                                    <Button variant="outline" className="text-xs" onClick={() => sendMessage('Zeige mir den Status aller Server')}>
+                                        Server-Status
                                     </Button>
-                                    <Button variant="outline" className="text-xs" onClick={() => sendQuickMessage('Habe ich fehlgeschlagene Backups?')}>
-                                        Fehlgeschlagene Backups?
+                                    <Button variant="outline" className="text-xs" onClick={() => sendMessage('Gibt es fehlgeschlagene Backups?')}>
+                                        Backup-Prüfung
+                                    </Button>
+                                    <Button variant="outline" className="text-xs" onClick={() => sendMessage('Liste die letzten 5 Backups')}>
+                                        Letzte Backups
                                     </Button>
                                 </div>
                             </div>
                         )}
 
-                        {messages.map((m: any) => (
+                        {messages.map((m) => (
                             <div key={m.id} className={`flex gap-4 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                                 {m.role !== 'user' && (
-                                    <div className="w-8 h-8 rounded-full bg-purple-500/10 flex items-center justify-center shrink-0 border border-purple-500/20">
+                                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500/20 to-blue-500/20 flex items-center justify-center shrink-0 border border-purple-500/20">
                                         <Bot className="h-4 w-4 text-purple-500" />
                                     </div>
                                 )}
@@ -88,26 +178,7 @@ export default function AgentPage() {
                                     ? 'bg-primary text-primary-foreground rounded-tr-none'
                                     : 'bg-muted/80 border rounded-tl-none'
                                     }`}>
-                                    <div className="whitespace-pre-wrap font-sans">{getMessageContent(m)}</div>
-                                    {m.parts?.filter((p: any) => p.type === 'tool-invocation').map((toolPart: any) => {
-                                        const toolCallId = toolPart.toolInvocation?.toolCallId || toolPart.toolCallId;
-                                        const toolResult = toolPart.toolInvocation?.result;
-
-                                        if (!toolResult) {
-                                            return (
-                                                <div key={toolCallId} className="mt-2 p-2 bg-background/50 rounded border text-xs font-mono text-muted-foreground flex items-center gap-2">
-                                                    <Terminal className="h-3 w-3" />
-                                                    Calling {toolPart.toolInvocation?.toolName || 'tool'}...
-                                                </div>
-                                            );
-                                        }
-
-                                        return (
-                                            <div key={toolCallId} className="mt-2 p-2 bg-green-500/10 rounded border border-green-500/20 text-xs font-mono text-green-600 dark:text-green-400 overflow-x-auto">
-                                                <pre>{JSON.stringify(toolResult, null, 2)}</pre>
-                                            </div>
-                                        );
-                                    })}
+                                    <div className="whitespace-pre-wrap font-sans">{m.content}</div>
                                 </div>
                                 {m.role === 'user' && (
                                     <div className="w-8 h-8 rounded-full bg-secondary/10 flex items-center justify-center shrink-0 border">
@@ -116,15 +187,14 @@ export default function AgentPage() {
                                 )}
                             </div>
                         ))}
-                        {isLoading && (
+                        {isLoading && messages[messages.length - 1]?.role === 'user' && (
                             <div className="flex gap-4">
-                                <div className="w-8 h-8 rounded-full bg-purple-500/10 flex items-center justify-center shrink-0 border border-purple-500/20">
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500/20 to-blue-500/20 flex items-center justify-center shrink-0 border border-purple-500/20">
                                     <Bot className="h-4 w-4 text-purple-500" />
                                 </div>
-                                <div className="px-4 py-2 bg-muted/50 rounded-2xl rounded-tl-none flex items-center gap-1">
-                                    <span className="w-1.5 h-1.5 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-                                    <span className="w-1.5 h-1.5 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-                                    <span className="w-1.5 h-1.5 bg-muted-foreground/40 rounded-full animate-bounce"></span>
+                                <div className="px-4 py-2 bg-muted/50 rounded-2xl rounded-tl-none flex items-center gap-2">
+                                    <Loader2 className="h-4 w-4 animate-spin text-purple-500" />
+                                    <span className="text-sm text-muted-foreground">Denke nach...</span>
                                 </div>
                             </div>
                         )}
@@ -136,15 +206,16 @@ export default function AgentPage() {
                         <Input
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
-                            placeholder="Fragen Sie etwas..."
+                            placeholder="Stellen Sie eine Frage..."
                             className="bg-background shadow-sm border-muted-foreground/20 focus-visible:ring-purple-500"
+                            disabled={isLoading}
                         />
                         <Button type="submit" disabled={isLoading || !input.trim()} size="icon" className="shrink-0 bg-purple-600 hover:bg-purple-700">
                             <Send className="h-4 w-4" />
                         </Button>
                     </form>
                     <p className="text-[10px] text-center mt-2 text-muted-foreground opacity-60">
-                        AI can make mistakes. Verify important actions.
+                        Antworten können ungenau sein. Wichtige Aktionen immer verifizieren.
                     </p>
                 </div>
             </Card>
