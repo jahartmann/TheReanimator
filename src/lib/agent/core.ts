@@ -1,44 +1,65 @@
 import { getAISettings } from '@/lib/actions/ai';
-import { tools } from './tools';
+import { tools, getSystemContext } from './tools';
 
-const SYSTEM_PROMPT = `
-Du bist Reanimator Copilot, ein intelligenter System-Administrator-Assistent für eine Proxmox-Umgebung.
-Du hast Zugriff auf Tools, um Server-Status zu prüfen, Backups zu listen und einfache Aktionen auszuführen.
+// Build the system prompt with actual capabilities
+async function buildSystemPrompt(): Promise<string> {
+    const context = await getSystemContext();
 
-Regeln:
-1. Antworte immer hilfsbereit und präzise.
-2. Wenn du nach Status oder Backups gefragt wirst, nutze die bereitgestellten Tools.
-3. Erfinde keine Fakten. Wenn ein Tool keine Daten liefert, sage das.
-4. Antworte in der Sprache des Benutzers (meist Deutsch).
-5. Formatiere Listen übersichtlich.
-6. Gib IMMER eine Rückmeldung über das Ergebnis der Tool-Ausführung.
+    return `
+Du bist der Reanimator Copilot, ein Assistent für Proxmox-Infrastruktur-Management.
+
+=== DEINE AKTUELLEN FÄHIGKEITEN ===
+Du kannst Daten ABFRAGEN:
+- Server-Liste und Status anzeigen
+- VMs und Container auflisten
+- Backups anzeigen (auch fehlgeschlagene)
+- Geplante und laufende Aufgaben zeigen
+
+Du kannst KEINE Befehle ausführen:
+- Keine VMs starten/stoppen
+- Keine SSH-Befehle senden
+- Keine Konfigurationen ändern
+
+Wenn der Benutzer eine Aktion fordert die du nicht kannst, sage ehrlich:
+"Diese Aktion kann ich derzeit nicht ausführen. Bitte nutzen Sie die WebUI: [Link zur entsprechenden Seite]"
+
+=== REGELN ===
+1. Antworte präzise und kurz
+2. Nutze die bereitgestellten Tool-Ergebnisse
+3. Erfinde KEINE Daten - zeige nur was du aus der Datenbank bekommst
+4. Antworte auf Deutsch
+5. Formatiere Ergebnisse als einfache Listen (kein Markdown mit **bold**)
+
+=== AKTUELLER SYSTEM-STATUS ===
+${context}
 `.trim();
+}
 
 interface OllamaMessage {
     role: 'system' | 'user' | 'assistant';
     content: string;
 }
 
-// Direct Ollama API call (bypasses AI SDK compatibility issues)
+// Direct Ollama API call
 export async function chatWithAgent(message: string, history: OllamaMessage[] = []): Promise<string> {
     const settings = await getAISettings();
     if (!settings.enabled || !settings.model) {
         throw new Error('AI ist deaktiviert oder kein Modell ausgewählt');
     }
 
+    const systemPrompt = await buildSystemPrompt();
     const messages: OllamaMessage[] = [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: systemPrompt },
         ...history,
         { role: 'user', content: message }
     ];
 
-    // Check if we need to call any tools based on the message
-    const toolResult = await maybeExecuteTool(message);
+    // Execute tools based on user message
+    const toolResult = await executeToolsForMessage(message);
     if (toolResult) {
-        // Add tool result to context
         messages.push({
             role: 'user',
-            content: `[Tool-Ergebnis]\n${JSON.stringify(toolResult, null, 2)}\n\nBitte fasse dieses Ergebnis für den Benutzer zusammen.`
+            content: `[TOOL-ERGEBNIS]\n${JSON.stringify(toolResult, null, 2)}\n\nFasse dieses Ergebnis kurz und übersichtlich zusammen.`
         });
     }
 
@@ -70,23 +91,25 @@ export async function chatWithAgentStream(messages: any[]) {
         throw new Error('AI ist deaktiviert oder kein Modell ausgewählt');
     }
 
-    // Convert to Ollama format and add system prompt
-    const ollamaMessages = [
-        { role: 'system', content: SYSTEM_PROMPT },
+    const systemPrompt = await buildSystemPrompt();
+
+    // Convert to Ollama format
+    const ollamaMessages: OllamaMessage[] = [
+        { role: 'system', content: systemPrompt },
         ...messages.map((m: any) => ({
-            role: m.role,
+            role: m.role as 'user' | 'assistant',
             content: m.content
         }))
     ];
 
-    // Check if we need to call any tools based on the last user message
+    // Check last user message for tool execution
     const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
     if (lastUserMessage) {
-        const toolResult = await maybeExecuteTool(lastUserMessage.content);
+        const toolResult = await executeToolsForMessage(lastUserMessage.content);
         if (toolResult) {
             ollamaMessages.push({
                 role: 'user',
-                content: `[Tool-Ergebnis]\n${JSON.stringify(toolResult, null, 2)}\n\nBitte fasse dieses Ergebnis für den Benutzer zusammen.`
+                content: `[TOOL-ERGEBNIS]\n${JSON.stringify(toolResult, null, 2)}\n\nFasse dieses Ergebnis kurz und übersichtlich zusammen.`
             });
         }
     }
@@ -111,21 +134,36 @@ export async function chatWithAgentStream(messages: any[]) {
     return response;
 }
 
-// Simple tool detection and execution
-async function maybeExecuteTool(userMessage: string): Promise<any | null> {
-    const lowerMsg = userMessage.toLowerCase();
+// Tool execution based on message content
+async function executeToolsForMessage(userMessage: string): Promise<any | null> {
+    const msg = userMessage.toLowerCase();
 
-    // Detect server status requests
-    if (lowerMsg.includes('server') && (lowerMsg.includes('status') || lowerMsg.includes('zeig') || lowerMsg.includes('list'))) {
+    // Server status
+    if ((msg.includes('server') || msg.includes('node')) &&
+        (msg.includes('status') || msg.includes('zeig') || msg.includes('list') || msg.includes('welche'))) {
         return await tools.getServers.execute();
     }
 
-    // Detect backup requests
-    if (lowerMsg.includes('backup')) {
-        if (lowerMsg.includes('fehlgeschlagen') || lowerMsg.includes('fehler') || lowerMsg.includes('failed')) {
+    // VMs and containers
+    if (msg.includes('vm') || msg.includes('container') || msg.includes('maschine')) {
+        const serverMatch = msg.match(/(?:auf|von|server)\s+(\w+)/i);
+        return await tools.getVMs.execute({ serverName: serverMatch?.[1] });
+    }
+
+    // Backups
+    if (msg.includes('backup')) {
+        if (msg.includes('fehlgeschlagen') || msg.includes('fehler') || msg.includes('failed')) {
             return await tools.getFailedBackups.execute();
         }
         return await tools.getBackups.execute({ limit: 10 });
+    }
+
+    // Tasks
+    if (msg.includes('task') || msg.includes('aufgabe') || msg.includes('job')) {
+        if (msg.includes('geplant') || msg.includes('scheduled')) {
+            return await tools.getScheduledTasks.execute();
+        }
+        return await tools.getRecentTasks.execute();
     }
 
     return null;
