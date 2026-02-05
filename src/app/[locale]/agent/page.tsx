@@ -1,6 +1,6 @@
 'use client';
 
-import { useChat } from 'ai/react';
+import { useChat } from '@ai-sdk/react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -58,8 +58,8 @@ export default function AgentPage() {
                                     </div>
                                 )}
                                 <div className={`px-4 py-2.5 rounded-2xl max-w-[85%] text-sm leading-relaxed shadow-sm ${m.role === 'user'
-                                        ? 'bg-primary text-primary-foreground rounded-tr-none'
-                                        : 'bg-muted/80 border rounded-tl-none'
+                                    ? 'bg-primary text-primary-foreground rounded-tr-none'
+                                    : 'bg-muted/80 border rounded-tl-none'
                                     }`}>
                                     <div className="whitespace-pre-wrap font-sans">{m.content}</div>
                                     {m.toolInvocations?.map((toolInvocation: any) => {
