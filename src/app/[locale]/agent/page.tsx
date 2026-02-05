@@ -27,17 +27,11 @@ export default function AgentPage() {
         const currentInput = input;
         setInput('');
 
-        await sendMessage({
-            role: 'user',
-            content: currentInput,
-        });
+        await sendMessage({ text: currentInput });
     };
 
     const sendQuickMessage = async (content: string) => {
-        await sendMessage({
-            role: 'user',
-            content,
-        });
+        await sendMessage({ text: content });
     };
 
     // Helper to get message text content
