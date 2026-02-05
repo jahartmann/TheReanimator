@@ -3,5 +3,9 @@ export async function register() {
         console.log('Registering instrumentation hook...');
         const { initScheduler } = await import('@/lib/scheduler');
         initScheduler();
+
+        // Initialize Telegram Bot
+        const { initTelegramBot } = await import('@/lib/agent/telegram');
+        initTelegramBot();
     }
 }

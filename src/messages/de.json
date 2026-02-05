@@ -50,6 +50,7 @@
     "tags": "Tags",
     "storage": "Speicher",
     "configs": "Konfigurationen",
+    "agent": "AI Assistent",
     "bulkCommands": "Bulk Commands",
     "users": "Benutzer",
     "administration": "Administration"
@@ -199,7 +200,8 @@
     "restartConfirm": "Möchten Sie die Anwendung neu starten?",
     "restartInitiated": "Neustart initiiert",
     "commandCopied": "Befehl kopiert!",
-    "github": "GitHub"
+    "github": "GitHub",
+    "notifications": "Benachrichtigungen"
   },
   "notifications": {
     "title": "Benachrichtigungen",
@@ -219,7 +221,7 @@
     "save": "Speichern",
     "saved": "Gespeichert",
     "enabled": "Aktiviert",
-    "telegramHelp": "Starten Sie den BotFather auf Telegram, um einen Token zu erhalten."
+    "telegramHelp": "1. Suche '@BotFather' auf Telegram.\n2. Sende '/newbot' und folge den Anweisungen.\n3. Kopiere den Token hierher.\n4. Sende deinem neuen Bot eine Nachricht.\n5. Klicke 'Testen' um die Chat ID zu erhalten."
   },
   "migrations": {
     "title": "Migrationen",

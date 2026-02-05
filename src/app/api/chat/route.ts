@@ -1,74 +1,15 @@
-import { streamText, tool } from 'ai';
-import { getLanguageModel } from '@/lib/ai/model';
-import { toolsSchema } from '@/lib/ai/tools';
-import { buildSystemContext } from '@/lib/ai/context';
-import { listNodes, getStorageStatus, createVM, startVM, stopVM, installPackage } from '@/lib/ai/functions';
-import { z } from 'zod';
+import { chatWithAgentStream } from '@/lib/agent/core';
 
-export const maxDuration = 300; // 5 minutes
+export const maxDuration = 60;
 
 export async function POST(req: Request) {
     const { messages } = await req.json();
 
-    // Cast model to any to avoid mismatch between V1/V2/V3 interfaces of ai-sdk implementations
-    // This is safe because core functionality (text generation) is compatible.
-    const model = (await getLanguageModel()) as any;
-
-    // Convert toolsSchema to actual tools object with 'execute' placeholders for now
-    // In Phase 2 we will fill the 'execute' functions.
-    const tools = {
-        list_nodes: tool({
-            description: toolsSchema.list_nodes.description,
-            parameters: toolsSchema.list_nodes.parameters,
-            execute: async () => {
-                return await listNodes();
-            },
-        } as any),
-        get_storage_status: tool({
-            description: 'Check storage usage on all servers.',
-            parameters: z.object({}),
-            execute: async () => {
-                return await getStorageStatus();
-            },
-        } as any),
-        create_vm: tool({
-            description: toolsSchema.create_vm.description,
-            parameters: toolsSchema.create_vm.parameters,
-            execute: async (args: any) => {
-                return await createVM(args.serverName, args.node, args);
-            },
-        } as any),
-        start_vm: tool({
-            description: toolsSchema.start_vm.description,
-            parameters: toolsSchema.start_vm.parameters,
-            execute: async (args: any) => {
-                return await startVM(args.serverName, args.node, args.vmid);
-            },
-        } as any),
-        stop_vm: tool({
-            description: toolsSchema.stop_vm.description,
-            parameters: toolsSchema.stop_vm.parameters,
-            execute: async (args: any) => {
-                return await stopVM(args.serverName, args.node, args.vmid);
-            },
-        } as any),
-        install_package: tool({
-            description: toolsSchema.install_package.description,
-            parameters: toolsSchema.install_package.parameters,
-            execute: async (args: any) => {
-                return await installPackage(args.serverName, args.node, args.vmid, args.packageName);
-            },
-        } as any),
-    };
-
-    const systemMessage = await buildSystemContext();
-
-    const result = streamText({
-        model,
-        messages,
-        tools,
-        system: systemMessage,
-    });
-
-    return (result as any).toDataStreamResponse();
+    try {
+        const result = await chatWithAgentStream(messages);
+        // @ts-ignore
+        return result.toDataStreamResponse();
+    } catch (error: any) {
+        return new Response(error.message, { status: 500 });
+    }
 }
