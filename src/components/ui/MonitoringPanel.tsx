@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Server, HardDrive, CheckCircle2, AlertCircle, XCircle, Clock, RefreshCw, Activity, Wifi, WifiOff, ChevronRight, Cpu, MemoryStick, AlertTriangle, Bell, TrendingUp, Zap } from "lucide-react";
 import { motion } from 'framer-motion';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { wakeOnLan } from "@/lib/actions/necromancer";
 import { toast } from "sonner";
 
@@ -131,6 +131,7 @@ function UsageGauge({ value, label, color, icon: Icon }: { value: number; label:
 
 export function MonitoringPanel() {
     const t = useTranslations('monitoringPanel');
+    const locale = useLocale();
     const [data, setData] = useState<MonitoringData | null>(null);
     const [loading, setLoading] = useState(true);
     const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
@@ -324,7 +325,7 @@ export function MonitoringPanel() {
                                 <p className="text-sm text-muted-foreground">{t('backupStorage')}</p>
                                 <p className="text-2xl font-bold">{formatBytes(summary.totalSize)}</p>
                                 <p className="text-xs text-muted-foreground mt-1">
-                                    {summary.totalBackups} {t('totalBackups')}
+                                    {summary.totalBackups} {summary.totalBackups === 1 ? 'Backup' : t('totalBackups')}
                                 </p>
                             </div>
                             <div className="w-12 h-12 rounded-full bg-orange-500/10 flex items-center justify-center">
@@ -366,7 +367,7 @@ export function MonitoringPanel() {
                     <div className="flex items-center gap-2">
                         {lastUpdate && (
                             <span className="text-xs text-muted-foreground">
-                                {lastUpdate.toLocaleTimeString('ru-RU')}
+                                {lastUpdate.toLocaleTimeString(locale)}
                             </span>
                         )}
                         <Button variant="ghost" size="sm" onClick={fetchData} disabled={loading}>
@@ -488,7 +489,7 @@ export function MonitoringPanel() {
                                         </span>
                                     </div>
                                     <span className="text-muted-foreground">
-                                        {server.totalBackups} {t('backups')}
+                                        {server.totalBackups} {server.totalBackups === 1 ? 'Backup' : t('backups')}
                                     </span>
                                 </div>
                             </Link>
@@ -534,7 +535,7 @@ export function MonitoringPanel() {
                                     <div className="flex-1 min-w-0">
                                         <p className="text-sm font-medium truncate">{backup.serverName}</p>
                                         <p className="text-xs text-muted-foreground">
-                                            {new Date(backup.backup_date).toLocaleString('ru-RU', {
+                                            {new Date(backup.backup_date).toLocaleString(locale, {
                                                 dateStyle: 'medium',
                                                 timeStyle: 'short'
                                             })}

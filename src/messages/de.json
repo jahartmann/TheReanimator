@@ -8,6 +8,10 @@
     "back": "Zurück",
     "next": "Weiter",
     "loading": "Laden...",
+    "confirmDialog": {
+      "confirm": "Bestätigen",
+      "cancel": "Abbrechen"
+    },
     "search": "Suchen",
     "filter": "Filtern",
     "actions": "Aktionen",
@@ -18,6 +22,9 @@
     "settings": "Einstellungen",
     "logout": "Abmelden",
     "close": "Schließen",
+    "notifications": "Benachrichtigungen",
+    "agent": "Agent",
+    "general": "Allgemein",
     "deeplTest": "Dies ist ein automatischer Test der DeepL-Übersetzung",
     "refresh": "Aktualisieren",
     "download": "Herunterladen",
@@ -193,6 +200,26 @@
     "restartInitiated": "Neustart initiiert",
     "commandCopied": "Befehl kopiert!",
     "github": "GitHub"
+  },
+  "notifications": {
+    "title": "Benachrichtigungen",
+    "subtitle": "Konfigurieren Sie externe Nachrichtenkanäle",
+    "smtp": "E-Mail (SMTP)",
+    "telegram": "Telegram",
+    "telegramDesc": "Erhalten Sie Watchdog-Alarme direkt auf Ihr Smartphone.",
+    "smtpDesc": "Für klassische E-Mail-Alarme.",
+    "host": "Host",
+    "port": "Port",
+    "user": "Benutzer",
+    "password": "Passwort",
+    "from": "Absender",
+    "botToken": "Bot Token",
+    "chatId": "Chat ID",
+    "test": "Testen",
+    "save": "Speichern",
+    "saved": "Gespeichert",
+    "enabled": "Aktiviert",
+    "telegramHelp": "Starten Sie den BotFather auf Telegram, um einen Token zu erhalten."
   },
   "migrations": {
     "title": "Migrationen",
