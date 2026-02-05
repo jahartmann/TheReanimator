@@ -23,42 +23,42 @@ export async function POST(req: Request) {
             execute: async () => {
                 return await listNodes();
             },
-        }),
+        } as any),
         get_storage_status: tool({
             description: 'Check storage usage on all servers.',
             parameters: z.object({}),
             execute: async () => {
                 return await getStorageStatus();
             },
-        }),
+        } as any),
         create_vm: tool({
             description: toolsSchema.create_vm.description,
             parameters: toolsSchema.create_vm.parameters,
             execute: async (args: any) => {
                 return await createVM(args.serverName, args.node, args);
             },
-        }),
+        } as any),
         start_vm: tool({
             description: toolsSchema.start_vm.description,
             parameters: toolsSchema.start_vm.parameters,
             execute: async (args: any) => {
                 return await startVM(args.serverName, args.node, args.vmid);
             },
-        }),
+        } as any),
         stop_vm: tool({
             description: toolsSchema.stop_vm.description,
             parameters: toolsSchema.stop_vm.parameters,
             execute: async (args: any) => {
                 return await stopVM(args.serverName, args.node, args.vmid);
             },
-        }),
+        } as any),
         install_package: tool({
             description: toolsSchema.install_package.description,
             parameters: toolsSchema.install_package.parameters,
             execute: async (args: any) => {
                 return await installPackage(args.serverName, args.node, args.vmid, args.packageName);
             },
-        }),
+        } as any),
     };
 
     const systemMessage = await buildSystemContext();
