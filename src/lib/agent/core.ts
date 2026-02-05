@@ -8,30 +8,32 @@ async function buildSystemPrompt(): Promise<string> {
     return `
 Du bist der Reanimator Copilot, ein Assistent für Proxmox-Infrastruktur-Management.
 
-=== DEINE AKTUELLEN FÄHIGKEITEN ===
-Du kannst Daten ABFRAGEN:
-- Server-Liste und Status anzeigen
-- VMs und Container auflisten
-- Backups anzeigen (auch fehlgeschlagene)
-- Geplante und laufende Aufgaben zeigen
+=== AKTUELLER SYSTEM-STATUS ===
+${context}
 
-Du kannst KEINE Befehle ausführen:
-- Keine VMs starten/stoppen
-- Keine SSH-Befehle senden
-- Keine Konfigurationen ändern
+=== DEINE FÄHIGKEITEN ===
+1. INFORMATIONEN:
+   - Server-Status abrufen
+   - VM/Container-Listen anzeigen
+   - Backups (auch fehlgeschlagene) prüfen
+   - Tasks überwachen
 
-Wenn der Benutzer eine Aktion fordert die du nicht kannst, sage ehrlich:
-"Diese Aktion kann ich derzeit nicht ausführen. Bitte nutzen Sie die WebUI: [Link zur entsprechenden Seite]"
+2. AKTIONEN (Nutze 'manageVM'):
+   - VMs starten/stoppen/neustarten
+   - Container starten/stoppen/neustarten
+   - Beispiel: "Starte VM 100" -> Führt Aktion aus.
+
+=== PROZESS FÜR AKTIONEN ===
+1. Wenn der Benutzer "Starte VM <ID>" sagt:
+   - Bestätige kurz ("Ich starte VM <ID>...").
+   - Führe das Tool aus.
+   - Melde das Ergebnis ("VM gestartet" oder Fehler).
 
 === REGELN ===
 1. Antworte präzise und kurz
-2. Nutze die bereitgestellten Tool-Ergebnisse
-3. Erfinde KEINE Daten - zeige nur was du aus der Datenbank bekommst
-4. Antworte auf Deutsch
-5. Formatiere Ergebnisse als einfache Listen (kein Markdown mit **bold**)
-
-=== AKTUELLER SYSTEM-STATUS ===
-${context}
+2. Formatiere Ergebnisse als einfache Listen
+3. Erfinde KEINE Daten
+4. Antworte immer auf Deutsch
 `.trim();
 }
 
@@ -59,7 +61,7 @@ export async function chatWithAgent(message: string, history: OllamaMessage[] = 
     if (toolResult) {
         messages.push({
             role: 'user',
-            content: `[TOOL-ERGEBNIS]\n${JSON.stringify(toolResult, null, 2)}\n\nFasse dieses Ergebnis kurz und übersichtlich zusammen.`
+            content: `[TOOL-ERGEBNIS]\n${JSON.stringify(toolResult, null, 2)}\n\nFasse das Ergebnis kurz für den Benutzer zusammen.`
         });
     }
 
@@ -105,11 +107,12 @@ export async function chatWithAgentStream(messages: any[]) {
     // Check last user message for tool execution
     const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
     if (lastUserMessage) {
+        // We only execute tools if it's the *latest* message from user
         const toolResult = await executeToolsForMessage(lastUserMessage.content);
         if (toolResult) {
             ollamaMessages.push({
                 role: 'user',
-                content: `[TOOL-ERGEBNIS]\n${JSON.stringify(toolResult, null, 2)}\n\nFasse dieses Ergebnis kurz und übersichtlich zusammen.`
+                content: `[TOOL-ERGEBNIS]\n${JSON.stringify(toolResult, null, 2)}\n\nFasse das Ergebnis kurz für den Benutzer zusammen.`
             });
         }
     }
@@ -138,19 +141,44 @@ export async function chatWithAgentStream(messages: any[]) {
 async function executeToolsForMessage(userMessage: string): Promise<any | null> {
     const msg = userMessage.toLowerCase();
 
-    // Server status
-    if ((msg.includes('server') || msg.includes('node')) &&
-        (msg.includes('status') || msg.includes('zeig') || msg.includes('list') || msg.includes('welche'))) {
+    // 1. VM Management (Start/Stop/Reboot)
+    // Regex identifies: [start/stop/restart] ... [vm/container] ... [number]
+    const actionMatch = msg.match(/(start|stop|boot|shutdown|fahr|schalt)/i);
+    const idMatch = msg.match(/(\d{3,})/); // VMIDs are usually 3+ digits
+
+    if (actionMatch && idMatch) {
+        const vmid = parseInt(idMatch[1]);
+        let action: 'start' | 'stop' | 'reboot' | 'shutdown' = 'start';
+
+        if (msg.includes('stop') || msg.includes('fahr') || msg.includes('aus')) {
+            action = 'stop';
+            if (msg.includes('force') || msg.includes('hart')) action = 'stop'; // Could map to 'stop' (kill) vs 'shutdown'
+            else action = 'shutdown';
+        } else if (msg.includes('restart') || msg.includes('neu') || msg.includes('reboot')) {
+            action = 'reboot';
+        }
+
+        console.log(`[Copilot] Detecting VM Action: ${action} ${vmid}`);
+        return await tools.manageVM.execute({ vmid, action });
+    }
+
+
+    // 2. Server status
+    if ((msg.includes('server') || msg.includes('node') || msg.includes('status')) &&
+        (msg.includes('zeig') || msg.includes('list') || msg.includes('alle') || msg.includes('wie geht'))) {
         return await tools.getServers.execute();
     }
 
-    // VMs and containers
+    // 3. VMs and containers list
     if (msg.includes('vm') || msg.includes('container') || msg.includes('maschine')) {
         const serverMatch = msg.match(/(?:auf|von|server)\s+(\w+)/i);
-        return await tools.getVMs.execute({ serverName: serverMatch?.[1] });
+        // Only run getVMs if we didn't match a management command above (detected by idMatch)
+        if (!idMatch) {
+            return await tools.getVMs.execute({ serverName: serverMatch?.[1] });
+        }
     }
 
-    // Backups
+    // 4. Backups
     if (msg.includes('backup')) {
         if (msg.includes('fehlgeschlagen') || msg.includes('fehler') || msg.includes('failed')) {
             return await tools.getFailedBackups.execute();
@@ -158,7 +186,7 @@ async function executeToolsForMessage(userMessage: string): Promise<any | null> 
         return await tools.getBackups.execute({ limit: 10 });
     }
 
-    // Tasks
+    // 5. Tasks
     if (msg.includes('task') || msg.includes('aufgabe') || msg.includes('job')) {
         if (msg.includes('geplant') || msg.includes('scheduled')) {
             return await tools.getScheduledTasks.execute();
