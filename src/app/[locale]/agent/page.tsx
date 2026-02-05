@@ -5,15 +5,34 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Terminal, Send, Bot, User, Sparkles } from "lucide-react";
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Input } from "@/components/ui/input";
 
 export default function AgentPage() {
     const t = useTranslations('common');
-    const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
+    const { messages, append, status } = useChat({
         api: '/api/chat',
     });
+    const [input, setInput] = useState('');
+    const isLoading = status === 'streaming' || status === 'submitted';
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        setInput(e.target.value);
+    };
+
+    const handleSubmit = async (e?: React.FormEvent) => {
+        e?.preventDefault();
+        if (!input.trim()) return;
+
+        const currentInput = input;
+        setInput('');
+
+        await append({
+            role: 'user',
+            content: currentInput,
+        });
+    };
     const bottomRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -40,10 +59,10 @@ export default function AgentPage() {
                                 <Bot className="h-16 w-16 mx-auto text-muted-foreground/50" />
                                 <p>Wie kann ich Ihnen heute helfen?</p>
                                 <div className="flex flex-wrap gap-2 justify-center max-w-md mx-auto">
-                                    <Button variant="outline" className="text-xs" onClick={() => handleInputChange({ target: { value: 'Zeige Server Status' } } as any)}>
+                                    <Button variant="outline" className="text-xs" onClick={() => append({ role: 'user', content: 'Zeige Server Status' })}>
                                         Zeige Server Status
                                     </Button>
-                                    <Button variant="outline" className="text-xs" onClick={() => handleInputChange({ target: { value: 'Habe ich fehlgeschlagene Backups?' } } as any)}>
+                                    <Button variant="outline" className="text-xs" onClick={() => append({ role: 'user', content: 'Habe ich fehlgeschlagene Backups?' })}>
                                         Fehlgeschlagene Backups?
                                     </Button>
                                 </div>
