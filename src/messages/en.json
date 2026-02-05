@@ -192,7 +192,30 @@
     "restartConfirm": "Would you like to restart the application?",
     "restartInitiated": "Restart initiated",
     "commandCopied": "Command copied!",
-    "github": "GitHub"
+    "github": "GitHub",
+    "notifications": "Notifications",
+    "general": "General",
+    "agent": "Copilot"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "subtitle": "Configure external notification channels",
+    "smtp": "E-Mail (SMTP)",
+    "telegram": "Telegram",
+    "telegramDesc": "Receive watchdog alerts directly on your phone.",
+    "smtpDesc": "For classic email alerts.",
+    "host": "Host",
+    "port": "Port",
+    "user": "User",
+    "password": "Password",
+    "from": "From",
+    "botToken": "Bot Token",
+    "chatId": "Chat ID",
+    "test": "Test",
+    "save": "Save",
+    "saved": "Saved",
+    "enabled": "Enabled",
+    "telegramHelp": "1. Search '@BotFather' on Telegram.\n2. Send '/newbot' and follow instructions.\n3. Copy the token here.\n4. Send your new bot a message.\n5. Click 'Test' to get the Chat ID."
   },
   "migrations": {
     "title": "Migrations",

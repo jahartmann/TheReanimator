@@ -11,13 +11,13 @@ const intlMiddleware = createMiddleware(routing);
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Skip i18n for API routes and static files
+  // Skip i18n for API routes and static files - let them pass through directly
   if (
     pathname.startsWith('/api') ||
     pathname.startsWith('/_next') ||
     pathname.includes('.')
   ) {
-    return intlMiddleware(request);
+    return NextResponse.next();
   }
 
   // Get locale from the pathname
