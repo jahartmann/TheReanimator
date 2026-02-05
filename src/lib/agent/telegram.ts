@@ -82,9 +82,9 @@ function setupListeners(bot: TelegramBot) {
 
             // Build simple history (maybe last 5 messages from this chat if we stored them?)
             // For now, stateless or single-turn.
-            const response = await chatWithAgent(text);
+            const result = await chatWithAgent(text);
 
-            bot.sendMessage(chatId, response);
+            bot.sendMessage(chatId, result.response);
         } catch (error: any) {
             console.error('[Telegram] Error processing message:', error);
             bot.sendMessage(chatId, `Error: ${error.message}`);
