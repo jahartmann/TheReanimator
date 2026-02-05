@@ -327,6 +327,34 @@ db.exec(`
   );
 `);
 
+// ====== COPILOT CHAT HISTORY ======
+
+// Chat Sessions table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS chat_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    title TEXT DEFAULT 'Neue Unterhaltung',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+
+// Chat Messages table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system', 'tool')),
+    content TEXT NOT NULL,
+    tool_name TEXT,
+    tool_result TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+  );
+`);
+
 // ====== DEFAULT PROVISIONING PROFILES (Ansible-style templates) ======
 
 const defaultProfiles = [

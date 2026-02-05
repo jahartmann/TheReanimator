@@ -1,47 +1,83 @@
 import { getAISettings } from '@/lib/actions/ai';
-import { tools, getSystemContext } from './tools';
+import { tools, getSystemContext, createChatSession, saveChatMessage, getChatHistory } from './tools';
 
-// Build the system prompt with actual capabilities
+// ============================================================================
+// SYSTEM PROMPT - MAKES AI HONEST AND ASK QUESTIONS
+// ============================================================================
+
 async function buildSystemPrompt(): Promise<string> {
     const context = await getSystemContext();
 
     return `
-Du bist der Reanimator Copilot, ein mächtiger Assistent für Proxmox-Infrastruktur-Management.
+Du bist der Reanimator Copilot, ein präziser und ehrlicher Assistent für Proxmox-Infrastruktur.
 
 ${context}
 
-=== DEINE FÄHIGKEITEN ===
+=== DEINE KERNREGELN ===
 
-📊 INFORMATIONEN ABRUFEN:
-- "Zeige alle Server" → Liste aller Proxmox-Server
-- "Zeige alle VMs" → Live VM/Container-Liste von Proxmox
-- "Zeige Server 1 Details" → System, Netzwerk, Disks eines Servers
-- "Zeige Gesundheit von Server 2" → SMART, ZFS, Events, Backups
-- "Zeige Backups" → Liste der Konfigurations-Backups
-- "Zeige Linux Hosts" → Alle konfigurierten Linux-Hosts
-- "Zeige Jobs" → Geplante Scheduler-Aufgaben
-- "Zeige Provisioning Profile" → Verfügbare Provisioning-Profile
-- "Zeige Tags" → Alle konfigurierten Tags
+1. SEI EHRLICH - Lüge NIEMALS über Ergebnisse
+   - Wenn ein Tool "success: false" zurückgibt, sage dem User die Wahrheit
+   - Wenn du den Status nicht verifizieren konntest, sage es
+   - Behaupte NIEMALS, etwas sei passiert, wenn du es nicht bestätigt hast
 
-⚡ AKTIONEN AUSFÜHREN:
-- "Starte VM 100" → VM via SSH starten
-- "Stoppe Container 105" → Container stoppen
-- "Erstelle Backup für alle Server" → Config-Backup erstellen
-- "Sync VMs von Server 1" → VM-Liste synchronisieren
-- "Scanne Server 2" → Health-Scan durchführen
-- "Scanne gesamte Infrastruktur" → Alle Server scannen
-- "Analysiere Netzwerk von Server 1" → KI-Netzwerkanalyse
-- "Synchronisiere Tags" → Tags vom Cluster holen
-- "Wende Profil 1 auf Server 2 an" → Provisioning ausführen
+2. FRAGE NACH BEI UNKLARHEITEN
+   - "Erstelle Backup um 3 Uhr" → Frage: "Soll ich einen geplanten Job für 3:00 erstellen, oder sofort ein Backup machen?"
+   - "Starte die VM" → Frage: "Welche VM meinst du? Hier sind deine VMs: ..."
+   - Bei kritischen Aktionen (stop, shutdown) → Frage nach Bestätigung
 
-🔧 SSH BEFEHLE:
-- "Führe 'uptime' auf Server 1 aus" → Beliebiger SSH-Befehl
+3. VERIFIZIERE DEINE AKTIONEN
+   - Nach VM start/stop: Prüfe den echten Status
+   - Wenn der Status nicht dem erwarteten entspricht, sage es dem User
+   - Zeige immer: vorher → nachher
 
-=== REGELN ===
-1. Antworte kurz und präzise auf Deutsch
-2. Führe Aktionen direkt aus wenn klar, frage bei Unklarheiten nach
-3. Formatiere Listen einfach ohne Markdown-Formatierung
-4. Bei kritischen Aktionen (SSH, Provisioning) frage nach Bestätigung
+4. UNTERSCHEIDE SOFORTIGE AKTIONEN VON GEPLANTEN AUFGABEN
+   - "Erstelle Backup" = SOFORT ausführen → createConfigBackup
+   - "Erstelle Backup-Job für 3 Uhr" = PLANEN → createScheduledJob
+   - Wenn unklar: FRAGE NACH!
+
+=== VERFÜGBARE TOOLS ===
+
+INFORMATIONEN:
+- getServers → Liste aller Server
+- listVMs → VMs/Container (live)
+- getVMStatus → Aktueller VM-Status
+- getBackups → Backup-Historie
+- getScheduledJobs → Geplante Jobs
+- getProvisioningProfiles → Profile
+- getTags → Tags
+- getLinuxHosts → Linux Hosts
+- getServerDetails → Server-Details
+- runNetworkAnalysis → Netzwerk analysieren
+
+AKTIONEN:
+- manageVM(vmid, action) → start/stop/shutdown/reboot - VERIFIZIERT Ergebnis
+- createConfigBackup(serverId?) → Backup JETZT erstellen
+- createScheduledJob(name, type, serverId, schedule) → Job PLANEN
+- runHealthScan(serverId) → Health-Scan
+- executeSSHCommand(serverId, command, confirmed) → SSH-Befehl (NUR nach Bestätigung)
+
+=== BEISPIEL-DIALOGE ===
+
+User: "Fahr VM 9901 runter"
+Du: [Führe manageVM(9901, "shutdown") aus]
+Tool gibt zurück: {success: true, statusBefore: "running", statusAfter: "stopped", vmName: "Wintest"}
+Du: "VM 9901 (Wintest) wurde erfolgreich heruntergefahren. Status: running → stopped."
+
+User: "Fahr VM 9901 runter"  
+Tool gibt zurück: {success: false, statusBefore: "running", statusAfter: "running"}
+Du: "Der Shutdown-Befehl wurde gesendet, aber die VM läuft noch (Status: running). Möglicherweise dauert der Shutdown länger oder es gibt ein Problem. Soll ich erneut prüfen?"
+
+User: "Mach ein Backup um 3 Uhr"
+Du: "Möchtest du:
+1. Einen geplanten Job erstellen, der jeden Tag um 3:00 Uhr läuft?
+2. Ein einmaliges Backup jetzt erstellen?
+Bitte klär mich auf."
+
+=== FORMATIERUNG ===
+- Antworte auf Deutsch, kurz und präzise
+- Keine Markdown-Formatierung (**fett**, etc.)
+- Zeige Status-Änderungen klar an: vorher → nachher
+- Bei Fehlern: Erkläre was passiert ist und was der User tun kann
 `.trim();
 }
 
@@ -50,12 +86,25 @@ interface OllamaMessage {
     content: string;
 }
 
-// Direct Ollama API call
-export async function chatWithAgent(message: string, history: OllamaMessage[] = []): Promise<string> {
+// ============================================================================
+// MAIN CHAT FUNCTION WITH HISTORY
+// ============================================================================
+
+export async function chatWithAgent(
+    message: string,
+    history: OllamaMessage[] = [],
+    sessionId?: number
+): Promise<{ response: string, sessionId: number }> {
     const settings = await getAISettings();
     if (!settings.enabled || !settings.model) {
         throw new Error('AI ist deaktiviert oder kein Modell ausgewählt');
     }
+
+    // Create or use existing session
+    const currentSessionId = sessionId || createChatSession();
+
+    // Save user message
+    saveChatMessage(currentSessionId, 'user', message);
 
     const systemPrompt = await buildSystemPrompt();
     const messages: OllamaMessage[] = [
@@ -67,9 +116,12 @@ export async function chatWithAgent(message: string, history: OllamaMessage[] = 
     // Execute tools based on user message
     const toolResult = await executeToolsForMessage(message);
     if (toolResult) {
+        // Save tool result
+        saveChatMessage(currentSessionId, 'tool', JSON.stringify(toolResult.result), toolResult.toolName);
+
         messages.push({
             role: 'user',
-            content: `[TOOL-ERGEBNIS]\n${JSON.stringify(toolResult, null, 2)}\n\nFasse das Ergebnis kurz zusammen.`
+            content: `[TOOL-ERGEBNIS von ${toolResult.toolName}]\n${JSON.stringify(toolResult.result, null, 2)}\n\nInterpretiere dieses Ergebnis ehrlich für den User. Wenn success=false, erkläre das Problem. Wenn success=true, bestätige was passiert ist.`
         });
     }
 
@@ -91,14 +143,28 @@ export async function chatWithAgent(message: string, history: OllamaMessage[] = 
     }
 
     const data = await response.json();
-    return data.message?.content || 'Keine Antwort erhalten.';
+    const assistantResponse = data.message?.content || 'Keine Antwort erhalten.';
+
+    // Save assistant response
+    saveChatMessage(currentSessionId, 'assistant', assistantResponse);
+
+    return { response: assistantResponse, sessionId: currentSessionId };
 }
 
-// Streaming version for chat UI
-export async function chatWithAgentStream(messages: any[]) {
+// Streaming version
+export async function chatWithAgentStream(messages: any[], sessionId?: number) {
     const settings = await getAISettings();
     if (!settings.enabled || !settings.model) {
         throw new Error('AI ist deaktiviert oder kein Modell ausgewählt');
+    }
+
+    // Create session if needed
+    const currentSessionId = sessionId || createChatSession();
+
+    // Save last user message
+    const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
+    if (lastUserMessage) {
+        saveChatMessage(currentSessionId, 'user', lastUserMessage.content);
     }
 
     const systemPrompt = await buildSystemPrompt();
@@ -111,14 +177,15 @@ export async function chatWithAgentStream(messages: any[]) {
         }))
     ];
 
-    // Check last user message for tool execution
-    const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
+    // Check for tool execution
     if (lastUserMessage) {
         const toolResult = await executeToolsForMessage(lastUserMessage.content);
         if (toolResult) {
+            saveChatMessage(currentSessionId, 'tool', JSON.stringify(toolResult.result), toolResult.toolName);
+
             ollamaMessages.push({
                 role: 'user',
-                content: `[TOOL-ERGEBNIS]\n${JSON.stringify(toolResult, null, 2)}\n\nFasse das Ergebnis kurz zusammen.`
+                content: `[TOOL-ERGEBNIS von ${toolResult.toolName}]\n${JSON.stringify(toolResult.result, null, 2)}\n\nInterpretiere dieses Ergebnis ehrlich für den User.`
             });
         }
     }
@@ -144,136 +211,147 @@ export async function chatWithAgentStream(messages: any[]) {
 }
 
 // ============================================================================
-// INTENT DETECTION & TOOL EXECUTION
+// INTENT DETECTION - MORE CAREFUL, ASKS QUESTIONS
 // ============================================================================
 
-async function executeToolsForMessage(userMessage: string): Promise<any | null> {
+interface ToolExecution {
+    toolName: string;
+    result: any;
+}
+
+async function executeToolsForMessage(userMessage: string): Promise<ToolExecution | null> {
     const msg = userMessage.toLowerCase();
 
-    // Helper to extract IDs from message
-    const extractId = (pattern: RegExp): number | undefined => {
+    // Helper to extract IDs
+    const extractNumber = (pattern: RegExp): number | undefined => {
         const match = msg.match(pattern);
         return match ? parseInt(match[1]) : undefined;
     };
 
-    const serverId = extractId(/server\s*(\d+)/i) || extractId(/server\s*id\s*(\d+)/i);
-    const profileId = extractId(/profil\s*(\d+)/i);
-    const hostId = extractId(/host\s*(\d+)/i);
-    const vmId = extractId(/vm\s*(\d+)/i) || extractId(/(\d{3,})/); // VMIDs usually 3+ digits
+    const serverId = extractNumber(/server\s*(\d+)/i);
+    const vmId = extractNumber(/vm\s*(\d+)/i) || extractNumber(/(\d{3,5})/);
 
     // ========================================================================
-    // VM MANAGEMENT
+    // VM MANAGEMENT - VERY CAREFUL
     // ========================================================================
 
-    if ((msg.includes('start') || msg.includes('boot')) && vmId) {
+    // Clear start intent
+    if ((msg.includes('start') || msg.includes('hochfahr') || msg.includes('boot')) && vmId && !msg.includes('neustart')) {
         console.log(`[Copilot] Starting VM ${vmId}`);
-        return await tools.manageVM.execute({ vmid: vmId, action: 'start' });
+        const result = await tools.manageVM.execute({ vmid: vmId, action: 'start' });
+        return { toolName: 'manageVM(start)', result };
     }
 
-    if ((msg.includes('stop') || msg.includes('aus') || msg.includes('beend')) && vmId) {
-        const action = msg.includes('force') || msg.includes('hart') ? 'stop' : 'shutdown';
-        console.log(`[Copilot] Stopping VM ${vmId} (${action})`);
-        return await tools.manageVM.execute({ vmid: vmId, action });
+    // Shutdown (graceful) - different from stop (force)
+    if ((msg.includes('herunterfahren') || msg.includes('herunterfahr') || msg.includes('shutdown') || msg.includes('fahre')) && vmId && !msg.includes('hoch')) {
+        console.log(`[Copilot] Shutdown VM ${vmId}`);
+        const result = await tools.manageVM.execute({ vmid: vmId, action: 'shutdown' });
+        return { toolName: 'manageVM(shutdown)', result };
     }
 
-    if ((msg.includes('restart') || msg.includes('neustart') || msg.includes('reboot')) && vmId) {
-        console.log(`[Copilot] Rebooting VM ${vmId}`);
-        return await tools.manageVM.execute({ vmid: vmId, action: 'reboot' });
+    // Stop (force)
+    if ((msg.includes('stop') || msg.includes('beende') || msg.includes('ausschalten')) && vmId) {
+        console.log(`[Copilot] Stop VM ${vmId}`);
+        const result = await tools.manageVM.execute({ vmid: vmId, action: 'stop' });
+        return { toolName: 'manageVM(stop)', result };
     }
 
-    // ========================================================================
-    // LIST VMs
-    // ========================================================================
-
-    if (msg.includes('vm') || msg.includes('container') || msg.includes('maschine') || msg.includes('gast')) {
-        if (!msg.includes('start') && !msg.includes('stop') && !msg.includes('restart')) {
-            console.log(`[Copilot] Listing VMs for server: ${serverId || 'all'}`);
-            return await tools.listVMs.execute({ serverId });
-        }
+    // Reboot
+    if ((msg.includes('neustart') || msg.includes('restart') || msg.includes('reboot')) && vmId) {
+        console.log(`[Copilot] Reboot VM ${vmId}`);
+        const result = await tools.manageVM.execute({ vmid: vmId, action: 'reboot' });
+        return { toolName: 'manageVM(reboot)', result };
     }
 
-    // ========================================================================
-    // SYNC VMs
-    // ========================================================================
-
-    if ((msg.includes('sync') || msg.includes('synchron')) && msg.includes('vm') && serverId) {
-        console.log(`[Copilot] Syncing VMs for server ${serverId}`);
-        return await tools.syncVMs.execute({ serverId });
+    // Check VM status
+    if ((msg.includes('status') || msg.includes('zustand') || msg.includes('läuft')) && vmId) {
+        console.log(`[Copilot] Check VM status ${vmId}`);
+        const result = await tools.getVMStatus.execute({ vmid: vmId });
+        return { toolName: 'getVMStatus', result };
     }
 
     // ========================================================================
-    // BACKUPS
+    // LIST VMs (only if not an action)
     // ========================================================================
 
+    if ((msg.includes('vm') || msg.includes('container') || msg.includes('maschine')) &&
+        !msg.includes('start') && !msg.includes('stop') && !msg.includes('fahre') && !msg.includes('status')) {
+        console.log(`[Copilot] Listing VMs`);
+        const result = await tools.listVMs.execute({ serverId });
+        return { toolName: 'listVMs', result };
+    }
+
+    // ========================================================================
+    // BACKUPS - DISTINGUISH IMMEDIATE VS SCHEDULED
+    // ========================================================================
+
+    // Scheduled job (contains time reference)
     if ((msg.includes('backup') || msg.includes('sicher')) &&
-        (msg.includes('erstell') || msg.includes('mach') || msg.includes('config') || msg.includes('konfig'))) {
-        console.log(`[Copilot] Creating backup for server: ${serverId || 'all'}`);
-        return await tools.createConfigBackup.execute({ serverId });
+        (msg.includes('um ') || msg.includes(' uhr') || msg.includes('täglich') || msg.includes('jeden tag') || msg.includes('schedule') || msg.includes('plan'))) {
+        // DON'T execute - let AI ask clarifying question
+        console.log(`[Copilot] Scheduled backup detected - need clarification`);
+        return null; // Let AI ask the user
     }
 
+    // Immediate backup
+    if ((msg.includes('backup') || msg.includes('sicher')) &&
+        (msg.includes('erstell') || msg.includes('mach') || msg.includes('jetzt'))) {
+        console.log(`[Copilot] Creating backup now`);
+        const result = await tools.createConfigBackup.execute({ serverId });
+        return { toolName: 'createConfigBackup', result };
+    }
+
+    // List backups
     if (msg.includes('backup') && (msg.includes('zeig') || msg.includes('list') || msg.includes('letzte'))) {
         console.log(`[Copilot] Listing backups`);
-        return await tools.getBackups.execute({ limit: 10 });
+        const result = await tools.getBackups.execute({ limit: 10 });
+        return { toolName: 'getBackups', result };
     }
 
     // ========================================================================
-    // SCANS
+    // JOBS
     // ========================================================================
 
-    if ((msg.includes('scan') || msg.includes('prüf')) && msg.includes('infrastruktur')) {
-        console.log(`[Copilot] Scanning entire infrastructure`);
-        return await tools.runFullInfrastructureScan.execute();
-    }
-
-    if ((msg.includes('scan') || msg.includes('prüf') || msg.includes('health')) && serverId) {
-        console.log(`[Copilot] Health scan for server ${serverId}`);
-        return await tools.runHealthScan.execute({ serverId });
-    }
-
-    // ========================================================================
-    // NETWORK ANALYSIS
-    // ========================================================================
-
-    if ((msg.includes('netzwerk') || msg.includes('network')) && msg.includes('analy') && serverId) {
-        console.log(`[Copilot] Network analysis for server ${serverId}`);
-        return await tools.runNetworkAnalysis.execute({ serverId });
-    }
-
-    if ((msg.includes('netzwerk') || msg.includes('network')) && serverId) {
-        console.log(`[Copilot] Getting network analysis for server ${serverId}`);
-        return await tools.getNetworkAnalysis.execute({ serverId });
+    if (msg.includes('job') || msg.includes('aufgabe') || msg.includes('geplant')) {
+        console.log(`[Copilot] Listing jobs`);
+        const result = await tools.getScheduledJobs.execute();
+        return { toolName: 'getScheduledJobs', result };
     }
 
     // ========================================================================
     // SERVER INFO
     // ========================================================================
 
-    if ((msg.includes('detail') || msg.includes('info')) && serverId) {
-        console.log(`[Copilot] Server details for ${serverId}`);
-        return await tools.getServerDetails.execute({ serverId });
-    }
-
-    if ((msg.includes('gesundheit') || msg.includes('health') || msg.includes('status')) && serverId) {
-        console.log(`[Copilot] Server health for ${serverId}`);
-        return await tools.getServerHealth.execute({ serverId });
-    }
-
     if (msg.includes('server') && (msg.includes('zeig') || msg.includes('list') || msg.includes('alle') || msg.includes('welche'))) {
         console.log(`[Copilot] Listing servers`);
-        return await tools.getServers.execute();
+        const result = await tools.getServers.execute();
+        return { toolName: 'getServers', result };
+    }
+
+    if ((msg.includes('detail') || msg.includes('info')) && serverId) {
+        console.log(`[Copilot] Server details`);
+        const result = await tools.getServerDetails.execute({ serverId });
+        return { toolName: 'getServerDetails', result };
+    }
+
+    // ========================================================================
+    // SCANS
+    // ========================================================================
+
+    if ((msg.includes('scan') || msg.includes('prüf') || msg.includes('health')) && serverId) {
+        console.log(`[Copilot] Health scan`);
+        const result = await tools.runHealthScan.execute({ serverId });
+        return { toolName: 'runHealthScan', result };
     }
 
     // ========================================================================
     // LINUX HOSTS
     // ========================================================================
 
-    if ((msg.includes('linux') && msg.includes('host')) || msg.includes('hosts')) {
-        if (hostId && (msg.includes('stat') || msg.includes('info'))) {
-            console.log(`[Copilot] Linux host stats for ${hostId}`);
-            return await tools.getLinuxHostStats.execute({ hostId });
-        }
-        console.log(`[Copilot] Listing Linux hosts`);
-        return await tools.getLinuxHosts.execute();
+    if (msg.includes('linux') && msg.includes('host')) {
+        console.log(`[Copilot] Linux hosts`);
+        const result = await tools.getLinuxHosts.execute();
+        return { toolName: 'getLinuxHosts', result };
     }
 
     // ========================================================================
@@ -281,58 +359,21 @@ async function executeToolsForMessage(userMessage: string): Promise<any | null> 
     // ========================================================================
 
     if (msg.includes('profil') && (msg.includes('zeig') || msg.includes('list'))) {
-        console.log(`[Copilot] Listing provisioning profiles`);
-        return await tools.getProvisioningProfiles.execute();
-    }
-
-    if ((msg.includes('wende') || msg.includes('apply')) && msg.includes('profil') && serverId && profileId) {
-        const serverType = msg.includes('linux') ? 'linux' : 'pve';
-        console.log(`[Copilot] Applying profile ${profileId} to server ${serverId}`);
-        return await tools.applyProvisioningProfile.execute({ serverId, profileId, serverType });
+        console.log(`[Copilot] Provisioning profiles`);
+        const result = await tools.getProvisioningProfiles.execute();
+        return { toolName: 'getProvisioningProfiles', result };
     }
 
     // ========================================================================
     // TAGS
     // ========================================================================
 
-    if (msg.includes('tag')) {
-        if (msg.includes('sync') || msg.includes('synchron')) {
-            console.log(`[Copilot] Syncing cluster tags`);
-            return await tools.syncClusterTags.execute();
-        }
-        console.log(`[Copilot] Listing tags`);
-        return await tools.getTags.execute();
+    if (msg.includes('tag') && (msg.includes('zeig') || msg.includes('list'))) {
+        console.log(`[Copilot] Tags`);
+        const result = await tools.getTags.execute();
+        return { toolName: 'getTags', result };
     }
 
-    // ========================================================================
-    // JOBS
-    // ========================================================================
-
-    if (msg.includes('job') || msg.includes('aufgabe') || msg.includes('scheduler')) {
-        if (msg.includes('historie') || msg.includes('verlauf') || msg.includes('letzte')) {
-            console.log(`[Copilot] Job history`);
-            return await tools.getJobHistory.execute({ limit: 10 });
-        }
-        console.log(`[Copilot] Listing jobs`);
-        return await tools.getScheduledJobs.execute();
-    }
-
-    // ========================================================================
-    // SSH COMMANDS
-    // ========================================================================
-
-    if ((msg.includes('führe') || msg.includes('ausführ') || msg.includes('exec') || msg.includes('ssh')) && serverId) {
-        // Extract command from quotes or after "aus:"
-        const cmdMatch = userMessage.match(/['"]([^'"]+)['"]/);
-        const cmdMatch2 = userMessage.match(/aus[:\s]+(.+)/i);
-        const command = cmdMatch?.[1] || cmdMatch2?.[1]?.trim();
-
-        if (command) {
-            console.log(`[Copilot] SSH command on server ${serverId}: ${command}`);
-            return await tools.executeSSHCommand.execute({ serverId, command });
-        }
-    }
-
-    // No tool matched
+    // No tool matched - let AI handle it naturally (may ask clarifying questions)
     return null;
 }

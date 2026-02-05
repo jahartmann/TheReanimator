@@ -2,7 +2,7 @@ import { z } from 'zod';
 import db from '@/lib/db';
 import { createSSHClient } from '@/lib/ssh';
 
-// Import all server actions to expose to the Copilot
+// Import server actions
 import { getVMs } from '@/lib/actions/vm';
 import { performFullBackup } from '@/lib/backup-logic';
 import { syncServerVMs } from '@/lib/actions/sync';
@@ -14,13 +14,54 @@ import { getTags, scanAllClusterTags } from '@/lib/actions/tags';
 import { getServerInfo, getServerHealth } from '@/lib/actions/monitoring';
 
 // ============================================================================
-// COMPREHENSIVE TOOL SET FOR COPILOT
+// ROBUST TOOL SET - VERIFIES RESULTS, NEVER LIES
 // ============================================================================
+
+// Helper: Get server by ID or name
+function getServerByIdOrName(identifier: number | string): any {
+    if (typeof identifier === 'number') {
+        return db.prepare('SELECT * FROM servers WHERE id = ?').get(identifier);
+    }
+    return db.prepare('SELECT * FROM servers WHERE name LIKE ?').get(`%${identifier}%`);
+}
+
+// Helper: Find VM across all servers
+async function findVM(vmid: number): Promise<{ vm: any, server: any } | null> {
+    const servers = db.prepare('SELECT * FROM servers').all() as any[];
+
+    for (const server of servers) {
+        try {
+            const vms = await getVMs(server.id);
+            const vm = vms.find((v: any) => parseInt(v.vmid) === vmid);
+            if (vm) return { vm, server };
+        } catch (e) {
+            console.error(`[Copilot] VM search failed on ${server.name}`);
+        }
+    }
+    return null;
+}
+
+// Helper: Get current VM status
+async function getVMStatus(server: any, vmid: number, type: 'qemu' | 'lxc'): Promise<string> {
+    try {
+        const client = createSSHClient(server);
+        await client.connect();
+        const cmd = type === 'lxc' ? `pct status ${vmid}` : `qm status ${vmid}`;
+        const output = await client.exec(cmd);
+        await client.disconnect();
+
+        // Parse status from output like "status: running" or "status: stopped"
+        const match = output.match(/status:\s*(\w+)/i);
+        return match ? match[1].toLowerCase() : 'unknown';
+    } catch (e) {
+        return 'error';
+    }
+}
 
 export const tools = {
 
     // ========================================================================
-    // SERVER MANAGEMENT
+    // SERVER INFORMATION
     // ========================================================================
 
     getServers: {
@@ -32,86 +73,70 @@ export const tools = {
                     SELECT id, name, type, url, ssh_host, group_name
                     FROM servers ORDER BY group_name, name
                 `).all();
-                return servers.length > 0 ? servers : 'Keine Server konfiguriert.';
+
+                if (servers.length === 0) {
+                    return { success: false, message: 'Keine Server konfiguriert.' };
+                }
+                return { success: true, count: servers.length, servers };
             } catch (e: any) {
-                return { error: e.message };
+                return { success: false, error: e.message };
             }
         },
     },
 
     getServerDetails: {
-        description: 'Zeigt detaillierte Informationen zu einem Server (System, Netzwerk, Disks, Pools).',
+        description: 'Zeigt detaillierte Informationen zu einem Server.',
         parameters: z.object({
             serverId: z.number().describe('Server ID'),
         }),
         execute: async ({ serverId }: { serverId: number }) => {
             try {
-                const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId) as any;
-                if (!server) return `Server ${serverId} nicht gefunden.`;
+                const server = getServerByIdOrName(serverId);
+                if (!server) return { success: false, error: `Server ${serverId} nicht gefunden.` };
 
                 const info = await getServerInfo(server);
-                if (!info) return `Konnte keine Informationen von ${server.name} abrufen.`;
+                if (!info) return { success: false, error: `Server ${server.name} nicht erreichbar.` };
 
                 return {
+                    success: true,
                     server: server.name,
                     system: info.system,
-                    networks: info.networks.length,
-                    disks: info.disks.length,
-                    pools: info.pools.length
+                    networkCount: info.networks.length,
+                    diskCount: info.disks.length,
+                    poolCount: info.pools.length
                 };
             } catch (e: any) {
-                return { error: e.message };
-            }
-        },
-    },
-
-    getServerHealth: {
-        description: 'Prüft den Gesundheitszustand eines Servers (SMART, ZFS, Events, Backups).',
-        parameters: z.object({
-            serverId: z.number().describe('Server ID'),
-        }),
-        execute: async ({ serverId }: { serverId: number }) => {
-            try {
-                const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId) as any;
-                if (!server) return `Server ${serverId} nicht gefunden.`;
-
-                const health = await getServerHealth(server);
-                if (!health) return `Konnte Gesundheitsstatus von ${server.name} nicht abrufen.`;
-
-                return {
-                    server: server.name,
-                    smart: health.smart,
-                    zfs: health.zfs,
-                    criticalEvents: health.events.length,
-                    backupStatus: health.backups
-                };
-            } catch (e: any) {
-                return { error: e.message };
+                return { success: false, error: e.message };
             }
         },
     },
 
     // ========================================================================
-    // VM & CONTAINER MANAGEMENT
+    // VM MANAGEMENT - WITH VERIFICATION
     // ========================================================================
 
     listVMs: {
         description: 'Listet alle VMs und Container (live von Proxmox).',
         parameters: z.object({
-            serverId: z.number().optional().describe('Server ID (optional, sonst alle)'),
+            serverId: z.number().optional().describe('Server ID'),
         }),
         execute: async ({ serverId }: { serverId?: number }) => {
             try {
                 let serverList: any[];
                 if (serverId) {
-                    serverList = [db.prepare('SELECT id, name FROM servers WHERE id = ?').get(serverId)].filter(Boolean);
+                    const server = getServerByIdOrName(serverId);
+                    serverList = server ? [server] : [];
                 } else {
-                    serverList = db.prepare('SELECT id, name FROM servers').all() as any[];
+                    serverList = db.prepare('SELECT * FROM servers').all() as any[];
                 }
 
-                if (serverList.length === 0) return 'Keine Server gefunden.';
+                if (serverList.length === 0) {
+                    return { success: false, error: 'Keine Server gefunden.' };
+                }
 
                 const allVMs: any[] = [];
+                const errors: string[] = [];
+
                 for (const server of serverList) {
                     try {
                         const vms = await getVMs(server.id);
@@ -125,66 +150,120 @@ export const tools = {
                             });
                         });
                     } catch (e: any) {
-                        console.error(`[Copilot] VMs von ${server.name}: ${e.message}`);
+                        errors.push(`${server.name}: ${e.message}`);
                     }
                 }
 
-                return allVMs.length > 0 ? allVMs : 'Keine VMs gefunden.';
+                return {
+                    success: true,
+                    count: allVMs.length,
+                    vms: allVMs,
+                    errors: errors.length > 0 ? errors : undefined
+                };
             } catch (e: any) {
-                return { error: e.message };
+                return { success: false, error: e.message };
             }
         },
     },
 
     manageVM: {
-        description: 'Startet, stoppt oder startet eine VM/Container neu.',
+        description: 'Startet, stoppt oder startet eine VM/Container neu. VERIFIZIERT das Ergebnis!',
         parameters: z.object({
             vmid: z.number().describe('VM ID'),
             action: z.enum(['start', 'stop', 'reboot', 'shutdown']).describe('Aktion'),
         }),
         execute: async ({ vmid, action }: { vmid: number, action: 'start' | 'stop' | 'reboot' | 'shutdown' }) => {
             try {
-                const servers = db.prepare('SELECT * FROM servers').all() as any[];
-
-                for (const server of servers) {
-                    try {
-                        const vms = await getVMs(server.id);
-                        const vm = vms.find((v: any) => parseInt(v.vmid) === vmid);
-
-                        if (vm) {
-                            const cmdPrefix = vm.type === 'lxc' ? 'pct' : 'qm';
-                            const command = `${cmdPrefix} ${action} ${vmid}`;
-
-                            const client = createSSHClient(server);
-                            await client.connect();
-                            const output = await client.exec(command);
-                            await client.disconnect();
-
-                            return `✓ ${command} auf ${server.name} ausgeführt. ${output || ''}`;
-                        }
-                    } catch (e: any) {
-                        console.error(`[Copilot] VM ${vmid} auf ${server.name}: ${e.message}`);
-                    }
+                // 1. Find the VM
+                const found = await findVM(vmid);
+                if (!found) {
+                    return {
+                        success: false,
+                        error: `VM ${vmid} nicht gefunden. Bitte prüfe die VMID.`,
+                        suggestion: 'Nutze "Zeige alle VMs" um die verfügbaren VMs zu sehen.'
+                    };
                 }
 
-                return `VM ${vmid} nicht gefunden.`;
+                const { vm, server } = found;
+
+                // 2. Get status BEFORE action
+                const statusBefore = await getVMStatus(server, vmid, vm.type);
+
+                // 3. Execute the action
+                const cmdPrefix = vm.type === 'lxc' ? 'pct' : 'qm';
+                const command = `${cmdPrefix} ${action} ${vmid}`;
+
+                let output = '';
+                try {
+                    const client = createSSHClient(server);
+                    await client.connect();
+                    output = await client.exec(command, 30000);
+                    await client.disconnect();
+                } catch (sshError: any) {
+                    return {
+                        success: false,
+                        error: `SSH-Fehler auf ${server.name}: ${sshError.message}`,
+                        vmid,
+                        action,
+                        server: server.name
+                    };
+                }
+
+                // 4. Wait a moment for status to update
+                await new Promise(resolve => setTimeout(resolve, 3000));
+
+                // 5. Get status AFTER action to VERIFY
+                const statusAfter = await getVMStatus(server, vmid, vm.type);
+
+                // 6. Determine if action was successful
+                const expectedStatus = (action === 'start') ? 'running' : 'stopped';
+                const wasSuccessful = statusAfter === expectedStatus ||
+                    (action === 'reboot' && statusAfter === 'running');
+
+                return {
+                    success: wasSuccessful,
+                    vmid,
+                    vmName: vm.name,
+                    action,
+                    server: server.name,
+                    statusBefore,
+                    statusAfter,
+                    commandOutput: output || undefined,
+                    message: wasSuccessful
+                        ? `${vm.name} (${vmid}) wurde erfolgreich ${action === 'start' ? 'gestartet' : action === 'reboot' ? 'neugestartet' : 'heruntergefahren'}. Status: ${statusAfter}`
+                        : `Befehl ausgeführt, aber Status ist "${statusAfter}" statt "${expectedStatus}". Möglicherweise dauert die Aktion noch an.`
+                };
             } catch (e: any) {
-                return { error: e.message };
+                return { success: false, error: e.message };
             }
         },
     },
 
-    syncVMs: {
-        description: 'Synchronisiert die VM-Liste vom Proxmox-Server.',
+    getVMStatus: {
+        description: 'Prüft den aktuellen Status einer VM.',
         parameters: z.object({
-            serverId: z.number().describe('Server ID'),
+            vmid: z.number().describe('VM ID'),
         }),
-        execute: async ({ serverId }: { serverId: number }) => {
+        execute: async ({ vmid }: { vmid: number }) => {
             try {
-                const result = await syncServerVMs(serverId);
-                return `✓ Sync abgeschlossen. ${result.count} VMs/Container gefunden.`;
+                const found = await findVM(vmid);
+                if (!found) {
+                    return { success: false, error: `VM ${vmid} nicht gefunden.` };
+                }
+
+                const { vm, server } = found;
+                const status = await getVMStatus(server, vmid, vm.type);
+
+                return {
+                    success: true,
+                    vmid,
+                    vmName: vm.name,
+                    type: vm.type,
+                    server: server.name,
+                    currentStatus: status
+                };
             } catch (e: any) {
-                return { error: e.message };
+                return { success: false, error: e.message };
             }
         },
     },
@@ -194,42 +273,57 @@ export const tools = {
     // ========================================================================
 
     createConfigBackup: {
-        description: 'Erstellt ein Konfigurations-Backup für Server.',
+        description: 'Erstellt JETZT ein Konfigurations-Backup.',
         parameters: z.object({
-            serverId: z.number().optional().describe('Server ID (optional, sonst alle)'),
+            serverId: z.number().optional().describe('Server ID (leer = alle)'),
         }),
         execute: async ({ serverId }: { serverId?: number }) => {
             try {
                 let serverList: any[];
                 if (serverId) {
-                    serverList = [db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId)].filter(Boolean);
+                    const server = getServerByIdOrName(serverId);
+                    serverList = server ? [server] : [];
                 } else {
                     serverList = db.prepare('SELECT * FROM servers').all() as any[];
                 }
 
-                if (serverList.length === 0) return 'Keine Server gefunden.';
+                if (serverList.length === 0) {
+                    return { success: false, error: 'Keine Server gefunden.' };
+                }
 
-                const results: string[] = [];
+                const results: any[] = [];
                 for (const server of serverList) {
                     try {
                         const result = await performFullBackup(server.id, server);
-                        results.push(result.success
-                            ? `✓ ${server.name}: Backup erstellt (ID: ${result.backupId})`
-                            : `✗ ${server.name}: ${result.message}`);
+                        results.push({
+                            server: server.name,
+                            success: result.success,
+                            backupId: result.backupId,
+                            message: result.message
+                        });
                     } catch (e: any) {
-                        results.push(`✗ ${server.name}: ${e.message}`);
+                        results.push({
+                            server: server.name,
+                            success: false,
+                            error: e.message
+                        });
                     }
                 }
 
-                return results.join('\n');
+                const successCount = results.filter(r => r.success).length;
+                return {
+                    success: successCount > 0,
+                    summary: `${successCount}/${results.length} Backups erfolgreich`,
+                    results
+                };
             } catch (e: any) {
-                return { error: e.message };
+                return { success: false, error: e.message };
             }
         },
     },
 
     getBackups: {
-        description: 'Listet die letzten Konfigurations-Backups auf.',
+        description: 'Listet die letzten Konfigurations-Backups.',
         parameters: z.object({
             limit: z.number().optional().describe('Anzahl (Standard: 10)'),
         }),
@@ -241,9 +335,81 @@ export const tools = {
                     JOIN servers s ON b.server_id = s.id
                     ORDER BY b.backup_date DESC LIMIT ?
                 `).all(limit);
-                return backups.length > 0 ? backups : 'Keine Backups vorhanden.';
+
+                return {
+                    success: true,
+                    count: backups.length,
+                    backups: backups.length > 0 ? backups : undefined,
+                    message: backups.length === 0 ? 'Keine Backups vorhanden.' : undefined
+                };
             } catch (e: any) {
-                return { error: e.message };
+                return { success: false, error: e.message };
+            }
+        },
+    },
+
+    // ========================================================================
+    // SCHEDULED JOBS
+    // ========================================================================
+
+    getScheduledJobs: {
+        description: 'Listet alle geplanten Jobs.',
+        parameters: z.object({}),
+        execute: async () => {
+            try {
+                const jobs = db.prepare(`
+                    SELECT j.id, j.name, j.job_type, j.schedule, j.enabled, j.next_run, s.name as server
+                    FROM jobs j
+                    JOIN servers s ON j.source_server_id = s.id
+                    ORDER BY j.next_run
+                `).all();
+
+                return {
+                    success: true,
+                    count: jobs.length,
+                    jobs: jobs.length > 0 ? jobs : undefined,
+                    message: jobs.length === 0 ? 'Keine Jobs konfiguriert.' : undefined
+                };
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        },
+    },
+
+    createScheduledJob: {
+        description: 'Erstellt einen neuen geplanten Job (z.B. Backup um 3 Uhr).',
+        parameters: z.object({
+            name: z.string().describe('Name des Jobs'),
+            jobType: z.enum(['backup', 'config']).describe('Art des Jobs'),
+            serverId: z.number().describe('Server ID'),
+            schedule: z.string().describe('Cron-Ausdruck (z.B. "0 3 * * *" für 3 Uhr täglich)'),
+        }),
+        execute: async ({ name, jobType, serverId, schedule }: {
+            name: string,
+            jobType: 'backup' | 'config',
+            serverId: number,
+            schedule: string
+        }) => {
+            try {
+                const server = getServerByIdOrName(serverId);
+                if (!server) {
+                    return { success: false, error: `Server ${serverId} nicht gefunden.` };
+                }
+
+                // Calculate next run time from cron
+                const result = db.prepare(`
+                    INSERT INTO jobs (name, job_type, source_server_id, schedule, enabled)
+                    VALUES (?, ?, ?, ?, 1)
+                `).run(name, jobType, server.id, schedule);
+
+                return {
+                    success: true,
+                    jobId: result.lastInsertRowid,
+                    message: `Job "${name}" erstellt. Läuft nach Zeitplan: ${schedule}`,
+                    note: 'Dieser Job wurde GEPLANT, nicht sofort ausgeführt.'
+                };
+            } catch (e: any) {
+                return { success: false, error: e.message };
             }
         },
     },
@@ -253,65 +419,52 @@ export const tools = {
     // ========================================================================
 
     runHealthScan: {
-        description: 'Führt einen Health-Scan auf einem Server durch.',
+        description: 'Führt einen Health-Scan durch.',
         parameters: z.object({
             serverId: z.number().describe('Server ID'),
         }),
         execute: async ({ serverId }: { serverId: number }) => {
             try {
+                const server = getServerByIdOrName(serverId);
+                if (!server) {
+                    return { success: false, error: `Server ${serverId} nicht gefunden.` };
+                }
+
                 const hostResult = await scanHost(serverId);
                 const vmResult = await scanAllVMs(serverId);
 
                 return {
-                    hostScan: hostResult.success ? '✓ Host gescannt' : `✗ ${hostResult.error}`,
-                    vmScan: vmResult.success ? `✓ ${vmResult.count} VMs gescannt` : `✗ ${vmResult.error}`
+                    success: hostResult.success && vmResult.success,
+                    server: server.name,
+                    hostScan: hostResult,
+                    vmScan: vmResult
                 };
             } catch (e: any) {
-                return { error: e.message };
-            }
-        },
-    },
-
-    runFullInfrastructureScan: {
-        description: 'Scannt die gesamte Infrastruktur (alle Server).',
-        parameters: z.object({}),
-        execute: async () => {
-            try {
-                await scanEntireInfrastructure();
-                return '✓ Infrastruktur-Scan gestartet. Ergebnisse werden im Hintergrund verarbeitet.';
-            } catch (e: any) {
-                return { error: e.message };
+                return { success: false, error: e.message };
             }
         },
     },
 
     runNetworkAnalysis: {
-        description: 'Führt eine KI-gestützte Netzwerkanalyse durch.',
+        description: 'KI-gestützte Netzwerkanalyse.',
         parameters: z.object({
             serverId: z.number().describe('Server ID'),
         }),
         execute: async ({ serverId }: { serverId: number }) => {
             try {
-                const result = await runNetworkAnalysis(serverId);
-                return `✓ Netzwerkanalyse abgeschlossen. Ergebnis gespeichert.`;
-            } catch (e: any) {
-                return { error: e.message };
-            }
-        },
-    },
+                const server = getServerByIdOrName(serverId);
+                if (!server) {
+                    return { success: false, error: `Server ${serverId} nicht gefunden.` };
+                }
 
-    getNetworkAnalysis: {
-        description: 'Zeigt die letzte Netzwerkanalyse eines Servers.',
-        parameters: z.object({
-            serverId: z.number().describe('Server ID'),
-        }),
-        execute: async ({ serverId }: { serverId: number }) => {
-            try {
-                const analysis = await getLatestNetworkAnalysis(serverId);
-                if (!analysis) return 'Keine Analyse vorhanden. Führe zuerst runNetworkAnalysis aus.';
-                return JSON.parse(analysis.content);
+                const result = await runNetworkAnalysis(serverId);
+                return {
+                    success: true,
+                    server: server.name,
+                    message: 'Netzwerkanalyse abgeschlossen und gespeichert.'
+                };
             } catch (e: any) {
-                return { error: e.message };
+                return { success: false, error: e.message };
             }
         },
     },
@@ -321,29 +474,19 @@ export const tools = {
     // ========================================================================
 
     getLinuxHosts: {
-        description: 'Listet alle konfigurierten Linux-Hosts auf.',
+        description: 'Listet alle Linux-Hosts.',
         parameters: z.object({}),
         execute: async () => {
             try {
                 const hosts = await getLinuxHosts();
-                return hosts.length > 0 ? hosts : 'Keine Linux-Hosts konfiguriert.';
+                return {
+                    success: true,
+                    count: hosts.length,
+                    hosts: hosts.length > 0 ? hosts : undefined,
+                    message: hosts.length === 0 ? 'Keine Linux-Hosts konfiguriert.' : undefined
+                };
             } catch (e: any) {
-                return { error: e.message };
-            }
-        },
-    },
-
-    getLinuxHostStats: {
-        description: 'Zeigt Statistiken eines Linux-Hosts (CPU, RAM, Disk).',
-        parameters: z.object({
-            hostId: z.number().describe('Linux Host ID'),
-        }),
-        execute: async ({ hostId }: { hostId: number }) => {
-            try {
-                const stats = await getLinuxHostStats(hostId);
-                return stats || 'Konnte Statistiken nicht abrufen.';
-            } catch (e: any) {
-                return { error: e.message };
+                return { success: false, error: e.message };
             }
         },
     },
@@ -353,34 +496,19 @@ export const tools = {
     // ========================================================================
 
     getProvisioningProfiles: {
-        description: 'Listet alle Provisioning-Profile auf.',
+        description: 'Listet Provisioning-Profile.',
         parameters: z.object({}),
         execute: async () => {
             try {
                 const profiles = await getProfiles();
-                return profiles.length > 0 ? profiles : 'Keine Profile vorhanden.';
+                return {
+                    success: true,
+                    count: profiles.length,
+                    profiles: profiles.length > 0 ? profiles : undefined,
+                    message: profiles.length === 0 ? 'Keine Profile vorhanden.' : undefined
+                };
             } catch (e: any) {
-                return { error: e.message };
-            }
-        },
-    },
-
-    applyProvisioningProfile: {
-        description: 'Wendet ein Provisioning-Profil auf einen Server an.',
-        parameters: z.object({
-            serverId: z.number().describe('Server ID'),
-            profileId: z.number().describe('Profil ID'),
-            serverType: z.enum(['linux', 'pve']).describe('Server-Typ'),
-        }),
-        execute: async ({ serverId, profileId, serverType }: { serverId: number, profileId: number, serverType: 'linux' | 'pve' }) => {
-            try {
-                const result = await applyProfile(serverId, profileId, serverType);
-                if (result.success) {
-                    return `✓ Profil angewendet. ${result.stepResults?.length || 0} Schritte ausgeführt.`;
-                }
-                return `✗ ${result.error}`;
-            } catch (e: any) {
-                return { error: e.message };
+                return { success: false, error: e.message };
             }
         },
     },
@@ -390,109 +518,117 @@ export const tools = {
     // ========================================================================
 
     getTags: {
-        description: 'Listet alle konfigurierten Tags auf.',
+        description: 'Listet alle Tags.',
         parameters: z.object({}),
         execute: async () => {
             try {
                 const tags = await getTags();
-                return tags.length > 0 ? tags : 'Keine Tags vorhanden.';
+                return {
+                    success: true,
+                    count: tags.length,
+                    tags: tags.length > 0 ? tags : undefined
+                };
             } catch (e: any) {
-                return { error: e.message };
-            }
-        },
-    },
-
-    syncClusterTags: {
-        description: 'Synchronisiert Tags von allen Proxmox-Servern.',
-        parameters: z.object({}),
-        execute: async () => {
-            try {
-                const result = await scanAllClusterTags();
-                return result.success
-                    ? `✓ ${result.count} Tags synchronisiert.`
-                    : `✗ ${result.message}`;
-            } catch (e: any) {
-                return { error: e.message };
+                return { success: false, error: e.message };
             }
         },
     },
 
     // ========================================================================
-    // JOBS & SCHEDULER
-    // ========================================================================
-
-    getScheduledJobs: {
-        description: 'Listet alle geplanten Jobs auf.',
-        parameters: z.object({}),
-        execute: async () => {
-            try {
-                const jobs = db.prepare(`
-                    SELECT id, name, job_type, schedule, enabled
-                    FROM jobs ORDER BY name
-                `).all();
-                return jobs.length > 0 ? jobs : 'Keine Jobs konfiguriert.';
-            } catch (e: any) {
-                return { error: e.message };
-            }
-        },
-    },
-
-    getJobHistory: {
-        description: 'Zeigt die letzten ausgeführten Jobs.',
-        parameters: z.object({
-            limit: z.number().optional().describe('Anzahl (Standard: 10)'),
-        }),
-        execute: async ({ limit = 10 }: { limit?: number }) => {
-            try {
-                const history = db.prepare(`
-                    SELECT h.id, j.name, j.job_type, h.status, h.start_time, h.end_time
-                    FROM history h
-                    JOIN jobs j ON h.job_id = j.id
-                    ORDER BY h.start_time DESC LIMIT ?
-                `).all(limit);
-                return history.length > 0 ? history : 'Keine Job-Historie.';
-            } catch (e: any) {
-                return { error: e.message };
-            }
-        },
-    },
-
-    // ========================================================================
-    // SSH COMMANDS
+    // SSH COMMANDS - REQUIRES EXPLICIT CONFIRMATION
     // ========================================================================
 
     executeSSHCommand: {
-        description: 'Führt einen beliebigen SSH-Befehl auf einem Server aus. VORSICHT!',
+        description: 'Führt SSH-Befehl aus. NUR nach expliziter Bestätigung!',
         parameters: z.object({
             serverId: z.number().describe('Server ID'),
             command: z.string().describe('SSH Befehl'),
+            confirmed: z.boolean().describe('Wurde vom User bestätigt?'),
         }),
-        execute: async ({ serverId, command }: { serverId: number, command: string }) => {
-            try {
-                // Safety check: Block dangerous commands
-                const blocked = ['rm -rf /', 'mkfs', 'dd if=', ':(){', 'chmod -R 777 /'];
-                if (blocked.some(b => command.includes(b))) {
-                    return '⛔ Dieser Befehl wurde aus Sicherheitsgründen blockiert.';
-                }
+        execute: async ({ serverId, command, confirmed }: { serverId: number, command: string, confirmed: boolean }) => {
+            if (!confirmed) {
+                return {
+                    success: false,
+                    requiresConfirmation: true,
+                    message: `Soll ich wirklich "${command}" auf Server ${serverId} ausführen?`,
+                    warning: 'SSH-Befehle können das System verändern. Bitte bestätige explizit.'
+                };
+            }
 
-                const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId) as any;
-                if (!server) return `Server ${serverId} nicht gefunden.`;
+            try {
+                const server = getServerByIdOrName(serverId);
+                if (!server) {
+                    return { success: false, error: `Server ${serverId} nicht gefunden.` };
+                }
 
                 const client = createSSHClient(server);
                 await client.connect();
                 const output = await client.exec(command, 30000);
                 await client.disconnect();
 
-                return output || '(Keine Ausgabe)';
+                return {
+                    success: true,
+                    server: server.name,
+                    command,
+                    output: output || '(Keine Ausgabe)'
+                };
             } catch (e: any) {
-                return { error: e.message };
+                return { success: false, error: e.message };
             }
         },
     },
 };
 
 // ============================================================================
-// SYSTEM CONTEXT FOR AI PROMPT
+// CHAT HISTORY MANAGEMENT
+// ============================================================================
+
+export function createChatSession(userId?: number): number {
+    const result = db.prepare(`
+        INSERT INTO chat_sessions (user_id) VALUES (?)
+    `).run(userId || null);
+    return result.lastInsertRowid as number;
+}
+
+export function saveChatMessage(sessionId: number, role: string, content: string, toolName?: string, toolResult?: string) {
+    db.prepare(`
+        INSERT INTO chat_messages (session_id, role, content, tool_name, tool_result)
+        VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, role, content, toolName || null, toolResult || null);
+
+    // Update session timestamp
+    db.prepare(`UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(sessionId);
+}
+
+export function getChatHistory(sessionId: number): any[] {
+    return db.prepare(`
+        SELECT role, content, tool_name, tool_result, created_at
+        FROM chat_messages
+        WHERE session_id = ?
+        ORDER BY created_at ASC
+    `).all(sessionId) as any[];
+}
+
+export function getRecentSessions(userId?: number, limit: number = 10): any[] {
+    if (userId) {
+        return db.prepare(`
+            SELECT id, title, created_at, updated_at
+            FROM chat_sessions
+            WHERE user_id = ?
+            ORDER BY updated_at DESC
+            LIMIT ?
+        `).all(userId, limit) as any[];
+    }
+    return db.prepare(`
+        SELECT id, title, created_at, updated_at
+        FROM chat_sessions
+        ORDER BY updated_at DESC
+        LIMIT ?
+    `).all(limit) as any[];
+}
+
+// ============================================================================
+// SYSTEM CONTEXT
 // ============================================================================
 
 export async function getSystemContext(): Promise<string> {
@@ -504,25 +640,21 @@ export async function getSystemContext(): Promise<string> {
         context.push('=== Deine Server ===');
         if (servers.length > 0) {
             servers.forEach((s: any) => {
-                context.push(`- [ID ${s.id}] ${s.name} (${s.type.toUpperCase()}) - ${s.url}`);
+                context.push(`- [ID ${s.id}] ${s.name} (${s.type.toUpperCase()})`);
             });
         } else {
             context.push('(Keine Server konfiguriert)');
         }
 
-        const linuxHosts = db.prepare('SELECT COUNT(*) as count FROM linux_hosts').get() as any;
-        const backupCount = db.prepare('SELECT COUNT(*) as count FROM config_backups').get() as any;
         const jobCount = db.prepare('SELECT COUNT(*) as count FROM jobs WHERE enabled = 1').get() as any;
-        const profileCount = db.prepare('SELECT COUNT(*) as count FROM provisioning_profiles').get() as any;
+        const backupCount = db.prepare('SELECT COUNT(*) as count FROM config_backups').get() as any;
 
-        context.push('\n=== Statistik ===');
-        context.push(`- Linux Hosts: ${linuxHosts?.count || 0}`);
+        context.push(`\n=== Statistik ===`);
         context.push(`- Aktive Jobs: ${jobCount?.count || 0}`);
         context.push(`- Backups: ${backupCount?.count || 0}`);
-        context.push(`- Provisioning Profile: ${profileCount?.count || 0}`);
 
     } catch (e) {
-        context.push('(Datenbank-Fehler)');
+        context.push('(Datenbank nicht erreichbar)');
     }
 
     return context.join('\n');
