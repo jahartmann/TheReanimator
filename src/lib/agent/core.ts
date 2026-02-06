@@ -1,217 +1,246 @@
 import { getAISettings } from '@/lib/actions/ai';
 import { tools, getSystemContext, createChatSession, saveChatMessage, getChatHistory } from './tools';
 
+export interface OllamaMessage {
+    role: 'system' | 'user' | 'assistant';
+    content: string;
+}
+
+export type StreamEvent =
+    | { type: 'text', content: string }
+    | { type: 'status', content: string }
+    | { type: 'tool_start', tool: string, args: any }
+    | { type: 'tool_end', tool: string, result: any }
+    | { type: 'error', content: string };
+
 // ============================================================================
-// SYSTEM PROMPT - MAKES AI HONEST AND ASK QUESTIONS
+// SYSTEM PROMPT
 // ============================================================================
 
 async function buildSystemPrompt(): Promise<string> {
     const context = await getSystemContext();
 
     return `
-Du bist der Reanimator Copilot, ein präziser und ehrlicher Assistent für Proxmox-Infrastruktur.
+Du bist der Reanimator Copilot, ein intelligenter Admin-Assistent für Proxmox.
 
 ${context}
 
-=== DEINE KERNREGELN ===
+=== REGELN ===
+1. SEI EHRLICH: Wenn ein Tool fehlschlägt, sag es. Erfinde keine Fakten.
+2. KONTEXT: Merke dir, über welchen Server/VM wir sprechen.
+3. AUTONOMIE: Wenn du Informationen (Disk, CPU, Logs) brauchst, hole sie dir selbst!
+   - Nutze den Befehl \`runAutonomousCommand\` für Diagnosen ('df -h', 'cat', etc.).
+   - Warte nicht auf den User, wenn du das Problem selbst untersuchen kannst.
+   - Frage bei *gefährlichen* Aktionen (reboot, stop) immer nach Erlaubnis.
 
-1. SEI EHRLICH - Lüge NIEMALS über Ergebnisse
-   - Wenn ein Tool "success: false" zurückgibt, sage dem User die Wahrheit
-   - Wenn du den Status nicht verifizieren konntest, sage es
-   - Behaupte NIEMALS, etwas sei passiert, wenn du es nicht bestätigt hast
+=== TOOLS (Self-Use) ===
+Du kannst Tools aufrufen, indem du dieses Format im Text nutzt:
+<<<TOOL:ToolName:{"arg1": "value"}>>>
 
-2. FRAGE NACH BEI UNKLARHEITEN
-   - "Erstelle Backup um 3 Uhr" → Frage: "Soll ich einen geplanten Job für 3:00 erstellen, oder sofort ein Backup machen?"
-   - "Starte die VM" → Frage: "Welche VM meinst du? Hier sind deine VMs: ..."
-   - Bei kritischen Aktionen (stop, shutdown) → Frage nach Bestätigung
+Verfügbare Tools:
+- manageVM(vmid, action: start/stop/shutdown/reboot)
+- runAutonomousCommand(serverId, command) -> Führe Safe-Commands (df, free, cat, ...) aus.
+- manageKnowledge(action: read/write/list, key?, content?) -> Speichere/Lese Langzeitwissen (.md Files).
+- getServers()
+- listVMs(serverId?)
+- getVMStatus(vmid)
+- createConfigBackup(serverId?)
+- getBackups()
+- getScheduledJobs()
+- createScheduledJob(...)
+- runHealthScan(serverId)
+- runNetworkAnalysis(serverId)
 
-3. VERIFIZIERE DEINE AKTIONEN
-   - Nach VM start/stop: Prüfe den echten Status
-   - Wenn der Status nicht dem erwarteten entspricht, sage es dem User
-   - Zeige immer: vorher → nachher
+=== BEISPIEL DIALOGIEREN ===
 
-4. UNTERSCHEIDE SOFORTIGE AKTIONEN VON GEPLANTEN AUFGABEN
-   - "Erstelle Backup" = SOFORT ausführen → createConfigBackup
-   - "Erstelle Backup-Job für 3 Uhr" = PLANEN → createScheduledJob
-   - Wenn unklar: FRAGE NACH!
+User: "Der Server PVE01 ist langsam."
+Du: "Ich prüfe die Auslastung auf PVE01." <<<TOOL:runAutonomousCommand:{"serverId":1, "command":"top -b -n 1"}>>>
+(System führt Tool aus, du bekommst das Ergebnis)
+Du: "Die CPU-Last ist hoch (90%)..."
 
-=== VERFÜGBARE TOOLS ===
+User: "Erstelle eine Notiz über das Netzwerkproblem."
+Du: "Gern." <<<TOOL:manageKnowledge:{"action":"write", "key":"network_issue", "content":"PVE01 hat Paketverlust."}>>>
 
-INFORMATIONEN:
-- getServers → Liste aller Server
-- listVMs → VMs/Container (live)
-- getVMStatus → Aktueller VM-Status
-- getBackups → Backup-Historie
-- getScheduledJobs → Geplante Jobs
-- getProvisioningProfiles → Profile
-- getTags → Tags
-- getLinuxHosts → Linux Hosts
-- getServerDetails → Server-Details
-- runNetworkAnalysis → Netzwerk analysieren
+User: "Fahr VM 100 runter."
+Du: <<<TOOL:manageVM:{"vmid":100, "action":"shutdown"}>>>
 
-AKTIONEN:
-- manageVM(vmid, action) → start/stop/shutdown/reboot - VERIFIZIERT Ergebnis
-- createConfigBackup(serverId?) → Backup JETZT erstellen
-- createScheduledJob(name, type, serverId, schedule) → Job PLANEN
-- runHealthScan(serverId) → Health-Scan
-- executeSSHCommand(serverId, command, confirmed) → SSH-Befehl (NUR nach Bestätigung)
-
-=== BEISPIEL-DIALOGE ===
-
-User: "Fahr VM 9901 runter"
-Du: [Führe manageVM(9901, "shutdown") aus]
-Tool gibt zurück: {success: true, statusBefore: "running", statusAfter: "stopped", vmName: "Wintest"}
-Du: "VM 9901 (Wintest) wurde erfolgreich heruntergefahren. Status: running → stopped."
-
-User: "Fahr VM 9901 runter"  
-Tool gibt zurück: {success: false, statusBefore: "running", statusAfter: "running"}
-Du: "Der Shutdown-Befehl wurde gesendet, aber die VM läuft noch (Status: running). Möglicherweise dauert der Shutdown länger oder es gibt ein Problem. Soll ich erneut prüfen?"
-
-User: "Mach ein Backup um 3 Uhr"
-Du: "Möchtest du:
-1. Einen geplanten Job erstellen, der jeden Tag um 3:00 Uhr läuft?
-2. Ein einmaliges Backup jetzt erstellen?
-Bitte klär mich auf."
-
-=== FORMATIERUNG ===
-- Antworte auf Deutsch, kurz und präzise
-- Keine Markdown-Formatierung (**fett**, etc.)
-- Zeige Status-Änderungen klar an: vorher → nachher
-- Bei Fehlern: Erkläre was passiert ist und was der User tun kann
 `.trim();
 }
 
-interface OllamaMessage {
-    role: 'system' | 'user' | 'assistant';
-    content: string;
+// ============================================================================
+// CONTEXT EXTRACTION
+// ============================================================================
+
+function extractContext(history: OllamaMessage[]): { serverId?: number, vmId?: number } {
+    let serverId: number | undefined;
+    let vmId: number | undefined;
+
+    // Scan backwards
+    for (let i = history.length - 1; i >= 0; i--) {
+        const msg = history[i].content.toLowerCase();
+
+        if (!serverId) {
+            const match = msg.match(/server\s*(\d+)/i) || msg.match(/server\s*.*?\(ID\s*(\d+)\)/i);
+            if (match) serverId = parseInt(match[1]);
+        }
+
+        if (!vmId) {
+            const match = msg.match(/vm\s*(\d+)/i) || msg.match(/container\s*(\d+)/i) || msg.match(/(\d{3,5})/);
+            if (match) vmId = parseInt(match[1]);
+        }
+
+        if (serverId && vmId) break;
+    }
+    return { serverId, vmId };
 }
 
 // ============================================================================
-// MAIN CHAT FUNCTION WITH HISTORY
+// STREAMING AGENT GENERATOR
 // ============================================================================
 
-export async function chatWithAgent(
+export async function* chatWithAgentGenerator(
     message: string,
     history: OllamaMessage[] = [],
     sessionId?: number
-): Promise<{ response: string, sessionId: number }> {
+): AsyncGenerator<StreamEvent> {
     const settings = await getAISettings();
     if (!settings.enabled || !settings.model) {
         throw new Error('AI ist deaktiviert oder kein Modell ausgewählt');
     }
 
-    // Create or use existing session
     const currentSessionId = sessionId || createChatSession();
-
-    // Save user message
     saveChatMessage(currentSessionId, 'user', message);
 
+    // 1. Context & Pre-Check
+    yield { type: 'status', content: 'Analysiere Kontext...' };
+    const context = extractContext([...history, { role: 'user', content: message }]);
+
+    // Legacy Regex Check (Fast Path)
+    const regexTool = await executeToolsForMessage(message, context);
+    let initialToolData = null;
+
+    if (regexTool) {
+        yield { type: 'status', content: `Führe erkanntes Tool aus: ${regexTool.toolName}` };
+        yield { type: 'tool_start', tool: regexTool.toolName, args: {} };
+        yield { type: 'tool_end', tool: regexTool.toolName, result: regexTool.result };
+        saveChatMessage(currentSessionId, 'tool', JSON.stringify(regexTool.result), regexTool.toolName);
+        initialToolData = regexTool;
+    }
+
+    // 2. Prepare Loop
     const systemPrompt = await buildSystemPrompt();
-    const messages: OllamaMessage[] = [
+    let messages: OllamaMessage[] = [
         { role: 'system', content: systemPrompt },
         ...history,
         { role: 'user', content: message }
     ];
 
-    // Execute tools based on user message
-    const toolResult = await executeToolsForMessage(message);
-    if (toolResult) {
-        // Save tool result
-        saveChatMessage(currentSessionId, 'tool', JSON.stringify(toolResult.result), toolResult.toolName);
-
+    if (initialToolData) {
         messages.push({
             role: 'user',
-            content: `[TOOL-ERGEBNIS von ${toolResult.toolName}]\n${JSON.stringify(toolResult.result, null, 2)}\n\nInterpretiere dieses Ergebnis ehrlich für den User. Wenn success=false, erkläre das Problem. Wenn success=true, bestätige was passiert ist.`
+            content: `[SYSTEM TOOL RESULT: ${initialToolData.toolName}]\n${JSON.stringify(initialToolData.result, null, 2)}`
         });
     }
 
+    const MAX_TURNS = 5;
     const baseUrl = settings.url.replace(/\/$/, '');
 
-    const response = await fetch(`${baseUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            model: settings.model,
-            messages,
-            stream: false
-        })
-    });
+    for (let turn = 0; turn < MAX_TURNS; turn++) {
+        yield { type: 'status', content: turn === 0 ? 'Denke nach...' : 'Verarbeite Ergebnisse...' };
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Ollama Fehler: ${errorText}`);
-    }
+        // Call Ollama (Streamed)
+        const response = await fetch(`${baseUrl}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: settings.model,
+                messages,
+                stream: true
+            })
+        });
 
-    const data = await response.json();
-    const assistantResponse = data.message?.content || 'Keine Antwort erhalten.';
-
-    // Save assistant response
-    saveChatMessage(currentSessionId, 'assistant', assistantResponse);
-
-    return { response: assistantResponse, sessionId: currentSessionId };
-}
-
-// Streaming version
-export async function chatWithAgentStream(messages: any[], sessionId?: number) {
-    const settings = await getAISettings();
-    if (!settings.enabled || !settings.model) {
-        throw new Error('AI ist deaktiviert oder kein Modell ausgewählt');
-    }
-
-    // Create session if needed
-    const currentSessionId = sessionId || createChatSession();
-
-    // Save last user message
-    const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
-    if (lastUserMessage) {
-        saveChatMessage(currentSessionId, 'user', lastUserMessage.content);
-    }
-
-    const systemPrompt = await buildSystemPrompt();
-
-    const ollamaMessages: OllamaMessage[] = [
-        { role: 'system', content: systemPrompt },
-        ...messages.map((m: any) => ({
-            role: m.role as 'user' | 'assistant',
-            content: m.content
-        }))
-    ];
-
-    // Check for tool execution
-    if (lastUserMessage) {
-        const toolResult = await executeToolsForMessage(lastUserMessage.content);
-        if (toolResult) {
-            saveChatMessage(currentSessionId, 'tool', JSON.stringify(toolResult.result), toolResult.toolName);
-
-            ollamaMessages.push({
-                role: 'user',
-                content: `[TOOL-ERGEBNIS von ${toolResult.toolName}]\n${JSON.stringify(toolResult.result, null, 2)}\n\nInterpretiere dieses Ergebnis ehrlich für den User.`
-            });
+        if (!response.ok || !response.body) {
+            yield { type: 'error', content: 'Ollama API Fehler' };
+            break;
         }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let fullContent = '';
+
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value, { stream: true });
+                const lines = (buffer + chunk).split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                        const json = JSON.parse(line);
+                        if (json.message?.content) {
+                            const token = json.message.content;
+                            fullContent += token;
+                            yield { type: 'text', content: token };
+                        }
+                    } catch (e) {
+                        // ignore malformed
+                    }
+                }
+            }
+        } finally {
+            reader.releaseLock();
+        }
+
+        // Check for Tool Calls in fullContent using safe Regex
+        const toolMatch = fullContent.match(/<<<TOOL:(\w+):(\{[\s\S]*?\})>>>/);
+
+        if (toolMatch) {
+            const toolName = toolMatch[1];
+            const argsStr = toolMatch[2];
+
+            yield { type: 'status', content: `Führe Tool aus: ${toolName}...` };
+            yield { type: 'tool_start', tool: toolName, args: JSON.parse(argsStr) };
+
+            try {
+                const toolDef = (tools as any)[toolName];
+                if (toolDef) {
+                    const args = JSON.parse(argsStr);
+                    const result = await toolDef.execute(args);
+
+                    yield { type: 'tool_end', tool: toolName, result };
+
+                    saveChatMessage(currentSessionId, 'tool', JSON.stringify(result), toolName);
+                    messages.push({ role: 'assistant', content: fullContent });
+                    messages.push({ role: 'user', content: `[TOOL RESULT]\n${JSON.stringify(result)}` });
+
+                    continue; // Loop again (Recursion via Loop)
+                } else {
+                    yield { type: 'error', content: `Tool ${toolName} nicht gefunden.` };
+                    messages.push({ role: 'assistant', content: fullContent });
+                    messages.push({ role: 'user', content: `[SYSTEM ERROR] Tool ${toolName} not found` });
+                    continue;
+                }
+            } catch (e: any) {
+                yield { type: 'error', content: `Fehler bei Ausführung: ${e.message}` };
+                messages.push({ role: 'assistant', content: fullContent });
+                messages.push({ role: 'user', content: `[TOOL ERROR] ${e.message}` });
+                continue;
+            }
+        }
+
+        // If no tool call, we are done
+        saveChatMessage(currentSessionId, 'assistant', fullContent);
+        break;
     }
-
-    const baseUrl = settings.url.replace(/\/$/, '');
-
-    const response = await fetch(`${baseUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            model: settings.model,
-            messages: ollamaMessages,
-            stream: true
-        })
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Ollama Fehler: ${errorText}`);
-    }
-
-    return response;
 }
 
 // ============================================================================
-// INTENT DETECTION - MORE CAREFUL, ASKS QUESTIONS
+// HELPERS & LEGACY
 // ============================================================================
 
 interface ToolExecution {
@@ -219,161 +248,38 @@ interface ToolExecution {
     result: any;
 }
 
-async function executeToolsForMessage(userMessage: string): Promise<ToolExecution | null> {
+async function executeToolsForMessage(userMessage: string, context: { serverId?: number, vmId?: number }): Promise<ToolExecution | null> {
     const msg = userMessage.toLowerCase();
 
-    // Helper to extract IDs
-    const extractNumber = (pattern: RegExp): number | undefined => {
+    // Helper to extract IDs with fallback to Context
+    const getID = (pattern: RegExp, contextVal?: number): number | undefined => {
         const match = msg.match(pattern);
-        return match ? parseInt(match[1]) : undefined;
+        return match ? parseInt(match[1]) : contextVal;
     };
 
-    const serverId = extractNumber(/server\s*(\d+)/i);
-    const vmId = extractNumber(/vm\s*(\d+)/i) || extractNumber(/(\d{3,5})/);
+    const serverId = getID(/server\s*(\d+)/i, context.serverId);
+    const vmId = getID(/vm\s*(\d+)/i, context.vmId) || getID(/(\d{3,5})/, context.vmId);
 
-    // ========================================================================
-    // VM MANAGEMENT - VERY CAREFUL
-    // ========================================================================
-
-    // Clear start intent
-    if ((msg.includes('start') || msg.includes('hochfahr') || msg.includes('boot')) && vmId && !msg.includes('neustart')) {
-        console.log(`[Copilot] Starting VM ${vmId}`);
-        const result = await tools.manageVM.execute({ vmid: vmId, action: 'start' });
-        return { toolName: 'manageVM(start)', result };
+    // Cleaned up fast path logic
+    if (vmId && (msg.includes('start') || msg.includes('boot')) && !msg.includes('neustart')) {
+        return { toolName: 'manageVM(start)', result: await tools.manageVM.execute({ vmid: vmId, action: 'start' }) };
+    }
+    if (vmId && (msg.includes('shutdown') || msg.includes('herunterfahren'))) {
+        return { toolName: 'manageVM(shutdown)', result: await tools.manageVM.execute({ vmid: vmId, action: 'shutdown' }) };
+    }
+    if (vmId && (msg.includes('stop') || msg.includes('beende'))) {
+        return { toolName: 'manageVM(stop)', result: await tools.manageVM.execute({ vmid: vmId, action: 'stop' }) };
+    }
+    if (vmId && (msg.includes('reboot') || msg.includes('neustart'))) {
+        return { toolName: 'manageVM(reboot)', result: await tools.manageVM.execute({ vmid: vmId, action: 'reboot' }) };
+    }
+    if (vmId && (msg.includes('status') || msg.includes('zustand'))) {
+        return { toolName: 'getVMStatus', result: await tools.getVMStatus.execute({ vmid: vmId }) };
     }
 
-    // Shutdown (graceful) - different from stop (force)
-    if ((msg.includes('herunterfahren') || msg.includes('herunterfahr') || msg.includes('shutdown') || msg.includes('fahre')) && vmId && !msg.includes('hoch')) {
-        console.log(`[Copilot] Shutdown VM ${vmId}`);
-        const result = await tools.manageVM.execute({ vmid: vmId, action: 'shutdown' });
-        return { toolName: 'manageVM(shutdown)', result };
+    if ((msg.includes('backup') || msg.includes('sicher')) && (msg.includes('jetzt') || msg.includes('erstell'))) {
+        return { toolName: 'createConfigBackup', result: await tools.createConfigBackup.execute({ serverId }) };
     }
 
-    // Stop (force)
-    if ((msg.includes('stop') || msg.includes('beende') || msg.includes('ausschalten')) && vmId) {
-        console.log(`[Copilot] Stop VM ${vmId}`);
-        const result = await tools.manageVM.execute({ vmid: vmId, action: 'stop' });
-        return { toolName: 'manageVM(stop)', result };
-    }
-
-    // Reboot
-    if ((msg.includes('neustart') || msg.includes('restart') || msg.includes('reboot')) && vmId) {
-        console.log(`[Copilot] Reboot VM ${vmId}`);
-        const result = await tools.manageVM.execute({ vmid: vmId, action: 'reboot' });
-        return { toolName: 'manageVM(reboot)', result };
-    }
-
-    // Check VM status
-    if ((msg.includes('status') || msg.includes('zustand') || msg.includes('läuft')) && vmId) {
-        console.log(`[Copilot] Check VM status ${vmId}`);
-        const result = await tools.getVMStatus.execute({ vmid: vmId });
-        return { toolName: 'getVMStatus', result };
-    }
-
-    // ========================================================================
-    // LIST VMs (only if not an action)
-    // ========================================================================
-
-    if ((msg.includes('vm') || msg.includes('container') || msg.includes('maschine')) &&
-        !msg.includes('start') && !msg.includes('stop') && !msg.includes('fahre') && !msg.includes('status')) {
-        console.log(`[Copilot] Listing VMs`);
-        const result = await tools.listVMs.execute({ serverId });
-        return { toolName: 'listVMs', result };
-    }
-
-    // ========================================================================
-    // BACKUPS - DISTINGUISH IMMEDIATE VS SCHEDULED
-    // ========================================================================
-
-    // Scheduled job (contains time reference)
-    if ((msg.includes('backup') || msg.includes('sicher')) &&
-        (msg.includes('um ') || msg.includes(' uhr') || msg.includes('täglich') || msg.includes('jeden tag') || msg.includes('schedule') || msg.includes('plan'))) {
-        // DON'T execute - let AI ask clarifying question
-        console.log(`[Copilot] Scheduled backup detected - need clarification`);
-        return null; // Let AI ask the user
-    }
-
-    // Immediate backup
-    if ((msg.includes('backup') || msg.includes('sicher')) &&
-        (msg.includes('erstell') || msg.includes('mach') || msg.includes('jetzt'))) {
-        console.log(`[Copilot] Creating backup now`);
-        const result = await tools.createConfigBackup.execute({ serverId });
-        return { toolName: 'createConfigBackup', result };
-    }
-
-    // List backups
-    if (msg.includes('backup') && (msg.includes('zeig') || msg.includes('list') || msg.includes('letzte'))) {
-        console.log(`[Copilot] Listing backups`);
-        const result = await tools.getBackups.execute({ limit: 10 });
-        return { toolName: 'getBackups', result };
-    }
-
-    // ========================================================================
-    // JOBS
-    // ========================================================================
-
-    if (msg.includes('job') || msg.includes('aufgabe') || msg.includes('geplant')) {
-        console.log(`[Copilot] Listing jobs`);
-        const result = await tools.getScheduledJobs.execute();
-        return { toolName: 'getScheduledJobs', result };
-    }
-
-    // ========================================================================
-    // SERVER INFO
-    // ========================================================================
-
-    if (msg.includes('server') && (msg.includes('zeig') || msg.includes('list') || msg.includes('alle') || msg.includes('welche'))) {
-        console.log(`[Copilot] Listing servers`);
-        const result = await tools.getServers.execute();
-        return { toolName: 'getServers', result };
-    }
-
-    if ((msg.includes('detail') || msg.includes('info')) && serverId) {
-        console.log(`[Copilot] Server details`);
-        const result = await tools.getServerDetails.execute({ serverId });
-        return { toolName: 'getServerDetails', result };
-    }
-
-    // ========================================================================
-    // SCANS
-    // ========================================================================
-
-    if ((msg.includes('scan') || msg.includes('prüf') || msg.includes('health')) && serverId) {
-        console.log(`[Copilot] Health scan`);
-        const result = await tools.runHealthScan.execute({ serverId });
-        return { toolName: 'runHealthScan', result };
-    }
-
-    // ========================================================================
-    // LINUX HOSTS
-    // ========================================================================
-
-    if (msg.includes('linux') && msg.includes('host')) {
-        console.log(`[Copilot] Linux hosts`);
-        const result = await tools.getLinuxHosts.execute();
-        return { toolName: 'getLinuxHosts', result };
-    }
-
-    // ========================================================================
-    // PROVISIONING
-    // ========================================================================
-
-    if (msg.includes('profil') && (msg.includes('zeig') || msg.includes('list'))) {
-        console.log(`[Copilot] Provisioning profiles`);
-        const result = await tools.getProvisioningProfiles.execute();
-        return { toolName: 'getProvisioningProfiles', result };
-    }
-
-    // ========================================================================
-    // TAGS
-    // ========================================================================
-
-    if (msg.includes('tag') && (msg.includes('zeig') || msg.includes('list'))) {
-        console.log(`[Copilot] Tags`);
-        const result = await tools.getTags.execute();
-        return { toolName: 'getTags', result };
-    }
-
-    // No tool matched - let AI handle it naturally (may ask clarifying questions)
     return null;
 }

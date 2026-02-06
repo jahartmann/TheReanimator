@@ -1,6 +1,26 @@
 import { z } from 'zod';
 import db from '@/lib/db';
 import { createSSHClient } from '@/lib/ssh';
+import fs from 'fs';
+import path from 'path';
+
+const BRAIN_DIR = path.resolve(process.cwd(), 'data', 'brain');
+if (!fs.existsSync(BRAIN_DIR)) {
+    fs.mkdirSync(BRAIN_DIR, { recursive: true });
+}
+
+const SAFE_COMMANDS = [
+    'df', 'free', 'uptime', 'ls', 'cat /proc/cpuinfo', 'cat /proc/meminfo',
+    'cat /etc/os-release', 'cat /etc/issue', 'lsblk', 'ip a', 'id', 'date',
+    'cat /etc/pve/storage.cfg', 'cat /etc/pve/qemu-server/', 'cat /etc/pve/lxc/',
+    'pvesh get', 'pvecm status', 'zpool status', 'zfs list'
+];
+
+function isCommandSafe(cmd: string): boolean {
+    // Basic heuristics
+    if (cmd.includes('rm ') || cmd.includes('mkfs') || cmd.includes('dd ') || cmd.includes('>')) return false;
+    return SAFE_COMMANDS.some(safe => cmd.startsWith(safe));
+}
 
 // Import server actions
 import { getVMs } from '@/lib/actions/vm';
@@ -576,6 +596,79 @@ export const tools = {
                 return { success: false, error: e.message };
             }
         },
+    },
+
+    runAutonomousCommand: {
+        description: 'Führt harmlose Befehle (Diagnose) ohne Bestätigung aus.',
+        parameters: z.object({
+            serverId: z.number().describe('Server ID'),
+            command: z.string().describe('Befehl (muss in Safe-List sein)'),
+        }),
+        execute: async ({ serverId, command }: { serverId: number, command: string }) => {
+            if (!isCommandSafe(command)) {
+                return {
+                    success: false,
+                    error: `Befehl "${command}" ist nicht in der Safe-List oder enthält unsichere Zeichen.`,
+                    suggestion: 'Nutze executeSSHCommand mit Bestätigung für riskante Befehle.'
+                };
+            }
+
+            try {
+                // Reuse existing logic via direct call or copy-paste? Copy safe logic to allow independence.
+                const server = getServerByIdOrName(serverId);
+                if (!server) return { success: false, error: `Server ${serverId} nicht gefunden.` };
+
+                const client = createSSHClient(server);
+                await client.connect();
+                // 10s timeout for auto commands
+                const output = await client.exec(command, 10000);
+                await client.disconnect();
+
+                return {
+                    success: true,
+                    server: server.name,
+                    command,
+                    output: output || '(Keine Ausgabe)'
+                };
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        },
+    },
+
+    manageKnowledge: {
+        description: 'Verwaltet das Langzeitgedächtnis (Brain).',
+        parameters: z.object({
+            action: z.enum(['read', 'write', 'list']).describe('Aktion'),
+            key: z.string().optional().describe('Dateiname (ohne Extension)'),
+            content: z.string().optional().describe('Inhalt (für write)'),
+        }),
+        execute: async ({ action, key, content }: { action: 'read' | 'write' | 'list', key?: string, content?: string }) => {
+            try {
+                if (action === 'list') {
+                    const files = fs.readdirSync(BRAIN_DIR).filter(f => f.endsWith('.md'));
+                    return { success: true, files };
+                }
+
+                if (!key) return { success: false, error: 'Key (Dateiname) erforderlich für read/write.' };
+                const safeKey = key.replace(/[^a-zA-Z0-9_-]/g, '') + '.md';
+                const filePath = path.join(BRAIN_DIR, safeKey);
+
+                if (action === 'read') {
+                    if (!fs.existsSync(filePath)) return { success: false, error: 'Eintrag nicht gefunden.' };
+                    const data = fs.readFileSync(filePath, 'utf-8');
+                    return { success: true, content: data };
+                }
+
+                if (action === 'write') {
+                    if (!content) return { success: false, error: 'Content erforderlich für write.' };
+                    fs.writeFileSync(filePath, content);
+                    return { success: true, message: `Wissen gespeichert unter "${safeKey}".` };
+                }
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        }
     },
 };
 

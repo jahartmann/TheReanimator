@@ -1,4 +1,4 @@
-import { chatWithAgentStream } from '@/lib/agent/core';
+import { chatWithAgentGenerator } from '@/lib/agent/core';
 
 export const maxDuration = 60;
 
@@ -10,44 +10,42 @@ export async function POST(req: Request) {
             return new Response('Invalid request: messages array required', { status: 400 });
         }
 
-        // Get streaming response from Ollama
-        const ollamaResponse = await chatWithAgentStream(messages);
+        // Initialize Generator
+        const generator = chatWithAgentGenerator(messages[messages.length - 1].content, messages.slice(0, -1));
 
-        // Convert Ollama's NDJSON stream to SSE format for the frontend
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
             async start(controller) {
-                const reader = ollamaResponse.body?.getReader();
-                if (!reader) {
-                    controller.close();
-                    return;
-                }
-
-                const decoder = new TextDecoder();
-                let buffer = '';
-
                 try {
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
-
-                        buffer += decoder.decode(value, { stream: true });
-                        const lines = buffer.split('\n');
-                        buffer = lines.pop() || '';
-
-                        for (const line of lines) {
-                            if (!line.trim()) continue;
-                            try {
-                                const json = JSON.parse(line);
-                                if (json.message?.content) {
-                                    // Send as AI SDK compatible format
-                                    controller.enqueue(encoder.encode(`0:${JSON.stringify(json.message.content)}\n`));
-                                }
-                            } catch {
-                                // Skip malformed lines
-                            }
+                    for await (const event of generator) {
+                        if (event.type === 'text') {
+                            // Standard Text Chunk
+                            controller.enqueue(encoder.encode(`0:${JSON.stringify(event.content)}\n`));
+                        }
+                        else if (event.type === 'status') {
+                            // Render status as italic blockquote
+                            const msg = `\n> 🤖 *${event.content}*\n\n`;
+                            controller.enqueue(encoder.encode(`0:${JSON.stringify(msg)}\n`));
+                        }
+                        else if (event.type === 'tool_start') {
+                            // Render tool start
+                            const msg = `\n> 🛠️ **Starte Tool:** \`${event.tool}\`...\n\n`;
+                            controller.enqueue(encoder.encode(`0:${JSON.stringify(msg)}\n`));
+                        }
+                        else if (event.type === 'tool_end') {
+                            // Optional: Show result summary? Or just checkmark.
+                            // const msg = `\n> ✅ **Ergebnis:** \`${JSON.stringify(event.result).substring(0, 50)}...\`\n\n`;
+                            // controller.enqueue(encoder.encode(`0:${JSON.stringify(msg)}\n`));
+                        }
+                        else if (event.type === 'error') {
+                            const msg = `\n> ❌ **Fehler:** ${event.content}\n\n`;
+                            controller.enqueue(encoder.encode(`0:${JSON.stringify(msg)}\n`));
                         }
                     }
+                } catch (e: any) {
+                    console.error('Stream Error:', e);
+                    const msg = `\n\n**System Error:** ${e.message}\n`;
+                    controller.enqueue(encoder.encode(`0:${JSON.stringify(msg)}\n`));
                 } finally {
                     controller.close();
                 }

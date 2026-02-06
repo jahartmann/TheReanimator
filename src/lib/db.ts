@@ -78,6 +78,42 @@ try {
   console.error('[DB] Failed to create node_stats table:', e);
 }
 
+// Auto-migrate: Agent Tables (Telegram, Chat, History)
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS telegram_users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id TEXT NOT NULL UNIQUE,
+      first_name TEXT,
+      username TEXT,
+      is_blocked INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER, -- Optional link to local user
+      title TEXT DEFAULT 'Neue Konversation',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL,
+      role TEXT NOT NULL, -- user, assistant, system, tool
+      content TEXT,
+      tool_name TEXT,
+      tool_result TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+    );
+  `);
+  console.log('[DB] Agent tables ready');
+} catch (e) {
+  console.error('[DB] Failed to create Agent tables:', e);
+}
+
 export default db;
 export function getDb() {
   return db;
