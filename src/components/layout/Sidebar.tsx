@@ -70,18 +70,21 @@ export function Sidebar() {
                     <LanguageSwitcher />
                 </div>
 
-                <div className="flex items-center gap-2 mb-1">
-                    <div className="bg-primary/10 p-2 rounded-lg">
-                        <Activity className="h-6 w-6 text-primary" />
+                <div className="flex items-center gap-3 mb-2">
+                    <div className="bg-gradient-to-br from-primary to-purple-600 p-2 rounded-lg shadow-lg shadow-primary/20">
+                        <Activity className="h-6 w-6 text-white" />
                     </div>
                     <div>
-                        <h1 className="text-lg font-bold tracking-tight text-white uppercase">Reanimator</h1>
+                        <h1 className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent uppercase">Reanimator</h1>
                     </div>
                 </div>
                 {IS_BETA && (
-                    <span className="text-[10px] bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded-full font-bold border border-amber-500/20 inline-block">BETA</span>
+                    <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] bg-amber-500/10 text-amber-500 px-2 py-0.5 rounded border border-amber-500/20 font-bold tracking-wider">BETA</span>
+                        <span className="text-[10px] text-muted-foreground">v{APP_VERSION}</span>
+                    </div>
                 )}
-                <p className="text-xs text-muted-foreground ml-1">Proxmox Management System</p>
+                <p className="text-xs text-muted-foreground/60 font-medium">Proxmox Management System</p>
             </div>
             <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
                 {filteredNavItems.map((item) => (

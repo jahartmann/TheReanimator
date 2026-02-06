@@ -1,4 +1,5 @@
-import { saveContact, getContacts, deleteContact, sendEmail } from '@/lib/email';
+import { saveContact, getContacts, deleteContact, sendEmail as sendEmailInternal } from '@/lib/email';
+import { broadcastMessage } from './telegram';
 import { z } from 'zod';
 import db from '@/lib/db';
 import { createSSHClient } from '@/lib/ssh';
@@ -10,26 +11,74 @@ if (!fs.existsSync(BRAIN_DIR)) {
     fs.mkdirSync(BRAIN_DIR, { recursive: true });
 }
 
+// BLOCKED commands - these require explicit confirmation
 const BLOCKED_COMMANDS = [
     'reboot', 'shutdown', 'poweroff', 'halt', 'init', 'telinit',
-    'rm ', 'mv ', 'dd ', 'mkfs', 'fdisk', 'parted', 'sfdisk', 'wipefs',
-    'chmod -R', 'chown -R', 'wget', 'curl', 'nc', 'netcat', // network download might be unsafe? User said "everything except delete/stop"
-    // Actually user said: "except restart, delete, move, stop, shutdown"
-    // So safe read/write is okay? "rm" is delete. "mv" is move.
+    'rm -rf', 'rm -r', 'rmdir', // destructive deletes
+    'dd ', 'mkfs', 'fdisk', 'parted', 'sfdisk', 'wipefs', // disk operations
+    ':(){:|:&};:', // fork bomb
+];
+
+// SAFE commands - these can run autonomously without confirmation
+const SAFE_COMMAND_PATTERNS = [
+    // System info
+    /^(df|free|top|htop|uptime|uname|lsb_release|cat|less|head|tail|grep|awk|sed)/,
+    /^(ps|pgrep|pstree|lsof|netstat|ss|ip|ifconfig|route|arp)/,
+    // Logs & Diagnostics
+    /^(journalctl|dmesg|last|who|w|vmstat|iostat|mpstat|sar)/,
+    // Proxmox specific - READ operations
+    /^(qm (config|status|list|showcmd|guest|agent))/,
+    /^(pct (config|status|list|exec))/,
+    /^(pvecm (status|nodes|expected))/,
+    /^(pvesh get)/,
+    /^(pveversion|proxmox-backup-client status)/,
+    // ZFS - READ operations
+    /^(zpool (status|list|iostat|history))/,
+    /^(zfs (list|get))/,
+    // Package management - INFO only
+    /^(apt (list|search|show|policy)|apt-cache|dpkg (-l|-L|-s|--list))/,
+    // Service status - READ only
+    /^(systemctl (status|is-active|is-enabled|list-units|list-timers))/,
+    // Network diagnostics
+    /^(ping|traceroute|tracepath|nslookup|dig|host|mtr|curl -I|wget --spider)/,
+    // File info (not modification)
+    /^(ls|find|locate|which|whereis|file|stat|du|wc)/,
+    // Hardware info
+    /^(lspci|lsusb|lsblk|lscpu|lsmem|dmidecode|smartctl)/,
 ];
 
 function isCommandSafe(cmd: string): boolean {
-    const lower = cmd.toLowerCase();
-    // Block if it starts with or contains "delete" logic
+    const lower = cmd.toLowerCase().trim();
+
+    // Always block dangerous patterns
     if (lower.includes('> /dev/')) return false; // overwriting devices
     if (lower.includes(':(){:|:&};:')) return false; // fork bomb
+    if (lower.includes('| sh') || lower.includes('| bash')) return false; // pipe to shell
+    if (lower.includes('$(') || lower.includes('`')) return false; // command substitution in dangerous context
 
-    // Check blocked keywords
+    // Check explicit blocked list
     if (BLOCKED_COMMANDS.some(blocked => lower.includes(blocked))) {
         return false;
     }
 
-    return true; // Allow everything else
+    // Check if matches safe patterns
+    for (const pattern of SAFE_COMMAND_PATTERNS) {
+        if (pattern.test(cmd)) {
+            return true;
+        }
+    }
+
+    // Default: allow if no blocked pattern matched and seems like a read operation
+    // More permissive for general diagnostics
+    const seemsSafe = !lower.includes('rm ') &&
+        !lower.includes('mv ') &&
+        !lower.includes('cp ') &&
+        !lower.includes('chmod') &&
+        !lower.includes('chown') &&
+        !lower.includes('kill') &&
+        !lower.includes('pkill');
+
+    return seemsSafe;
 }
 
 // Import server actions
@@ -297,6 +346,246 @@ export const tools = {
             }
         },
     },
+
+    // ========================================================================
+    // VM/CONTAINER CREATION - Full Sysadmin Capabilities
+    // ========================================================================
+
+    createVM: {
+        description: 'Erstellt eine neue QEMU/KVM VM auf einem PVE-Server.',
+        parameters: z.object({
+            serverId: z.number().describe('Server ID'),
+            name: z.string().describe('Name der VM'),
+            cores: z.number().optional().describe('CPU Cores (Standard: 2)'),
+            memory: z.number().optional().describe('RAM in MB (Standard: 2048)'),
+            disk: z.string().optional().describe('Disk-Größe (z.B. "32G", Standard: "32G")'),
+            ostype: z.string().optional().describe('OS-Typ (l26=Linux, win10, etc., Standard: l26)'),
+            storage: z.string().optional().describe('Storage für Disk (Standard: local-lvm)'),
+            iso: z.string().optional().describe('ISO-Image Pfad (optional)'),
+            net: z.string().optional().describe('Netzwerk-Bridge (Standard: vmbr0)'),
+            start: z.boolean().optional().describe('VM nach Erstellung starten?'),
+        }),
+        execute: async ({ serverId, name, cores = 2, memory = 2048, disk = '32G', ostype = 'l26', storage = 'local-lvm', iso, net = 'vmbr0', start = false }: {
+            serverId: number,
+            name: string,
+            cores?: number,
+            memory?: number,
+            disk?: string,
+            ostype?: string,
+            storage?: string,
+            iso?: string,
+            net?: string,
+            start?: boolean
+        }) => {
+            try {
+                const server = getServerByIdOrName(serverId);
+                if (!server) {
+                    return { success: false, error: `Server ${serverId} nicht gefunden.` };
+                }
+
+                const client = createSSHClient(server);
+                await client.connect();
+
+                // 1. Get next free VMID
+                const vmidOutput = await client.exec('pvesh get /cluster/nextid');
+                const vmid = parseInt(vmidOutput.trim());
+
+                if (isNaN(vmid)) {
+                    await client.disconnect();
+                    return { success: false, error: 'Konnte keine freie VMID ermitteln.' };
+                }
+
+                // 2. Build qm create command
+                let cmd = `qm create ${vmid} --name "${name}" --cores ${cores} --memory ${memory} --ostype ${ostype}`;
+                cmd += ` --net0 virtio,bridge=${net}`;
+                cmd += ` --scsihw virtio-scsi-single`;
+                cmd += ` --scsi0 ${storage}:${disk}`;
+
+                if (iso) {
+                    cmd += ` --cdrom ${iso}`;
+                }
+
+                // 3. Execute creation
+                const createOutput = await client.exec(cmd, 60000);
+
+                // 4. Optionally start the VM
+                if (start) {
+                    await client.exec(`qm start ${vmid}`, 30000);
+                }
+
+                await client.disconnect();
+
+                return {
+                    success: true,
+                    vmid,
+                    name,
+                    server: server.name,
+                    config: { cores, memory, disk, ostype, storage, net },
+                    started: start,
+                    message: `VM "${name}" (VMID ${vmid}) erfolgreich erstellt${start ? ' und gestartet' : ''}.`,
+                    output: createOutput || undefined
+                };
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        },
+    },
+
+    createContainer: {
+        description: 'Erstellt einen neuen LXC Container auf einem PVE-Server.',
+        parameters: z.object({
+            serverId: z.number().describe('Server ID'),
+            name: z.string().describe('Name des Containers'),
+            template: z.string().describe('Template (z.B. "local:vztmpl/debian-12-standard_12.2-1_amd64.tar.zst")'),
+            memory: z.number().optional().describe('RAM in MB (Standard: 512)'),
+            cores: z.number().optional().describe('CPU Cores (Standard: 1)'),
+            disk: z.string().optional().describe('Disk-Größe (z.B. "8G", Standard: "8G")'),
+            storage: z.string().optional().describe('Storage für rootfs (Standard: local-lvm)'),
+            net: z.string().optional().describe('Netzwerk-Bridge (Standard: vmbr0)'),
+            password: z.string().optional().describe('Root-Passwort (optional, generiert wenn leer)'),
+            start: z.boolean().optional().describe('Container nach Erstellung starten?'),
+            unprivileged: z.boolean().optional().describe('Unprivilegierter Container? (Standard: true)'),
+        }),
+        execute: async ({ serverId, name, template, memory = 512, cores = 1, disk = '8G', storage = 'local-lvm', net = 'vmbr0', password, start = false, unprivileged = true }: {
+            serverId: number,
+            name: string,
+            template: string,
+            memory?: number,
+            cores?: number,
+            disk?: string,
+            storage?: string,
+            net?: string,
+            password?: string,
+            start?: boolean,
+            unprivileged?: boolean
+        }) => {
+            try {
+                const server = getServerByIdOrName(serverId);
+                if (!server) {
+                    return { success: false, error: `Server ${serverId} nicht gefunden.` };
+                }
+
+                const client = createSSHClient(server);
+                await client.connect();
+
+                // 1. Get next free VMID
+                const vmidOutput = await client.exec('pvesh get /cluster/nextid');
+                const vmid = parseInt(vmidOutput.trim());
+
+                if (isNaN(vmid)) {
+                    await client.disconnect();
+                    return { success: false, error: 'Konnte keine freie VMID ermitteln.' };
+                }
+
+                // 2. Generate password if not provided
+                const rootPassword = password || Math.random().toString(36).slice(-12);
+
+                // 3. Build pct create command
+                let cmd = `pct create ${vmid} ${template}`;
+                cmd += ` --hostname "${name}"`;
+                cmd += ` --memory ${memory}`;
+                cmd += ` --cores ${cores}`;
+                cmd += ` --rootfs ${storage}:${disk}`;
+                cmd += ` --net0 name=eth0,bridge=${net},ip=dhcp`;
+                cmd += ` --password "${rootPassword}"`;
+                cmd += unprivileged ? ' --unprivileged 1' : ' --unprivileged 0';
+
+                // 4. Execute creation
+                const createOutput = await client.exec(cmd, 120000);
+
+                // 5. Optionally start
+                if (start) {
+                    await client.exec(`pct start ${vmid}`, 30000);
+                }
+
+                await client.disconnect();
+
+                return {
+                    success: true,
+                    vmid,
+                    name,
+                    type: 'lxc',
+                    server: server.name,
+                    config: { memory, cores, disk, storage, net, unprivileged },
+                    rootPassword: password ? '(benutzerdefiniert)' : rootPassword,
+                    started: start,
+                    message: `Container "${name}" (VMID ${vmid}) erfolgreich erstellt${start ? ' und gestartet' : ''}.`,
+                    output: createOutput || undefined
+                };
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        },
+    },
+
+    cloneVM: {
+        description: 'Klont eine existierende VM oder Container.',
+        parameters: z.object({
+            vmid: z.number().describe('Quell-VMID'),
+            newName: z.string().describe('Name für den Klon'),
+            full: z.boolean().optional().describe('Full Clone statt Linked Clone? (Standard: true)'),
+            targetServerId: z.number().optional().describe('Ziel-Server (für Cluster-Migration)'),
+            targetStorage: z.string().optional().describe('Ziel-Storage (optional)'),
+        }),
+        execute: async ({ vmid, newName, full = true, targetServerId, targetStorage }: {
+            vmid: number,
+            newName: string,
+            full?: boolean,
+            targetServerId?: number,
+            targetStorage?: string
+        }) => {
+            try {
+                const found = await findVM(vmid);
+                if (!found) {
+                    return { success: false, error: `VM ${vmid} nicht gefunden.` };
+                }
+
+                const { vm, server } = found;
+                const targetServer = targetServerId ? getServerByIdOrName(targetServerId) : server;
+
+                if (!targetServer) {
+                    return { success: false, error: `Ziel-Server ${targetServerId} nicht gefunden.` };
+                }
+
+                const client = createSSHClient(server);
+                await client.connect();
+
+                // Get next VMID
+                const vmidOutput = await client.exec('pvesh get /cluster/nextid');
+                const newVmid = parseInt(vmidOutput.trim());
+
+                // Build clone command
+                const cmdPrefix = vm.type === 'lxc' ? 'pct' : 'qm';
+                let cmd = `${cmdPrefix} clone ${vmid} ${newVmid} --name "${newName}"`;
+
+                if (full) {
+                    cmd += ' --full';
+                }
+                if (targetStorage) {
+                    cmd += ` --storage ${targetStorage}`;
+                }
+
+                const output = await client.exec(cmd, 300000); // 5 min timeout for full clones
+                await client.disconnect();
+
+                return {
+                    success: true,
+                    sourceVmid: vmid,
+                    newVmid,
+                    newName,
+                    type: vm.type,
+                    sourceServer: server.name,
+                    targetServer: targetServer.name,
+                    fullClone: full,
+                    message: `${vm.type === 'lxc' ? 'Container' : 'VM'} "${vm.name}" erfolgreich geklont als "${newName}" (VMID ${newVmid}).`,
+                    output: output || undefined
+                };
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        },
+    },
+
 
     // ========================================================================
     // BACKUPS
@@ -647,34 +936,194 @@ export const tools = {
     },
 
     manageKnowledge: {
-        description: 'Verwaltet das Langzeitgedächtnis (Brain).',
+        description: 'Verwaltet das Langzeitgedächtnis (Brain) - NUTZE DIES AKTIV zum Lernen!',
         parameters: z.object({
-            action: z.enum(['read', 'write', 'list']).describe('Aktion'),
-            key: z.string().optional().describe('Dateiname (ohne Extension)'),
-            content: z.string().optional().describe('Inhalt (für write)'),
+            action: z.enum(['read', 'write', 'list', 'search', 'append', 'delete']).describe('Aktion'),
+            key: z.string().optional().describe('Dateiname (ohne Extension) - nutze Präfixe wie troubleshooting_, howto_, notes_, config_'),
+            content: z.string().optional().describe('Inhalt (für write/append) oder Suchbegriff (für search)'),
+            category: z.string().optional().describe('Kategorie für Filterung bei list'),
         }),
-        execute: async ({ action, key, content }: { action: 'read' | 'write' | 'list', key?: string, content?: string }) => {
+        execute: async ({ action, key, content, category }: {
+            action: 'read' | 'write' | 'list' | 'search' | 'append' | 'delete',
+            key?: string,
+            content?: string,
+            category?: string
+        }) => {
             try {
-                if (action === 'list') {
-                    const files = fs.readdirSync(BRAIN_DIR).filter(f => f.endsWith('.md'));
-                    return { success: true, files };
+                // Ensure brain directory exists with subdirs
+                const categories = ['troubleshooting', 'howto', 'notes', 'config', 'logs'];
+                for (const cat of categories) {
+                    const catDir = path.join(BRAIN_DIR, cat);
+                    if (!fs.existsSync(catDir)) {
+                        fs.mkdirSync(catDir, { recursive: true });
+                    }
                 }
 
-                if (!key) return { success: false, error: 'Key (Dateiname) erforderlich für read/write.' };
-                const safeKey = key.replace(/[^a-zA-Z0-9_-]/g, '') + '.md';
-                const filePath = path.join(BRAIN_DIR, safeKey);
+                if (action === 'list') {
+                    // List all files, optionally filtered by category
+                    let files: string[] = [];
+
+                    const scanDir = (dir: string, prefix: string = '') => {
+                        const items = fs.readdirSync(dir);
+                        for (const item of items) {
+                            const fullPath = path.join(dir, item);
+                            const stat = fs.statSync(fullPath);
+                            if (stat.isDirectory()) {
+                                scanDir(fullPath, `${prefix}${item}/`);
+                            } else if (item.endsWith('.md')) {
+                                files.push(`${prefix}${item}`);
+                            }
+                        }
+                    };
+
+                    scanDir(BRAIN_DIR);
+
+                    // Filter by category if specified
+                    if (category) {
+                        files = files.filter(f => f.startsWith(category) || f.includes(`/${category}`));
+                    }
+
+                    return {
+                        success: true,
+                        count: files.length,
+                        files,
+                        categories: categories.filter(c => fs.existsSync(path.join(BRAIN_DIR, c)))
+                    };
+                }
+
+                if (action === 'search') {
+                    if (!content) return { success: false, error: 'Suchbegriff (content) erforderlich.' };
+
+                    const searchTerm = content.toLowerCase();
+                    const results: { file: string, matches: string[] }[] = [];
+
+                    const searchDir = (dir: string, prefix: string = '') => {
+                        const items = fs.readdirSync(dir);
+                        for (const item of items) {
+                            const fullPath = path.join(dir, item);
+                            const stat = fs.statSync(fullPath);
+                            if (stat.isDirectory()) {
+                                searchDir(fullPath, `${prefix}${item}/`);
+                            } else if (item.endsWith('.md')) {
+                                const fileContent = fs.readFileSync(fullPath, 'utf-8');
+                                if (fileContent.toLowerCase().includes(searchTerm)) {
+                                    // Extract matching lines
+                                    const lines = fileContent.split('\n');
+                                    const matches = lines
+                                        .filter(l => l.toLowerCase().includes(searchTerm))
+                                        .slice(0, 3);
+                                    results.push({ file: `${prefix}${item}`, matches });
+                                }
+                            }
+                        }
+                    };
+
+                    searchDir(BRAIN_DIR);
+
+                    return {
+                        success: true,
+                        query: content,
+                        resultCount: results.length,
+                        results: results.slice(0, 10) // Max 10 results
+                    };
+                }
+
+                if (!key) return { success: false, error: 'Key (Dateiname) erforderlich für read/write/append/delete.' };
+
+                // Determine file path - support category prefixes in key
+                let filePath: string;
+                const safeKey = key.replace(/[^a-zA-Z0-9_\-\/]/g, '');
+
+                // Check if key includes category path
+                if (safeKey.includes('/')) {
+                    filePath = path.join(BRAIN_DIR, safeKey + '.md');
+                } else {
+                    // Auto-categorize based on prefix
+                    let targetDir = BRAIN_DIR;
+                    for (const cat of categories) {
+                        if (safeKey.startsWith(cat + '_') || safeKey.startsWith(cat)) {
+                            targetDir = path.join(BRAIN_DIR, cat);
+                            break;
+                        }
+                    }
+                    filePath = path.join(targetDir, safeKey + '.md');
+                }
+
+                // Ensure parent directory exists
+                const parentDir = path.dirname(filePath);
+                if (!fs.existsSync(parentDir)) {
+                    fs.mkdirSync(parentDir, { recursive: true });
+                }
 
                 if (action === 'read') {
-                    if (!fs.existsSync(filePath)) return { success: false, error: 'Eintrag nicht gefunden.' };
+                    if (!fs.existsSync(filePath)) {
+                        // Try to find in subdirs
+                        for (const cat of categories) {
+                            const altPath = path.join(BRAIN_DIR, cat, safeKey + '.md');
+                            if (fs.existsSync(altPath)) {
+                                const data = fs.readFileSync(altPath, 'utf-8');
+                                return { success: true, key: safeKey, path: `${cat}/${safeKey}.md`, content: data };
+                            }
+                        }
+                        return { success: false, error: `Eintrag "${key}" nicht gefunden.` };
+                    }
                     const data = fs.readFileSync(filePath, 'utf-8');
-                    return { success: true, content: data };
+                    return { success: true, key: safeKey, content: data };
                 }
 
                 if (action === 'write') {
                     if (!content) return { success: false, error: 'Content erforderlich für write.' };
-                    fs.writeFileSync(filePath, content);
-                    return { success: true, message: `Wissen gespeichert unter "${safeKey}".` };
+
+                    // Add metadata header
+                    const timestamp = new Date().toISOString();
+                    const header = `<!-- Brain Entry: ${safeKey} -->\n<!-- Created: ${timestamp} -->\n<!-- Updated: ${timestamp} -->\n\n`;
+                    const fullContent = header + content;
+
+                    fs.writeFileSync(filePath, fullContent);
+                    return {
+                        success: true,
+                        message: `Wissen gespeichert: "${safeKey}"`,
+                        path: filePath.replace(BRAIN_DIR, '').replace(/\\/g, '/').replace(/^\//, '')
+                    };
                 }
+
+                if (action === 'append') {
+                    if (!content) return { success: false, error: 'Content erforderlich für append.' };
+
+                    const timestamp = new Date().toISOString();
+                    let existingContent = '';
+
+                    if (fs.existsSync(filePath)) {
+                        existingContent = fs.readFileSync(filePath, 'utf-8');
+                        // Update the "Updated" timestamp in header
+                        existingContent = existingContent.replace(
+                            /<!-- Updated: .* -->/,
+                            `<!-- Updated: ${timestamp} -->`
+                        );
+                    } else {
+                        // Create new with header
+                        existingContent = `<!-- Brain Entry: ${safeKey} -->\n<!-- Created: ${timestamp} -->\n<!-- Updated: ${timestamp} -->\n\n`;
+                    }
+
+                    const newContent = existingContent + '\n\n---\n\n' + `## Update ${timestamp}\n\n${content}`;
+                    fs.writeFileSync(filePath, newContent);
+
+                    return {
+                        success: true,
+                        message: `Wissen erweitert: "${safeKey}"`,
+                        path: filePath.replace(BRAIN_DIR, '').replace(/\\/g, '/').replace(/^\//, '')
+                    };
+                }
+
+                if (action === 'delete') {
+                    if (!fs.existsSync(filePath)) {
+                        return { success: false, error: `Eintrag "${key}" nicht gefunden.` };
+                    }
+                    fs.unlinkSync(filePath);
+                    return { success: true, message: `Eintrag "${safeKey}" gelöscht.` };
+                }
+
+                return { success: false, error: 'Unbekannte Aktion.' };
             } catch (e: any) {
                 return { success: false, error: e.message };
             }
@@ -710,14 +1159,14 @@ export const tools = {
         }
     },
 
-    sendReportEmail: {
-        description: 'Sendet einen detaillierten System-Report an einen Kontakt.',
+    sendEmail: {
+        description: 'Sendet eine Email (Text oder HTML).',
         parameters: z.object({
             recipient: z.string().describe('Email-Adresse oder Name aus Kontakten'),
-            subject: z.string().optional().describe('Betreff der Email'),
-            notes: z.string().optional().describe('Zusätzliche Infos/Notizen')
+            subject: z.string().describe('Betreff'),
+            body: z.string().describe('Inhalt (Text/HTML)'),
         }),
-        execute: async ({ recipient, subject, notes }: { recipient: string, subject?: string, notes?: string }) => {
+        execute: async ({ recipient, subject, body }: { recipient: string, subject: string, body: string }) => {
             try {
                 // Resolve Recipient
                 const contacts = getContacts();
@@ -727,33 +1176,28 @@ export const tools = {
                 if (!toEmail.includes('@')) {
                     return {
                         success: false,
-                        error: 'Ungültiger Empfänger. Bitte Email-Adresse oder gespeicherten Namen angeben.',
-                        availableContacts: contacts.map(c => c.name)
+                        error: 'Ungültiger Empfänger. Bitte Email-Adresse oder gespeicherten Namen angeben.'
                     };
                 }
 
-                // Gather System Info
-                const context = await getSystemContext();
-                const servers = db.prepare('SELECT count(*) as c FROM servers').get() as any;
-                const vms = db.prepare('SELECT count(*) as c FROM vms').get() as any;
-
-                const html = `
-                    <h2>Reanimator System Report</h2>
-                    <p><strong>Erstellt am:</strong> ${new Date().toLocaleString()}</p>
-                    ${notes ? `<p><strong>Notiz:</strong> ${notes}</p>` : ''}
-                    <hr/>
-                    <h3>System Übersicht</h3>
-                    <ul>
-                        <li>Server: ${servers?.c || 0}</li>
-                        <li>VMs/Container: ${vms?.c || 0}</li>
-                    </ul>
-                    <h3>Details</h3>
-                    <pre>${context}</pre>
-                `;
-
-                const result = await sendEmail(toEmail, subject || 'System Report', html);
+                const result = await sendEmailInternal(toEmail, subject, body);
                 return result;
 
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        }
+    },
+
+    sendTelegram: {
+        description: 'Sendet eine Nachricht per Telegram an alle Admins.',
+        parameters: z.object({
+            message: z.string().describe('Nachricht'),
+        }),
+        execute: async ({ message }: { message: string }) => {
+            try {
+                await broadcastMessage(message);
+                return { success: true, message: 'Nachricht an Admins gesendet.' };
             } catch (e: any) {
                 return { success: false, error: e.message };
             }

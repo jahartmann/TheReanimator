@@ -650,6 +650,8 @@ function NotificationsCard({ telegramUsers, notificationSettings, onRefresh }: N
     const t = useTranslations('notifications');
     const [saving, setSaving] = useState(false);
     const [testingSmtp, setTestingSmtp] = useState(false);
+    const [isTestEmailOpen, setIsTestEmailOpen] = useState(false);
+    const [testRecipient, setTestRecipient] = useState('');
 
     // Local form state
     const [smtp, setSmtp] = useState({ host: '', port: 587, user: '', password: '', from: '' });
@@ -678,15 +680,16 @@ function NotificationsCard({ telegramUsers, notificationSettings, onRefresh }: N
     }
 
     async function handleTestSmtp() {
-        if (!smtp.user && !smtp.from) {
-            toast.error("Please enter User or From address to receive test email.");
+        if (!testRecipient) {
+            toast.error("Please enter a recipient address.");
             return;
         }
         setTestingSmtp(true);
         try {
-            const result = await testSMTPEmail(smtp.user || smtp.from);
+            const result = await testSMTPEmail(testRecipient);
             if (result.success) {
-                toast.success("Test email sent successfully!");
+                toast.success(`Test email sent to ${testRecipient}!`);
+                setIsTestEmailOpen(false);
             } else {
                 toast.error("Failed to send test email: " + result.error);
             }
@@ -694,6 +697,11 @@ function NotificationsCard({ telegramUsers, notificationSettings, onRefresh }: N
             toast.error(e.message);
         }
         setTestingSmtp(false);
+    }
+
+    function openTestDialog() {
+        setTestRecipient(smtp.user || '');
+        setIsTestEmailOpen(true);
     }
 
     async function handleAddUser() {
@@ -769,12 +777,38 @@ function NotificationsCard({ telegramUsers, notificationSettings, onRefresh }: N
                         <Input value={smtp.from} onChange={e => setSmtp({ ...smtp, from: e.target.value })} placeholder="noreply@reanimator.local" />
                     </div>
                     <div className="pt-2 flex justify-end">
-                        <Button onClick={handleTestSmtp} disabled={testingSmtp} variant="secondary" size="sm" className="mr-2">
-                            {testingSmtp ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />} Test
+                        <Button onClick={openTestDialog} variant="secondary" size="sm" className="mr-2">
+                            <Send className="mr-2 h-4 w-4" /> Test Email
                         </Button>
                         <Button onClick={handleSave} disabled={saving} variant="outline" size="sm">
                             <Save className="mr-2 h-4 w-4" /> Save SMTP
                         </Button>
+
+                        <Dialog open={isTestEmailOpen} onOpenChange={setIsTestEmailOpen}>
+                            <DialogContent>
+                                <DialogHeader>
+                                    <DialogTitle>Send Test Email</DialogTitle>
+                                    <DialogDescription>
+                                        Enter the recipient email address to verify SMTP settings.
+                                    </DialogDescription>
+                                </DialogHeader>
+                                <div className="py-4">
+                                    <Label className="mb-2 block">Recipient</Label>
+                                    <Input
+                                        value={testRecipient}
+                                        onChange={(e) => setTestRecipient(e.target.value)}
+                                        placeholder="admin@example.com"
+                                    />
+                                </div>
+                                <DialogFooter>
+                                    <Button variant="outline" onClick={() => setIsTestEmailOpen(false)}>Cancel</Button>
+                                    <Button onClick={handleTestSmtp} disabled={testingSmtp}>
+                                        {testingSmtp ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                                        Send Test
+                                    </Button>
+                                </DialogFooter>
+                            </DialogContent>
+                        </Dialog>
                     </div>
                 </CardContent>
             </Card>
