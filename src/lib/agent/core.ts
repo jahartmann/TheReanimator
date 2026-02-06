@@ -11,7 +11,8 @@ export type StreamEvent =
     | { type: 'status', content: string }
     | { type: 'tool_start', tool: string, args: any }
     | { type: 'tool_end', tool: string, result: any }
-    | { type: 'error', content: string };
+    | { type: 'error', content: string }
+    | { type: 'session', id: number };
 
 // ============================================================================
 // SYSTEM PROMPT
@@ -109,6 +110,9 @@ export async function* chatWithAgentGenerator(
     }
 
     const currentSessionId = sessionId || createChatSession();
+    // Yield session ID first
+    yield { type: 'session', id: currentSessionId };
+
     saveChatMessage(currentSessionId, 'user', message);
 
     // 1. Context & Pre-Check
@@ -282,4 +286,26 @@ async function executeToolsForMessage(userMessage: string, context: { serverId?:
     }
 
     return null;
+}
+
+
+// ============================================================================
+// COMPATIBILITY WRAPPER (For Telegram / Non-Streaming)
+// ============================================================================
+
+export async function chatWithAgent(message: string, history: OllamaMessage[] = [], sessionId?: number): Promise<{ response: string, sessionId: number }> {
+    const generator = chatWithAgentGenerator(message, history, sessionId);
+    let fullResponse = '';
+    let finalSessionId = sessionId || 0;
+
+    for await (const event of generator) {
+        if (event.type === 'text') {
+            fullResponse += event.content;
+        } else if (event.type === 'session') {
+            finalSessionId = event.id;
+        }
+        // Tools are handled inside generator, we just want final text
+    }
+
+    return { response: fullResponse, sessionId: finalSessionId };
 }
