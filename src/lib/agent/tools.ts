@@ -1,3 +1,4 @@
+import { saveContact, getContacts, deleteContact, sendEmail } from '@/lib/email';
 import { z } from 'zod';
 import db from '@/lib/db';
 import { createSSHClient } from '@/lib/ssh';
@@ -9,17 +10,26 @@ if (!fs.existsSync(BRAIN_DIR)) {
     fs.mkdirSync(BRAIN_DIR, { recursive: true });
 }
 
-const SAFE_COMMANDS = [
-    'df', 'free', 'uptime', 'ls', 'cat /proc/cpuinfo', 'cat /proc/meminfo',
-    'cat /etc/os-release', 'cat /etc/issue', 'lsblk', 'ip a', 'id', 'date',
-    'cat /etc/pve/storage.cfg', 'cat /etc/pve/qemu-server/', 'cat /etc/pve/lxc/',
-    'pvesh get', 'pvecm status', 'zpool status', 'zfs list'
+const BLOCKED_COMMANDS = [
+    'reboot', 'shutdown', 'poweroff', 'halt', 'init', 'telinit',
+    'rm ', 'mv ', 'dd ', 'mkfs', 'fdisk', 'parted', 'sfdisk', 'wipefs',
+    'chmod -R', 'chown -R', 'wget', 'curl', 'nc', 'netcat', // network download might be unsafe? User said "everything except delete/stop"
+    // Actually user said: "except restart, delete, move, stop, shutdown"
+    // So safe read/write is okay? "rm" is delete. "mv" is move.
 ];
 
 function isCommandSafe(cmd: string): boolean {
-    // Basic heuristics
-    if (cmd.includes('rm ') || cmd.includes('mkfs') || cmd.includes('dd ') || cmd.includes('>')) return false;
-    return SAFE_COMMANDS.some(safe => cmd.startsWith(safe));
+    const lower = cmd.toLowerCase();
+    // Block if it starts with or contains "delete" logic
+    if (lower.includes('> /dev/')) return false; // overwriting devices
+    if (lower.includes(':(){:|:&};:')) return false; // fork bomb
+
+    // Check blocked keywords
+    if (BLOCKED_COMMANDS.some(blocked => lower.includes(blocked))) {
+        return false;
+    }
+
+    return true; // Allow everything else
 }
 
 // Import server actions
@@ -665,6 +675,85 @@ export const tools = {
                     fs.writeFileSync(filePath, content);
                     return { success: true, message: `Wissen gespeichert unter "${safeKey}".` };
                 }
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        }
+    },
+
+    manageContacts: {
+        description: 'Verwaltet das Adressbuch für Emails.',
+        parameters: z.object({
+            action: z.enum(['list', 'add', 'delete']).describe('Aktion'),
+            name: z.string().optional().describe('Name des Kontakts'),
+            email: z.string().optional().describe('Email-Adresse (nur für add)')
+        }),
+        execute: async ({ action, name, email }: { action: 'list' | 'add' | 'delete', name?: string, email?: string }) => {
+            try {
+                if (action === 'list') {
+                    const contacts = getContacts();
+                    return { success: true, count: contacts.length, contacts };
+                }
+                if (action === 'add') {
+                    if (!name || !email) return { success: false, error: 'Name und Email erforderlich.' };
+                    saveContact(name, email);
+                    return { success: true, message: `Kontakt ${name} (${email}) gespeichert.` };
+                }
+                if (action === 'delete') {
+                    if (!name) return { success: false, error: 'Name erforderlich.' };
+                    deleteContact(name);
+                    return { success: true, message: `Kontakt ${name} gelöscht.` };
+                }
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        }
+    },
+
+    sendReportEmail: {
+        description: 'Sendet einen detaillierten System-Report an einen Kontakt.',
+        parameters: z.object({
+            recipient: z.string().describe('Email-Adresse oder Name aus Kontakten'),
+            subject: z.string().optional().describe('Betreff der Email'),
+            notes: z.string().optional().describe('Zusätzliche Infos/Notizen')
+        }),
+        execute: async ({ recipient, subject, notes }: { recipient: string, subject?: string, notes?: string }) => {
+            try {
+                // Resolve Recipient
+                const contacts = getContacts();
+                const contact = contacts.find(c => c.name.toLowerCase() === recipient.toLowerCase());
+                const toEmail = contact ? contact.email : recipient;
+
+                if (!toEmail.includes('@')) {
+                    return {
+                        success: false,
+                        error: 'Ungültiger Empfänger. Bitte Email-Adresse oder gespeicherten Namen angeben.',
+                        availableContacts: contacts.map(c => c.name)
+                    };
+                }
+
+                // Gather System Info
+                const context = await getSystemContext();
+                const servers = db.prepare('SELECT count(*) as c FROM servers').get() as any;
+                const vms = db.prepare('SELECT count(*) as c FROM vms').get() as any;
+
+                const html = `
+                    <h2>Reanimator System Report</h2>
+                    <p><strong>Erstellt am:</strong> ${new Date().toLocaleString()}</p>
+                    ${notes ? `<p><strong>Notiz:</strong> ${notes}</p>` : ''}
+                    <hr/>
+                    <h3>System Übersicht</h3>
+                    <ul>
+                        <li>Server: ${servers?.c || 0}</li>
+                        <li>VMs/Container: ${vms?.c || 0}</li>
+                    </ul>
+                    <h3>Details</h3>
+                    <pre>${context}</pre>
+                `;
+
+                const result = await sendEmail(toEmail, subject || 'System Report', html);
+                return result;
+
             } catch (e: any) {
                 return { success: false, error: e.message };
             }

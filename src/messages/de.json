@@ -50,7 +50,8 @@
     "tags": "Tags",
     "storage": "Speicher",
     "configs": "Konfigurationen",
-    "agent": "Copilot",
+    "agent": "Chat",
+    ,
     "bulkCommands": "Bulk Commands",
     "users": "Benutzer",
     "administration": "Administration"
@@ -203,7 +204,7 @@
     "github": "GitHub",
     "notifications": "Benachrichtigungen",
     "general": "Allgemein",
-    "agent": "Copilot"
+    "agent": "Chat"
   },
   "notifications": {
     "title": "Benachrichtigungen",

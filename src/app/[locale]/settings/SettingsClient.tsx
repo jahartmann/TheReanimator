@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getAISettings, saveAISettings, checkOllamaConnection, type OllamaModel } from "@/lib/actions/ai";
-import { getNotificationSettings, saveNotificationSettings, getTelegramUsers, addTelegramUser, deleteTelegramUser, toggleTelegramUserBlock } from "@/lib/actions/settings";
+import { getNotificationSettings, saveNotificationSettings, getTelegramUsers, addTelegramUser, deleteTelegramUser, toggleTelegramUserBlock, testSMTPEmail } from "@/lib/actions/settings";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -649,6 +649,7 @@ interface NotificationsCardProps {
 function NotificationsCard({ telegramUsers, notificationSettings, onRefresh }: NotificationsCardProps) {
     const t = useTranslations('notifications');
     const [saving, setSaving] = useState(false);
+    const [testingSmtp, setTestingSmtp] = useState(false);
 
     // Local form state
     const [smtp, setSmtp] = useState({ host: '', port: 587, user: '', password: '', from: '' });
@@ -674,6 +675,25 @@ function NotificationsCard({ telegramUsers, notificationSettings, onRefresh }: N
             toast.error('Error saving settings');
         }
         setSaving(false);
+    }
+
+    async function handleTestSmtp() {
+        if (!smtp.user && !smtp.from) {
+            toast.error("Please enter User or From address to receive test email.");
+            return;
+        }
+        setTestingSmtp(true);
+        try {
+            const result = await testSMTPEmail(smtp.user || smtp.from);
+            if (result.success) {
+                toast.success("Test email sent successfully!");
+            } else {
+                toast.error("Failed to send test email: " + result.error);
+            }
+        } catch (e: any) {
+            toast.error(e.message);
+        }
+        setTestingSmtp(false);
     }
 
     async function handleAddUser() {
@@ -749,6 +769,9 @@ function NotificationsCard({ telegramUsers, notificationSettings, onRefresh }: N
                         <Input value={smtp.from} onChange={e => setSmtp({ ...smtp, from: e.target.value })} placeholder="noreply@reanimator.local" />
                     </div>
                     <div className="pt-2 flex justify-end">
+                        <Button onClick={handleTestSmtp} disabled={testingSmtp} variant="secondary" size="sm" className="mr-2">
+                            {testingSmtp ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />} Test
+                        </Button>
                         <Button onClick={handleSave} disabled={saving} variant="outline" size="sm">
                             <Save className="mr-2 h-4 w-4" /> Save SMTP
                         </Button>

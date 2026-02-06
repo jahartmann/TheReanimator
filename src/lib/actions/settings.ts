@@ -1,6 +1,7 @@
 'use server';
 
 import db from '@/lib/db';
+import { sendEmail } from '@/lib/email';
 
 // --- Notifications Settings ---
 
@@ -93,3 +94,13 @@ export async function toggleTelegramUserBlock(id: number, blocked: boolean) {
         return { success: false, error: e.message };
     }
 }
+
+export async function testSMTPEmail(to: string) {
+    try {
+        const result = await sendEmail(to, 'Reanimator SMTP Test', '<h1>SMTP Test erfolgreich!</h1><p>Das Email-System funktioniert.</p>');
+        return result;
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+}
+
