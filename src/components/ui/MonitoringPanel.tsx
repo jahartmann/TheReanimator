@@ -6,13 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Server, HardDrive, CheckCircle2, AlertCircle, XCircle, Clock, RefreshCw, Activity, Wifi, WifiOff, ChevronRight, Cpu, MemoryStick, AlertTriangle, Bell, TrendingUp, Zap } from "lucide-react";
 import { motion } from 'framer-motion';
-<<<<<<< HEAD
 import { useTranslations, useLocale } from 'next-intl';
-=======
-import { useTranslations } from 'next-intl';
 import { wakeOnLan } from "@/lib/actions/necromancer";
 import { toast } from "sonner";
->>>>>>> e3ba1ec35311d5ad6e38d5d79dc8110d17877677
 
 interface ServerMetrics {
     cpuUsage: number;

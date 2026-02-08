@@ -275,6 +275,8 @@ function ServerBackupCard({
     onToggle: () => void;
 }) {
     const t = useTranslations('configList');
+    const locale = useLocale();
+
     return (
         <div className="border-l-4 border-l-transparent hover:border-l-primary/50 transition-colors">
             <div
