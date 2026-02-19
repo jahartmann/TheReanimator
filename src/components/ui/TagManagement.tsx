@@ -2,25 +2,14 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
-import { Tag, getTags, createTag, deleteTag, syncTagsFromProxmox, pushTagsToServer } from '@/lib/actions/tags';
+import { Tag, getTags, createTag, deleteTag, syncTagsFromProxmox, pushTagsToServer, scanAllClusterTags } from '@/lib/actions/tags';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Loader2, RefreshCw, Plus, Trash2, Upload, Search, X } from 'lucide-react';
+import { Loader2, RefreshCw, Plus, Upload, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
-function getContrastColor(hexColor: string) {
-    if (!hexColor) return 'white';
-    const hex = hexColor.replace('#', '');
-    if (hex.length !== 6) return 'white';
-    const r = parseInt(hex.substring(0, 2), 16);
-    const g = parseInt(hex.substring(2, 4), 16);
-    const b = parseInt(hex.substring(4, 6), 16);
-    const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
-    return (yiq >= 128) ? 'black' : 'white';
-}
 
 export default function TagManagement({ serverId }: { serverId: number }) {
     const t = useTranslations('tagManagement');
@@ -32,8 +21,37 @@ export default function TagManagement({ serverId }: { serverId: number }) {
     const [searchQuery, setSearchQuery] = useState('');
 
     useEffect(() => {
-        loadTags();
+        initTags();
     }, []);
+
+    async function initTags() {
+        setLoading(true);
+        try {
+            // Scan tags and show result
+            console.log("Scanning tags...");
+            const res = await scanAllClusterTags();
+            console.log("Scan result:", res);
+
+            if (!res.success) {
+                toast.error(`Scan Warning: ${res.message}`);
+            } else if (res.count > 0) {
+                toast.success(`Scan completed: ${res.message}`);
+            }
+        } catch (e: any) {
+            console.error("Scan error:", e);
+            toast.error(`Scan failed: ${e.message}`);
+        }
+
+        // Always try to load what we have
+        try {
+            const fetchedTags = await getTags();
+            setTags(fetchedTags);
+        } catch (e) {
+            toast.error(t('errorLoading'));
+        } finally {
+            setLoading(false);
+        }
+    }
 
     async function loadTags() {
         setLoading(true);
@@ -206,24 +224,28 @@ export default function TagManagement({ serverId }: { serverId: number }) {
                                     </div>
                                     <div className="flex flex-wrap gap-2 px-1">
                                         {letterTags.map(tag => {
-                                            const bgColor = tag.color.startsWith('#') ? tag.color : `#${tag.color}`;
+                                            // Ensure 6-digit hex so alpha suffix (#rrggbbaa) is valid CSS
+                                            const raw = tag.color.startsWith('#') ? tag.color.slice(1) : tag.color;
+                                            const hex = `#${raw.length === 3 ? raw.split('').map(c => c + c).join('') : raw}`;
                                             return (
-                                                <Badge
+                                                <span
                                                     key={tag.id}
-                                                    className="group relative pr-6 cursor-default break-all"
+                                                    className="group relative inline-flex items-center gap-1.5 pl-2.5 pr-7 py-1 rounded-full text-xs font-medium cursor-default transition-all"
                                                     style={{
-                                                        backgroundColor: bgColor,
-                                                        color: getContrastColor(tag.color)
+                                                        backgroundColor: `${hex}1a`,
+                                                        color: hex,
+                                                        border: `1px solid ${hex}55`,
                                                     }}
                                                 >
+                                                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: hex }} />
                                                     {tag.name}
                                                     <button
                                                         onClick={() => handleDeleteTag(tag.id)}
-                                                        className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-black/20 rounded"
+                                                        className="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-black/10 rounded-full"
                                                     >
-                                                        <X className="h-3 w-3" />
+                                                        <X className="h-2.5 w-2.5" />
                                                     </button>
-                                                </Badge>
+                                                </span>
                                             );
                                         })}
                                     </div>

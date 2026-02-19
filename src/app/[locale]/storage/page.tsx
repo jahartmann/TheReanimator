@@ -2,27 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { HardDrive, Loader2, Database, Server } from "lucide-react";
+import { HardDrive, Loader2, Database, Server, Share2 } from "lucide-react";
+import { getServerStorages, type ServerStorage } from "@/lib/actions/storage";
 
-interface StorageItem {
-    name: string;
-    type: string;
-    total: number;
-    used: number;
-    available: number;
-    usagePercent: number;
-    active: boolean;
-    isShared: boolean;
-}
 
-interface ServerStorage {
-    serverId: number;
-    serverName: string;
-    serverType: string;
-    storages: StorageItem[];
-}
 
 function formatBytes(bytes: number): string {
     if (bytes === 0) return '0 B';
@@ -43,19 +27,15 @@ export default function StoragePage() {
 
     async function fetchStorage() {
         try {
-            const res = await fetch('/api/storage');
-            if (res.ok) {
-                const data = await res.json();
-                setServerStorages(data);
-            }
+            const data = await getServerStorages();
+            setServerStorages(data);
         } catch (e) {
-            console.error(e);
+            console.error('Failed to load storage:', e);
         } finally {
             setLoading(false);
         }
     }
 
-    // Flatten for total count
     const totalStorages = serverStorages.reduce((sum, s) => sum + s.storages.length, 0);
 
     return (
@@ -70,15 +50,13 @@ export default function StoragePage() {
                     <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
             ) : totalStorages === 0 ? (
-                <Card className="border-dashed">
-                    <CardContent className="flex flex-col items-center justify-center py-12">
-                        <HardDrive className="h-12 w-12 text-muted-foreground mb-4" />
-                        <h3 className="text-lg font-semibold">{t('noStorages')}</h3>
-                        <p className="text-muted-foreground text-center">
-                            {t('noStoragesDesc')}
-                        </p>
-                    </CardContent>
-                </Card>
+                <div className="border border-dashed rounded-lg flex flex-col items-center justify-center py-12">
+                    <HardDrive className="h-12 w-12 text-muted-foreground mb-4" />
+                    <h3 className="text-lg font-semibold">{t('noStorages')}</h3>
+                    <p className="text-muted-foreground text-center">
+                        {t('noStoragesDesc')}
+                    </p>
+                </div>
             ) : (
                 <div className="space-y-8">
                     {serverStorages.map((serverData) => (
@@ -90,49 +68,46 @@ export default function StoragePage() {
                             </div>
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                                 {serverData.storages.map((storage, i) => (
-                                    <Card key={i}>
-                                        <CardHeader className="pb-2">
-                                            <CardTitle className="text-base flex items-center justify-between">
-                                                <span className="flex items-center gap-2">
-                                                    <Database className={`h-4 w-4 ${storage.isShared ? 'text-purple-500' : 'text-blue-500'}`} />
-                                                    {storage.name}
+                                    <div key={i} className="border rounded-lg p-4 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <span className="flex items-center gap-2 font-medium">
+                                                {storage.isShared
+                                                    ? <Share2 className="h-4 w-4 text-purple-500" />
+                                                    : <Database className="h-4 w-4 text-blue-500" />
+                                                }
+                                                {storage.name}
+                                            </span>
+                                            <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                                                {storage.type}
+                                            </span>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="flex justify-between text-sm">
+                                                <span>{t('used')}</span>
+                                                <span className="text-muted-foreground">
+                                                    {formatBytes(storage.used)} / {formatBytes(storage.total)}
                                                 </span>
-                                                <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded">
-                                                    {storage.type}
-                                                </span>
-                                            </CardTitle>
-                                        </CardHeader>
-                                        <CardContent>
-                                            <div className="space-y-3">
-                                                <div className="space-y-1">
-                                                    <div className="flex justify-between text-sm">
-                                                        <span>{t('used')}</span>
-                                                        <span className="text-muted-foreground">
-                                                            {formatBytes(storage.used)} / {formatBytes(storage.total)}
-                                                        </span>
-                                                    </div>
-                                                    <Progress
-                                                        value={storage.usagePercent}
-                                                        className={
-                                                            storage.usagePercent > 90 ? "bg-red-100 [&>div]:bg-red-500" :
-                                                                storage.usagePercent > 75 ? "bg-amber-100 [&>div]:bg-amber-500" : ""
-                                                        }
-                                                    />
-                                                    <div className="text-right text-xs text-muted-foreground">
-                                                        {storage.usagePercent.toFixed(1)}%
-                                                    </div>
-                                                </div>
-                                                <div className="flex justify-between text-xs pt-2 border-t">
-                                                    <span className={storage.active ? 'text-green-500' : 'text-red-500'}>
-                                                        {storage.active ? `● ${t('active')}` : `○ ${t('inactive')}`}
-                                                    </span>
-                                                    {storage.isShared && (
-                                                        <span className="text-purple-500">{t('shared')}</span>
-                                                    )}
-                                                </div>
                                             </div>
-                                        </CardContent>
-                                    </Card>
+                                            <Progress
+                                                value={storage.usagePercent}
+                                                className={
+                                                    storage.usagePercent > 90 ? "bg-red-100 [&>div]:bg-red-500" :
+                                                        storage.usagePercent > 75 ? "bg-amber-100 [&>div]:bg-amber-500" : ""
+                                                }
+                                            />
+                                            <div className="text-right text-xs text-muted-foreground">
+                                                {storage.usagePercent.toFixed(1)}%
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-between text-xs pt-2 border-t">
+                                            <span className={storage.active ? 'text-green-500' : 'text-red-500'}>
+                                                {storage.active ? `● ${t('active')}` : `○ ${t('inactive')}`}
+                                            </span>
+                                            {storage.isShared && (
+                                                <span className="text-purple-500">{t('shared')}</span>
+                                            )}
+                                        </div>
+                                    </div>
                                 ))}
                             </div>
                         </div>

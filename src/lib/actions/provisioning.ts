@@ -212,7 +212,8 @@ export async function applyProfile(
 
     let privateKey: string;
     try {
-        privateKey = fs.readFileSync(privateKeyPath, 'utf-8');
+        const { readPrivateKey } = await import('@/lib/ssh-keys');
+        privateKey = readPrivateKey(privateKeyPath);
     } catch (e) {
         return { success: false, error: `Cannot read SSH private key at ${privateKeyPath}` };
     }

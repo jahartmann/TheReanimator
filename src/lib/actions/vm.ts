@@ -699,7 +699,7 @@ async function migrateRemote(ctx: MigrationContext): Promise<string> {
         const scpRc = `${sourceBackupDir}/scp_${vmid}.rc`;
         try { await sourceSsh.exec(`rm -f ${scpLog} ${scpRc}`); } catch { }
 
-        const scpCmd = `scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${backupFile} root@${targetHost}:${targetBackupDir}/`;
+        const scpCmd = `scp -v -C -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 ${backupFile} root@${targetHost}:${targetBackupDir}/`;
         // We use sh -c to capture exit code of scp into a file
         // echo \\$? escapes $? so the inner shell evaluates it, not the outer SSH shell
         const scpCmdDetached = `/usr/bin/nohup sh -c "${scpCmd} > ${scpLog} 2>&1; echo \\$?>${scpRc}" >/dev/null 2>&1 & echo $!`;

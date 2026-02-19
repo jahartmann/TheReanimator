@@ -9,7 +9,7 @@ export async function POST(
     const { id } = await params;
     const backupId = parseInt(id);
     const body = await request.json();
-    const { filePath } = body;
+    const { filePath, targetServerId } = body;
 
     if (!filePath) {
         return NextResponse.json({ success: false, message: 'filePath required' }, { status: 400 });
@@ -21,6 +21,17 @@ export async function POST(
         return NextResponse.json({ success: false, message: 'Backup not found' }, { status: 404 });
     }
 
-    const result = await restoreFile(backupId, filePath, backup.server_id);
+    // Use targetServerId if provided (cross-node restore), otherwise use original server
+    const serverId = targetServerId ? parseInt(targetServerId) : backup.server_id;
+
+    // Validate target server exists
+    if (targetServerId) {
+        const targetServer = db.prepare('SELECT id FROM servers WHERE id = ?').get(serverId) as any;
+        if (!targetServer) {
+            return NextResponse.json({ success: false, message: 'Target server not found' }, { status: 404 });
+        }
+    }
+
+    const result = await restoreFile(backupId, filePath, serverId);
     return NextResponse.json(result);
 }

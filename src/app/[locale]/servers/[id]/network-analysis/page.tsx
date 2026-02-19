@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import Link from 'next/link';
+import { Link } from '@/i18n/routing';
 import { runNetworkAnalysis, getLatestNetworkAnalysis } from '@/lib/actions/network_analysis';
 import { getAISettings } from '@/lib/actions/ai';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -260,7 +260,7 @@ export default function NetworkAnalysisPage() {
                                     <span>•</span>
                                     <span className="flex items-center gap-1">
                                         <Clock className="h-3 w-3" />
-                                        {new Date(lastUpdate).toLocaleString('ru-RU')}
+                                        {new Date(lastUpdate).toLocaleString('de-DE')}
                                     </span>
                                 </>
                             )}

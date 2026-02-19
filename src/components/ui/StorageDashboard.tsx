@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { HardDrive, RefreshCw, AlertTriangle, Database, Server } from "lucide-react";
 import { motion } from 'framer-motion';
+import { getServerStorages } from "@/lib/actions/storage";
 
 interface StorageInfo {
     serverId: number;
@@ -56,10 +57,8 @@ export function StorageDashboard() {
         setLoading(true);
         setError(null);
         try {
-            const res = await fetch('/api/storage');
-            if (!res.ok) throw new Error('Failed to fetch storage data');
-            const json = await res.json();
-            setData(json);
+            const result = await getServerStorages();
+            setData(result);
         } catch (err) {
             setError(err instanceof Error ? err.message : t('unknownError'));
         }
@@ -173,7 +172,7 @@ export function StorageDashboard() {
                                 <div key={server.serverId} className={`space-y-3 ${server.serverId === -1 ? 'bg-primary/5 p-4 rounded-xl border border-primary/10' : ''}`}>
                                     <div className="flex items-center gap-2">
                                         <div className={`w-6 h-6 rounded flex items-center justify-center ${server.serverId === -1 ? 'bg-purple-500/10' :
-                                                server.serverType === 'pve' ? 'bg-orange-500/10' : 'bg-blue-500/10'
+                                            server.serverType === 'pve' ? 'bg-orange-500/10' : 'bg-blue-500/10'
                                             }`}>
                                             {server.serverId === -1 ? (
                                                 <Database className="h-3 w-3 text-purple-500" />

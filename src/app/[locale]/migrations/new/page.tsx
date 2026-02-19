@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter } from '@/i18n/routing';
 import { useTranslations } from 'next-intl';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -250,6 +250,7 @@ export default function NewMigrationPage() {
                 migrationPayload,
                 {
                     autoVmid: options.autoVmid,
+                    deleteSource: options.deleteSource,
                 }
             );
 
@@ -639,6 +640,13 @@ export default function NewMigrationPage() {
                                                             <p className="text-xs text-muted-foreground">{t('step3.onlineModeDesc')}</p>
                                                         </div>
                                                     </div>
+                                                    <div className="flex items-start gap-3 pt-2 border-t">
+                                                        <Checkbox id="deleteSource" checked={options.deleteSource} onCheckedChange={(c) => setOptions(o => ({ ...o, deleteSource: !!c }))} />
+                                                        <div className="grid gap-1.5 leading-none">
+                                                            <Label htmlFor="deleteSource" className="text-red-600">{t('step3.deleteSource')}</Label>
+                                                            <p className="text-xs text-muted-foreground">{t('step3.deleteSourceDesc')}</p>
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
 
@@ -690,6 +698,12 @@ export default function NewMigrationPage() {
                                                 <div className="font-bold text-xl">{options.online ? t('step4.online') : t('step4.offline')}</div>
                                                 <div className="text-muted-foreground">{t('step4.mode')}</div>
                                             </div>
+                                            {options.deleteSource && (
+                                                <div className="text-center">
+                                                    <div className="font-bold text-xl text-red-600">{t('step4.deleteSourceYes')}</div>
+                                                    <div className="text-muted-foreground">{t('step4.afterMigration')}</div>
+                                                </div>
+                                            )}
                                             {options.schedule && (
                                                 <div className="text-center">
                                                     <div className="font-bold text-xl text-yellow-600">{t('step4.scheduled')}</div>

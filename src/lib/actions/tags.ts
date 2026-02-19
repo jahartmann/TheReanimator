@@ -65,20 +65,19 @@ export async function pushTagsToServer(serverId: number, tags: Tag[]): Promise<{
     try {
         await ssh.connect();
 
-        // Construct color map: "tag1=color,tag2=color"
-        // Proxmox format in datacenter.cfg: tag-style: shape=circle,color-map=tag1:FFFFFF;tag2:000000
-        const colorMap = tags.map(t => `${t.name}:${t.color}`).join(';');
+        // Build color-map string: "tag1:RRGGBB;tag2:RRGGBB"
+        const colorMap = tags.map(t => {
+            const hex = t.color.replace('#', '');
+            return `${t.name}:${hex}`;
+        }).join(';');
 
-        // Using pvesh/pveum might not expose tag-style directly easily, so we can edit the config file.
-        // Safer: check if we can using 'pvesh set /cluster/options -tag-style ...'
-        // According to stats, 'tag-style' is a cluster option.
-
-        const cmd = `pvesh set /cluster/options -tag-style "shape=circle,color-map=${colorMap}"`;
+        // pvesh uses -- flags; -tag-style (single dash) is wrong and silently ignored
+        const cmd = `pvesh set /cluster/options --tag-style "shape=circle,color-map=${colorMap}"`;
 
         console.log(`[Tags] Pushing to server ${server.name}: ${cmd}`);
-        const output = await ssh.exec(cmd);
+        await ssh.exec(cmd);
 
-        return { success: true, message: output };
+        return { success: true, message: `${tags.length} Tags übertragen` };
     } catch (e) {
         console.error('[Tags] Push failed:', e);
         return { success: false, message: String(e) };
@@ -87,8 +86,10 @@ export async function pushTagsToServer(serverId: number, tags: Tag[]): Promise<{
     }
 }
 
-// Sync tags from Proxmox server
+// Sync tags from Proxmox server (legacy / specific server pull)
 export async function syncTagsFromProxmox(serverId: number): Promise<{ success: boolean; message?: string }> {
+    // Re-use robust scan logic but filter for single server if needed, 
+    // or just keep this simple implementation for specific server sync button
     const server = getServer(serverId);
     if (!server) return { success: false, message: 'Server not found' };
 
@@ -102,26 +103,24 @@ export async function syncTagsFromProxmox(serverId: number): Promise<{ success: 
     try {
         await ssh.connect();
 
-        // Get cluster options to find tag-style
-        // pvesh get /cluster/options --output-format json
         const output = await ssh.exec('pvesh get /cluster/options --output-format json');
         const options = JSON.parse(output);
         const tagStyle = options['tag-style'];
 
-        // Handle case where tagStyle is not a string (could be undefined or object)
-        if (!tagStyle || typeof tagStyle !== 'string') {
-            console.log('No tag-style found or invalid format');
-            return { success: true, message: 'Keine Tags zum Synchronisieren gefunden' };
+        let colorMapStr: string | null = null;
+        if (typeof tagStyle === 'string') {
+            const m = tagStyle.match(/color-map=([^,]+)/);
+            colorMapStr = m ? m[1] : null;
+        } else if (tagStyle && typeof tagStyle === 'object') {
+            colorMapStr = tagStyle['color-map'] || null;
         }
 
-        const colorMapMatch = tagStyle.match(/color-map=([^,]+)/);
-        if (!colorMapMatch) {
-            console.log('No color-map found in tag-style');
-            return { success: true, message: 'Keine Farbzuordnung gefunden' };
+        if (!colorMapStr) {
+            // Fallback: Scan resources if no global map
+            return await scanAllClusterTags();
         }
 
-        const colorMap = colorMapMatch[1];
-        const tags = colorMap.split(';').map((t: string) => { // Explicit type here too
+        const tags = colorMapStr.split(';').map((t: string) => {
             const [name, color] = t.split(':');
             return { name, color };
         }).filter((t: { name: string, color: string }) => t.name && t.color);
@@ -165,21 +164,9 @@ export async function assignTagsToResource(
     try {
         await ssh.connect();
 
-        // Prepare tags string: tag1,tag2,tag3
-        // Need to handle spaces or special chars if any, generally proxmox tags are simple strings
-        // But comma separated
         const tagString = tags.map(t => t.trim()).join(',');
 
-        // We don't know if it's qemu or lxc easily without checking, but pvesh path differs.
-        // However, we can try to find where the VM is.
-        // Or simpler: The user of this function might know.
-        // Actually, 'pvesh set /nodes/{node}/{type}/{vmid} -tags {tags}'
-        // We need the node and type (qemu/lxc).
-        // Let's assume we can find it via pvesh or we update the UI to pass it.
-        // For now, let's try to find it. But wait, `pvesh` is cluster wide? 
-        // No, we need node.
-
-        // Let's first search for the VM to get node and type
+        // Search for the VM to get node and type
         const findCmd = `pvesh get /cluster/resources --type vm --output-format json`;
         const resourcesJson = await ssh.exec(findCmd);
         const resources = JSON.parse(resourcesJson);
@@ -187,38 +174,10 @@ export async function assignTagsToResource(
 
         if (!resource) return { success: false, message: 'Resource not found' };
 
-        if (!resource) return { success: false, message: 'Resource not found' };
-
         const { node, type } = resource; // type is 'qemu' or 'lxc'
 
-        let cmd = '';
-        if (type === 'qemu') {
-            cmd = `qm set ${vmid} --tags "${tagString}"`;
-        } else if (type === 'lxc') {
-            cmd = `pct set ${vmid} --tags "${tagString}"`;
-        } else {
-            return { success: false, message: 'Unknown resource type: ' + type };
-        }
+        const cmd = `pvesh set /nodes/${node}/${type}/${vmid}/config -tags "${tagString}"`;
 
-        // Execute on the specific node? No, qm/pct need to run on the node where VM is? 
-        // Or cluster-wide? qm usually runs on any node in cluster if shared? 
-        // Actually qm needs to run on the node OR we use ssh to connect to THAT node.
-        // My SSH client connects to `server.ssh_host`. Is that the node?
-        // If `server` represents the cluster entry point, we might be on a different node.
-        // But `server` in DB usually is a specific node.
-        // If the VM is on another node (resource.node), we might need to forward the command?
-        // Simple fix: `ssh node "qm ..."` if we are on a different node.
-        // But wait, `pvesh` handles forwarding. `qm` might not.
-        // If I use `pvesh set /nodes/{node}/{type}/{vmid}/config -tags ...` it works via API.
-        // Let's try the API path properly first: `/nodes/{node}/qemu/{vmid}/config`.
-
-        // Retry with proper API path first (maybe I missed /config or something?)
-        // Docs: PUT /nodes/{node}/qemu/{vmid}/config
-        // Params: tags
-
-        cmd = `pvesh set /nodes/${node}/${type}/${vmid}/config -tags "${tagString}"`;
-
-        // Debug
         console.log(`[Tags] Assigning to ${vmid} on ${node}: ${cmd}`);
         await ssh.exec(cmd);
 
@@ -236,9 +195,11 @@ export async function scanAllClusterTags(): Promise<{ success: boolean; message:
     const servers = await getServers();
     const foundTags = new Set<string>();
     let errorCount = 0;
+    let scannedNodes = 0;
 
     for (const server of servers) {
         try {
+            console.log(`[Tags] Connecting to server ${server.name} (${server.host}) for tag scan...`);
             const ssh = createSSHClient({
                 ssh_host: server.ssh_host,
                 ssh_port: server.ssh_port,
@@ -247,16 +208,51 @@ export async function scanAllClusterTags(): Promise<{ success: boolean; message:
             });
             await ssh.connect();
 
-            // Get all resources to extract tags
-            const output = await ssh.exec('pvesh get /cluster/resources --output-format json');
-            const resources = JSON.parse(output);
+            // 1. Discover nodes in this cluster (or standalone node)
+            const nodesJson = await ssh.exec('pvesh get /nodes --output-format json');
+            let nodes = [];
+            try {
+                nodes = JSON.parse(nodesJson);
+            } catch (e) {
+                console.warn('[Tags] Failed to parse nodes json, using fallback (hostname)', e);
+                const hostname = (await ssh.exec('cat /etc/hostname')).trim();
+                nodes = [{ node: hostname }];
+            }
 
-            resources.forEach((r: any) => {
-                if (r.tags) {
-                    const tList = r.tags.split(',').map((t: string) => t.trim()).filter((t: string) => t);
-                    tList.forEach((t: string) => foundTags.add(t));
+            console.log(`[Tags] Found ${nodes.length} nodes on server ${server.name}:`, nodes.map((n: any) => n.node).join(', '));
+
+            for (const nodeObj of nodes) {
+                const nodeName = nodeObj.node;
+                scannedNodes++;
+
+                // 2. Get QEMU VMs for this node
+                try {
+                    const qemuJson = await ssh.exec(`pvesh get /nodes/${nodeName}/qemu --output-format json`);
+                    const qemuList = JSON.parse(qemuJson);
+                    qemuList.forEach((vm: any) => {
+                        if (vm.tags) {
+                            const tList = typeof vm.tags === 'string' ? vm.tags.split(',') : [];
+                            tList.forEach((t: string) => foundTags.add(t.trim()));
+                        }
+                    });
+                } catch (e) {
+                    console.warn(`[Tags] Failed to fetch QEMU for node ${nodeName}`, e);
                 }
-            });
+
+                // 3. Get LXC Containers for this node
+                try {
+                    const lxcJson = await ssh.exec(`pvesh get /nodes/${nodeName}/lxc --output-format json`);
+                    const lxcList = JSON.parse(lxcJson);
+                    lxcList.forEach((vm: any) => {
+                        if (vm.tags) {
+                            const tList = typeof vm.tags === 'string' ? vm.tags.split(',') : [];
+                            tList.forEach((t: string) => foundTags.add(t.trim()));
+                        }
+                    });
+                } catch (e) {
+                    console.warn(`[Tags] Failed to fetch LXC for node ${nodeName}`, e);
+                }
+            }
 
             await ssh.disconnect();
         } catch (e) {
@@ -268,11 +264,17 @@ export async function scanAllClusterTags(): Promise<{ success: boolean; message:
     // Sync found tags to DB (if not exist)
     const insertStmt = db.prepare('INSERT OR IGNORE INTO tags (name, color) VALUES (?, ?)');
     let newCount = 0;
+
+    // Ensure table exists just in case (though init script handles it)
+    try {
+        db.exec("CREATE TABLE IF NOT EXISTS tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, color TEXT NOT NULL)");
+    } catch { }
+
     const existingTags = new Set((db.prepare('SELECT name FROM tags').all() as Tag[]).map(t => t.name));
 
-    const defaultColors = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#1A535C', '#F7FFF7'];
+    const defaultColors = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#1A535C', '#F7FFF7', '#3B82F6', '#8B5CF6', '#EC4899'];
 
-    for (const tagName of Array.from(foundTags)) {
+    for (const tagName of Array.from(foundTags).filter(t => t && t.length > 0)) {
         if (!existingTags.has(tagName)) {
             // Assign random default color
             const color = defaultColors[Math.floor(Math.random() * defaultColors.length)];
@@ -283,7 +285,7 @@ export async function scanAllClusterTags(): Promise<{ success: boolean; message:
 
     return {
         success: true,
-        message: `Scanned ${servers.length} servers. Found ${foundTags.size} unique tags. Added ${newCount} new tags. Errors on ${errorCount} servers.`,
+        message: `Scanned ${servers.length} servers (${scannedNodes} nodes). Found ${foundTags.size} unique tags. Added ${newCount} new tags. Errors on ${errorCount} servers.`,
         count: newCount
     };
 }

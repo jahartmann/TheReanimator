@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -136,19 +136,24 @@ export function MonitoringPanel() {
     const [loading, setLoading] = useState(true);
     const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
     const [showAllServers, setShowAllServers] = useState(false);
+    const fetchingRef = useRef(false);
 
     async function fetchData() {
+        if (fetchingRef.current) return;
+        fetchingRef.current = true;
         setLoading(true);
         try {
-            const res = await fetch('/api/monitoring');
+            const res = await fetch(`/${locale}/api/monitoring`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const json = await res.json();
             setData(json);
             setLastUpdate(new Date());
         } catch (err) {
             console.error('Failed to fetch monitoring data:', err);
+        } finally {
+            setLoading(false);
+            fetchingRef.current = false;
         }
-        setLoading(false);
-        setLoading(false);
     }
 
     async function handleWakeUp(e: React.MouseEvent, server: ServerStatus) {
@@ -234,7 +239,7 @@ export function MonitoringPanel() {
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 {/* Server Status */}
                 <Card className="overflow-hidden">
-                    <div className={`h-1 ${summary.offlineServers === 0 ? 'bg-gradient-to-r from-green-500 to-emerald-500' : 'bg-gradient-to-r from-red-500 to-orange-500'}`} />
+                    <div className={`h-0.5 ${summary.offlineServers === 0 ? 'bg-green-500' : 'bg-red-500'}`} />
                     <CardContent className="p-4">
                         <div className="flex items-center justify-between">
                             <div>
@@ -258,7 +263,7 @@ export function MonitoringPanel() {
 
                 {/* Resource Usage */}
                 <Card className="overflow-hidden">
-                    <div className="h-1 bg-gradient-to-r from-blue-500 to-cyan-500" />
+                    <div className="h-0.5 bg-border" />
                     <CardContent className="p-4">
                         <p className="text-sm text-muted-foreground mb-3">{t('avgLoad')}</p>
                         <div className="flex justify-around">
@@ -286,7 +291,7 @@ export function MonitoringPanel() {
 
                 {/* Backup Health */}
                 <Card className="overflow-hidden">
-                    <div className="h-1 bg-gradient-to-r from-purple-500 to-pink-500" />
+                    <div className="h-0.5 bg-border" />
                     <CardContent className="p-4">
                         <div className="flex items-center justify-between">
                             <div>
@@ -309,8 +314,8 @@ export function MonitoringPanel() {
                                     {summary.healthCounts.none > 0 && `${summary.healthCounts.none} ${t('noBackup')}`}
                                 </p>
                             </div>
-                            <div className="w-12 h-12 rounded-full bg-purple-500/10 flex items-center justify-center">
-                                <Clock className="h-6 w-6 text-purple-500" />
+                            <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+                                <Clock className="h-6 w-6 text-muted-foreground" />
                             </div>
                         </div>
                     </CardContent>
@@ -318,18 +323,18 @@ export function MonitoringPanel() {
 
                 {/* Storage */}
                 <Card className="overflow-hidden">
-                    <div className="h-1 bg-gradient-to-r from-orange-500 to-amber-500" />
+                    <div className="h-0.5 bg-border" />
                     <CardContent className="p-4">
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-sm text-muted-foreground">{t('backupStorage')}</p>
                                 <p className="text-2xl font-bold">{formatBytes(summary.totalSize)}</p>
                                 <p className="text-xs text-muted-foreground mt-1">
-                                    {t('backupsUnit', { count: summary.totalBackups })}
+                                    {summary.totalBackups} {summary.totalBackups === 1 ? 'Backup' : t('totalBackups')}
                                 </p>
                             </div>
-                            <div className="w-12 h-12 rounded-full bg-orange-500/10 flex items-center justify-center">
-                                <HardDrive className="h-6 w-6 text-orange-500" />
+                            <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+                                <HardDrive className="h-6 w-6 text-muted-foreground" />
                             </div>
                         </div>
                     </CardContent>
@@ -489,7 +494,7 @@ export function MonitoringPanel() {
                                         </span>
                                     </div>
                                     <span className="text-muted-foreground">
-                                        {t('backupsUnit', { count: server.totalBackups })}
+                                        {server.totalBackups} {server.totalBackups === 1 ? 'Backup' : t('backups')}
                                     </span>
                                 </div>
                             </Link>
@@ -510,47 +515,6 @@ export function MonitoringPanel() {
                 </CardContent>
             </Card>
 
-            {/* Recent Backups */}
-            {summary.recentBackups && summary.recentBackups.length > 0 && (
-                <Card className="overflow-hidden border-muted/60">
-                    <CardHeader className="py-3 px-4 bg-muted/10">
-                        <CardTitle className="text-base flex items-center gap-2">
-                            <TrendingUp className="h-4 w-4" />
-                            {t('recentBackups')}
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-0">
-                        <div className="divide-y divide-border/50">
-                            {summary.recentBackups.slice(0, 5).map((backup) => (
-                                <Link
-                                    key={backup.id}
-                                    href={`/configs/${backup.id}`}
-                                    className="flex items-center gap-4 p-3 hover:bg-muted/5 transition-colors"
-                                >
-                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${backup.serverType === 'pve' ? 'bg-orange-500/10' : 'bg-blue-500/10'
-                                        }`}>
-                                        <Server className={`h-4 w-4 ${backup.serverType === 'pve' ? 'text-orange-500' : 'text-blue-500'
-                                            }`} />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-medium truncate">{backup.serverName}</p>
-                                        <p className="text-xs text-muted-foreground">
-                                            {new Date(backup.backup_date).toLocaleString(locale, {
-                                                dateStyle: 'medium',
-                                                timeStyle: 'short'
-                                            })}
-                                        </p>
-                                    </div>
-                                    <div className="text-right text-xs text-muted-foreground">
-                                        <p>{t('filesUnit', { count: backup.file_count })}</p>
-                                        <p>{formatBytes(backup.total_size)}</p>
-                                    </div>
-                                </Link>
-                            ))}
-                        </div>
-                    </CardContent>
-                </Card>
-            )}
         </div>
     );
 }

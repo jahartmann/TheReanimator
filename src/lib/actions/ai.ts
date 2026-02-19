@@ -33,23 +33,49 @@ async function getServerLocale(): Promise<string> {
 // --- Settings Management ---
 
 export async function getAISettings() {
-    const url = db.prepare('SELECT value FROM settings WHERE key = ?').get('ai_url') as { value: string } | undefined;
-    const model = db.prepare('SELECT value FROM settings WHERE key = ?').get('ai_model') as { value: string } | undefined;
-    const enabled = db.prepare('SELECT value FROM settings WHERE key = ?').get('ai_enabled') as { value: string } | undefined;
+    console.log('[AI] Loading settings from DB...');
+    try {
+        const url = db.prepare('SELECT value FROM settings WHERE key = ?').get('ai_url') as { value: string } | undefined;
+        const model = db.prepare('SELECT value FROM settings WHERE key = ?').get('ai_model') as { value: string } | undefined;
+        const enabled = db.prepare('SELECT value FROM settings WHERE key = ?').get('ai_enabled') as { value: string } | undefined;
 
-    return {
-        url: url?.value || 'http://localhost:11434',
-        model: model?.value || '',
-        enabled: enabled?.value === 'true' // Default to false if not set
-    };
+        const settings = {
+            url: url?.value || 'http://localhost:11434',
+            model: model?.value || '',
+            enabled: enabled?.value === 'true' // Default to false if not set
+        };
+        console.log('[AI] Loaded settings:', settings);
+        return settings;
+    } catch (error) {
+        console.error('[AI] Failed to load settings:', error);
+        return {
+            url: 'http://localhost:11434',
+            model: '',
+            enabled: false
+        };
+    }
 }
 
 export async function saveAISettings(url: string, model: string, enabled: boolean) {
-    const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
-    upsert.run('ai_url', url);
-    upsert.run('ai_model', model);
-    upsert.run('ai_enabled', String(enabled));
-    return { success: true };
+    console.log('[AI] Saving settings:', { url, model, enabled });
+    try {
+        const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+
+        const infoUrl = upsert.run('ai_url', url);
+        const infoModel = upsert.run('ai_model', model);
+        const infoEnabled = upsert.run('ai_enabled', String(enabled));
+
+        console.log('[AI] Settings saved to DB. Changes:', {
+            urlChanges: infoUrl.changes,
+            modelChanges: infoModel.changes,
+            enabledChanges: infoEnabled.changes
+        });
+
+        return { success: true };
+    } catch (error) {
+        console.error('[AI] Failed to save settings:', error);
+        return { success: false, error: String(error) };
+    }
 }
 
 // --- Ollama API Proxy ---
@@ -66,17 +92,18 @@ export async function checkOllamaConnection(url: string) {
         // Remove trailing slash
         const cleanUrl = url.replace(/\/$/, '');
 
-        // Create abort controller with 10 second timeout
+        // Create abort controller with 5 second timeout (fast fail)
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
 
         try {
             const res = await request(`${cleanUrl}/api/tags`, {
-                signal: controller.signal
+                signal: controller.signal,
+                headers: { 'Content-Type': 'application/json' }
             });
 
             if (res.statusCode !== 200) {
-                return { success: false, message: `Status ${res.statusCode}` };
+                return { success: false, message: `Ollama returned status ${res.statusCode}` };
             }
 
             const data = await res.body.json() as { models: OllamaModel[] };
@@ -85,8 +112,11 @@ export async function checkOllamaConnection(url: string) {
             clearTimeout(timeoutId);
         }
     } catch (e: any) {
-        if (e.name === 'AbortError') {
-            return { success: false, message: 'Connection timeout (10s)' };
+        if (e.name === 'AbortError' || e.code === 'UND_ERR_CONNECT_TIMEOUT') {
+            return { success: false, message: 'Connection timed out (5s). Is Ollama running?' };
+        }
+        if (e.code === 'ECONNREFUSED') {
+            return { success: false, message: 'Connection refused. Check URL and port.' };
         }
         return { success: false, message: e.message || 'Connection failed' };
     }

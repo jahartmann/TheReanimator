@@ -188,7 +188,7 @@ export default function ConfigList({ servers, backupsByServer, groups }: ConfigL
                                         <div className="flex items-center gap-4 text-sm text-muted-foreground">
                                             <span>{groupServers.length} {t('servers')}</span>
                                             <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 text-xs font-medium">
-                                                {t('backupsUnit', { count: stats.totalBackups })}
+                                                {stats.totalBackups} {stats.totalBackups === 1 ? 'Backup' : t('backups')}
                                             </span>
                                             <span className="text-xs">{formatBytes(stats.totalSize)}</span>
                                         </div>
@@ -237,7 +237,7 @@ export default function ConfigList({ servers, backupsByServer, groups }: ConfigL
                                     <div className="flex items-center gap-4 text-sm text-muted-foreground">
                                         <span>{groupedServers['ungrouped'].length} {t('servers')}</span>
                                         <span className="px-2 py-0.5 rounded-full bg-muted text-muted-foreground text-xs">
-                                            {t('backupsUnit', { count: getGroupStats(groupedServers['ungrouped']).totalBackups })}
+                                            {getGroupStats(groupedServers['ungrouped']).totalBackups} {getGroupStats(groupedServers['ungrouped']).totalBackups === 1 ? 'Backup' : t('backups')}
                                         </span>
                                     </div>
                                 </div>
@@ -276,7 +276,6 @@ function ServerBackupCard({
 }) {
     const t = useTranslations('configList');
     const locale = useLocale();
-
     return (
         <div className="border-l-4 border-l-transparent hover:border-l-primary/50 transition-colors">
             <div
@@ -306,7 +305,7 @@ function ServerBackupCard({
                 </div>
                 <div className="flex items-center gap-4" onClick={e => e.stopPropagation()}>
                     <span className="text-sm text-muted-foreground">
-                        {t('backupsUnit', { count: backups.length })}
+                        {backups.length} {backups.length === 1 ? 'Backup' : t('backups')}
                     </span>
                     <BackupButton serverId={server.id} />
                 </div>
@@ -334,7 +333,7 @@ function ServerBackupCard({
                                             })}
                                         </p>
                                         <p className="text-xs text-muted-foreground flex items-center gap-2">
-                                            <span>{t('filesUnit', { count: backup.file_count })}</span>
+                                            <span>{backup.file_count} {t('files')}</span>
                                             <span>•</span>
                                             <span>{formatBytes(backup.total_size)}</span>
                                         </p>

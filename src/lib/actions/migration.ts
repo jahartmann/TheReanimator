@@ -40,10 +40,11 @@ export async function startServerMigration(
     sourceId: number,
     targetId: number,
     sourceVms: any[], // Simple array of {vmid, type}
-    options?: { // Optional manual overrides
+    options?: {
         targetStorage?: string;
         targetBridge?: string;
-        autoVmid?: boolean; // If true, auto-select next available VMID
+        autoVmid?: boolean;
+        deleteSource?: boolean;
     }
 ): Promise<{ success: boolean; taskId?: number; message?: string }> {
     try {
@@ -104,7 +105,9 @@ export async function startServerMigration(
         const migrationExecOptions = {
             storage: options?.targetStorage,
             bridge: options?.targetBridge,
-            autoVmid: options?.autoVmid ?? true // Default to true
+            autoVmid: options?.autoVmid ?? true,
+            deleteSource: options?.deleteSource ?? false,
+            sourceServerId: sourceId
         };
 
         // Execute asynchronously
@@ -210,7 +213,7 @@ export async function startVMMigration(
 }
 
 // Background Worker
-async function executeMigrationTask(taskId: number, vms: any[], options: { storage?: string, bridge?: string, autoVmid?: boolean }) {
+async function executeMigrationTask(taskId: number, vms: any[], options: { storage?: string, bridge?: string, autoVmid?: boolean, deleteSource?: boolean, sourceServerId?: number }) {
     const log = (msg: string) => {
         const ts = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         db.prepare('UPDATE migration_tasks SET log = log || ? WHERE id = ?').run(`[${ts}] ${msg}\n`, taskId);
@@ -228,10 +231,45 @@ async function executeMigrationTask(taskId: number, vms: any[], options: { stora
         steps[0].status = 'running';
         db.prepare('UPDATE migration_tasks SET current_step = ?, steps_json = ? WHERE id = ?').run(1, JSON.stringify(steps), taskId);
         log('Starting preparation...');
-        // (Optional: perform real checks here if needed)
-        await new Promise(r => setTimeout(r, 1000));
+
+        // Pre-check: Test SSH connectivity to both servers
+        const source = db.prepare('SELECT * FROM servers WHERE id = ?').get(taskRow.source_server_id) as any;
+        const target = db.prepare('SELECT * FROM servers WHERE id = ?').get(taskRow.target_server_id) as any;
+
+        if (source) {
+            try {
+                log(`Testing SSH to source: ${source.name} (${source.ssh_host})...`);
+                const srcSsh = createSSHClient({ ssh_host: source.ssh_host, ssh_port: source.ssh_port, ssh_user: source.ssh_user, ssh_key: source.ssh_key });
+                await srcSsh.connect();
+                await srcSsh.disconnect();
+                log('Source SSH: OK');
+            } catch (sshErr: any) {
+                log(`Source SSH FAILED: ${sshErr.message}`);
+                steps[0].status = 'failed';
+                steps[0].error = `Source SSH failed: ${sshErr.message}`;
+                db.prepare(`UPDATE migration_tasks SET status = 'failed', steps_json = ? WHERE id = ?`).run(JSON.stringify(steps), taskId);
+                return;
+            }
+        }
+
+        if (target) {
+            try {
+                log(`Testing SSH to target: ${target.name} (${target.ssh_host})...`);
+                const tgtSsh = createSSHClient({ ssh_host: target.ssh_host, ssh_port: target.ssh_port, ssh_user: target.ssh_user, ssh_key: target.ssh_key });
+                await tgtSsh.connect();
+                await tgtSsh.disconnect();
+                log('Target SSH: OK');
+            } catch (sshErr: any) {
+                log(`Target SSH FAILED: ${sshErr.message}`);
+                steps[0].status = 'failed';
+                steps[0].error = `Target SSH failed: ${sshErr.message}`;
+                db.prepare(`UPDATE migration_tasks SET status = 'failed', steps_json = ? WHERE id = ?`).run(JSON.stringify(steps), taskId);
+                return;
+            }
+        }
+
         steps[0].status = 'completed';
-        log('Preparation done.');
+        log('Preparation done. All pre-checks passed.');
         db.prepare('UPDATE migration_tasks SET steps_json = ? WHERE id = ?').run(JSON.stringify(steps), taskId);
 
 
@@ -270,6 +308,31 @@ async function executeMigrationTask(taskId: number, vms: any[], options: { stora
             if (res.success) {
                 steps[currentStepIndex].status = 'completed';
                 log(`Success: ${res.message ? res.message.substring(0, 100) + '...' : 'OK'}`);
+
+                // Delete source VM if option enabled
+                if (options.deleteSource && options.sourceServerId) {
+                    try {
+                        log(`Deleting source ${vm.type === 'qemu' ? 'VM' : 'LXC'} ${vm.vmid} from source server...`);
+                        const source = db.prepare('SELECT * FROM servers WHERE id = ?').get(options.sourceServerId) as any;
+                        if (source) {
+                            const ssh = createSSHClient({
+                                ssh_host: source.ssh_host,
+                                ssh_port: source.ssh_port,
+                                ssh_user: source.ssh_user,
+                                ssh_key: source.ssh_key
+                            });
+                            await ssh.connect();
+                            const stopCmd = vm.type === 'qemu' ? `qm stop ${vm.vmid} --skiplock 2>/dev/null; sleep 2` : `pct stop ${vm.vmid} 2>/dev/null; sleep 2`;
+                            await ssh.exec(stopCmd).catch(() => {});
+                            const destroyCmd = vm.type === 'qemu' ? `qm destroy ${vm.vmid} --purge` : `pct destroy ${vm.vmid} --purge`;
+                            const destroyResult = await ssh.exec(destroyCmd);
+                            await ssh.disconnect();
+                            log(`Source ${vm.vmid} deleted successfully.`);
+                        }
+                    } catch (delErr: any) {
+                        log(`Warning: Failed to delete source ${vm.vmid}: ${delErr.message}`);
+                    }
+                }
             } else {
                 steps[currentStepIndex].status = 'failed';
                 steps[currentStepIndex].error = res.message;
@@ -291,11 +354,26 @@ async function executeMigrationTask(taskId: number, vms: any[], options: { stora
             steps[currentStepIndex].status = 'completed';
         }
 
-        // Complete Task
-        db.prepare(`UPDATE migration_tasks SET status = 'completed', completed_at = datetime('now'), steps_json = ? WHERE id = ?`)
-            .run(JSON.stringify(steps), taskId);
+        // Determine final status based on step results
+        const failedSteps = steps.filter(s => s.status === 'failed');
+        const completedSteps = steps.filter(s => s.status === 'completed');
+        const vmSteps = steps.filter(s => s.type === 'vm' || s.type === 'lxc');
+        const failedVmSteps = vmSteps.filter(s => s.status === 'failed');
 
-        log('Migration Task Completed.');
+        let finalStatus: string;
+        if (failedVmSteps.length === vmSteps.length && vmSteps.length > 0) {
+            finalStatus = 'failed';
+            log('Migration Task FAILED - all VMs failed.');
+        } else if (failedVmSteps.length > 0) {
+            finalStatus = 'completed';
+            log(`Migration Task completed with errors (${failedVmSteps.length}/${vmSteps.length} failed).`);
+        } else {
+            finalStatus = 'completed';
+            log('Migration Task completed successfully.');
+        }
+
+        db.prepare(`UPDATE migration_tasks SET status = ?, completed_at = datetime('now'), steps_json = ?, error = ? WHERE id = ?`)
+            .run(finalStatus, JSON.stringify(steps), failedVmSteps.length > 0 ? `${failedVmSteps.length}/${vmSteps.length} VMs failed` : null, taskId);
 
     } catch (e) {
         log(`CRITICAL ERROR: ${e}`);
@@ -358,10 +436,22 @@ export async function getAllMigrationTasks(): Promise<MigrationTask[]> {
 // Cancel a running migration
 export async function cancelMigration(taskId: number): Promise<{ success: boolean }> {
     const stmt = db.prepare(`
-        UPDATE migration_tasks 
+        UPDATE migration_tasks
         SET status = 'cancelled', completed_at = datetime('now')
         WHERE id = ? AND status IN ('pending', 'running')
     `);
     stmt.run(taskId);
+    return { success: true };
+}
+
+// Delete a migration task
+export async function deleteMigrationTask(taskId: number): Promise<{ success: boolean }> {
+    db.prepare('DELETE FROM migration_tasks WHERE id = ?').run(taskId);
+    return { success: true };
+}
+
+// Clear all completed/failed/cancelled migration history
+export async function clearMigrationHistory(): Promise<{ success: boolean }> {
+    db.prepare("DELETE FROM migration_tasks WHERE status IN ('completed', 'failed', 'cancelled')").run();
     return { success: true };
 }

@@ -300,6 +300,20 @@ db.exec(`
   );
 `);
 
+// ====== TELEGRAM INTEGRATION ======
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS telegram_users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL UNIQUE,
+    username TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    is_blocked BOOLEAN DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
 // ====== PROVISIONING PROFILES ======
 
 // Provisioning Profiles table
@@ -324,6 +338,363 @@ db.exec(`
     content TEXT NOT NULL,
     target_path TEXT,
     FOREIGN KEY(profile_id) REFERENCES provisioning_profiles(id) ON DELETE CASCADE
+  );
+`);
+
+// ====== BRAIN SYSTEM (Structured Memory) ======
+
+// Brain entries with full-text search support
+db.exec(`
+  CREATE TABLE IF NOT EXISTS brain_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT UNIQUE NOT NULL,
+    domain TEXT DEFAULT 'general',
+    title TEXT NOT NULL,
+    summary TEXT,
+    content TEXT NOT NULL,
+    importance INTEGER DEFAULT 5 CHECK(importance >= 1 AND importance <= 10),
+    access_count INTEGER DEFAULT 0,
+    last_accessed DATETIME,
+    tags TEXT DEFAULT '[]',
+    relationships TEXT DEFAULT '[]',
+    version INTEGER DEFAULT 1,
+    parent_id INTEGER,
+    embedding BLOB,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(parent_id) REFERENCES brain_entries(id) ON DELETE SET NULL
+  );
+`);
+
+// FTS5 full-text search index for brain entries
+try {
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS brain_search USING fts5(
+      key, title, summary, content, tags,
+      content=brain_entries,
+      content_rowid=id
+    );
+  `);
+} catch (e) {
+  // FTS5 table may already exist
+}
+
+// Triggers to keep FTS5 index in sync
+try {
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS brain_entries_ai AFTER INSERT ON brain_entries BEGIN
+      INSERT INTO brain_search(rowid, key, title, summary, content, tags)
+      VALUES (new.id, new.key, new.title, new.summary, new.content, new.tags);
+    END;
+  `);
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS brain_entries_ad AFTER DELETE ON brain_entries BEGIN
+      INSERT INTO brain_search(brain_search, rowid, key, title, summary, content, tags)
+      VALUES ('delete', old.id, old.key, old.title, old.summary, old.content, old.tags);
+    END;
+  `);
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS brain_entries_au AFTER UPDATE ON brain_entries BEGIN
+      INSERT INTO brain_search(brain_search, rowid, key, title, summary, content, tags)
+      VALUES ('delete', old.id, old.key, old.title, old.summary, old.content, old.tags);
+      INSERT INTO brain_search(rowid, key, title, summary, content, tags)
+      VALUES (new.id, new.key, new.title, new.summary, new.content, new.tags);
+    END;
+  `);
+} catch (e) {
+  // Triggers may already exist
+}
+
+// Working memory per session (current server, VM, task context)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS working_memory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER,
+    context_key TEXT NOT NULL,
+    context_value TEXT NOT NULL,
+    confidence REAL DEFAULT 1.0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+// Memory consolidation log (short-term -> long-term)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS memory_consolidation (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER,
+    message_ids TEXT DEFAULT '[]',
+    brain_entry_id INTEGER,
+    consolidation_type TEXT DEFAULT 'auto',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(brain_entry_id) REFERENCES brain_entries(id) ON DELETE SET NULL
+  );
+`);
+
+// ====== AGENT REASONING (ReAct) ======
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS agent_reasoning (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER,
+    turn_number INTEGER DEFAULT 0,
+    thought TEXT,
+    action TEXT,
+    observation TEXT,
+    reflection TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+// ====== EMBEDDING QUEUE ======
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS embedding_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    brain_entry_id INTEGER NOT NULL,
+    status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'processing', 'done', 'failed')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(brain_entry_id) REFERENCES brain_entries(id) ON DELETE CASCADE
+  );
+`);
+
+// ====== DAILY JOURNAL (Hippocampus) ======
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS daily_journal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    event_type TEXT NOT NULL CHECK(event_type IN ('user_interaction', 'system_event', 'alert', 'action_taken', 'observation')),
+    source TEXT NOT NULL CHECK(source IN ('chat', 'scheduler', 'monitoring', 'telegram', 'brain', 'reflex')),
+    summary TEXT NOT NULL,
+    details TEXT,
+    server_id INTEGER,
+    severity TEXT DEFAULT 'info' CHECK(severity IN ('info', 'warning', 'critical')),
+    FOREIGN KEY(server_id) REFERENCES servers(id) ON DELETE SET NULL
+  );
+`);
+
+// Index for efficient date-based queries
+db.exec(`CREATE INDEX IF NOT EXISTS idx_journal_timestamp ON daily_journal(timestamp DESC)`);
+
+// ====== REFLEX SYSTEM ======
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS reflex_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    trigger_type TEXT NOT NULL CHECK(trigger_type IN ('service_down', 'disk_full', 'high_cpu', 'vm_stopped', 'backup_failed', 'custom')),
+    trigger_condition TEXT DEFAULT '{}',
+    action_type TEXT NOT NULL CHECK(action_type IN ('restart_service', 'clear_cache', 'notify', 'run_command', 'start_vm', 'custom')),
+    action_params TEXT DEFAULT '{}',
+    cooldown_seconds INTEGER DEFAULT 3600,
+    last_triggered DATETIME,
+    execution_count INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+// ====== CUSTOM TOOLS (Dynamic Tool System) ======
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS custom_tools (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    description TEXT NOT NULL,
+    parameters_schema TEXT DEFAULT '{}',
+    code TEXT NOT NULL,
+    compiled_code TEXT,
+    version INTEGER DEFAULT 1,
+    status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'active', 'deprecated', 'disabled')),
+    safety_level TEXT DEFAULT 'review_required' CHECK(safety_level IN ('safe', 'review_required', 'dangerous')),
+    approved_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_used DATETIME,
+    usage_count INTEGER DEFAULT 0,
+    FOREIGN KEY(approved_by) REFERENCES users(id)
+  );
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS tool_audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_name TEXT NOT NULL,
+    session_id INTEGER,
+    arguments TEXT DEFAULT '{}',
+    result TEXT,
+    execution_time_ms INTEGER,
+    status TEXT DEFAULT 'success',
+    error_message TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+// ====== MONITORING SYSTEM ======
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS monitor_checks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    check_type TEXT NOT NULL CHECK(check_type IN ('storage', 'vm_status', 'backup_health', 'cpu', 'ram', 'disk_io', 'custom')),
+    server_id INTEGER,
+    vm_id INTEGER,
+    enabled INTEGER DEFAULT 1,
+    interval_minutes INTEGER DEFAULT 5,
+    threshold_warning TEXT DEFAULT '{}',
+    threshold_critical TEXT DEFAULT '{}',
+    notification_channels TEXT DEFAULT '["telegram"]',
+    notification_mode TEXT DEFAULT 'on_change' CHECK(notification_mode IN ('always', 'on_change', 'escalation', 'digest')),
+    last_check DATETIME,
+    last_status TEXT DEFAULT 'unknown',
+    consecutive_failures INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(server_id) REFERENCES servers(id) ON DELETE CASCADE
+  );
+`);
+
+// Notification routing rules for granular control
+db.exec(`
+  CREATE TABLE IF NOT EXISTS notification_routing (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    priority INTEGER DEFAULT 0,
+
+    -- Filters (JSON arrays or null for "all")
+    notification_types TEXT DEFAULT '["all"]',
+    severity_levels TEXT DEFAULT '["warning", "critical"]',
+    source_servers TEXT DEFAULT '["all"]',
+    source_vms TEXT DEFAULT '["all"]',
+
+    -- Recipients
+    channel TEXT NOT NULL CHECK(channel IN ('email', 'telegram')),
+    recipients TEXT NOT NULL DEFAULT '[]',
+
+    -- Time filtering
+    quiet_hours_start TEXT,
+    quiet_hours_end TEXT,
+
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS monitor_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    check_id INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('ok', 'warning', 'critical', 'error')),
+    value REAL,
+    message TEXT,
+    details TEXT DEFAULT '{}',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(check_id) REFERENCES monitor_checks(id) ON DELETE CASCADE
+  );
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS notification_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    check_id INTEGER,
+    notification_type TEXT NOT NULL,
+    recipient TEXT,
+    subject TEXT,
+    message TEXT NOT NULL,
+    status TEXT DEFAULT 'sent' CHECK(status IN ('sent', 'failed', 'queued')),
+    error TEXT,
+    sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(check_id) REFERENCES monitor_checks(id) ON DELETE SET NULL
+  );
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS notification_preferences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    channel TEXT NOT NULL DEFAULT 'telegram',
+    check_types TEXT DEFAULT '["all"]',
+    severity_levels TEXT DEFAULT '["warning", "critical"]',
+    quiet_hours_start TEXT,
+    quiet_hours_end TEXT,
+    digest_enabled INTEGER DEFAULT 0,
+    digest_time TEXT DEFAULT '08:00',
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+
+// ====== VM TEMPLATES & WIZARD ======
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS vm_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    icon TEXT DEFAULT 'server',
+    base_type TEXT NOT NULL CHECK(base_type IN ('vm', 'lxc')),
+    default_cores INTEGER DEFAULT 2,
+    default_memory INTEGER DEFAULT 2048,
+    default_disk TEXT DEFAULT '32G',
+    default_os_type TEXT DEFAULT 'l26',
+    auto_start INTEGER DEFAULT 0,
+    monitoring_profile_id INTEGER,
+    provisioning_profile_id INTEGER,
+    tags TEXT DEFAULT '[]',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(monitoring_profile_id) REFERENCES monitor_checks(id) ON DELETE SET NULL,
+    FOREIGN KEY(provisioning_profile_id) REFERENCES provisioning_profiles(id) ON DELETE SET NULL
+  );
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS vm_wizard_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    session_type TEXT DEFAULT 'web',
+    current_step INTEGER DEFAULT 1,
+    total_steps INTEGER DEFAULT 6,
+    data TEXT DEFAULT '{}',
+    status TEXT DEFAULT 'in_progress' CHECK(status IN ('in_progress', 'completed', 'cancelled')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+  );
+`);
+
+// ====== TELEGRAM CONVERSATION STATE ======
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS telegram_conversation_state (
+    chat_id TEXT PRIMARY KEY,
+    current_flow TEXT,
+    flow_data TEXT DEFAULT '{}',
+    last_interaction DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+// ====== COPILOT CHAT HISTORY ======
+
+// Chat Sessions table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS chat_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    title TEXT DEFAULT 'Neue Unterhaltung',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+
+// Chat Messages table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system', 'tool')),
+    content TEXT NOT NULL,
+    tool_name TEXT,
+    tool_result TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
   );
 `);
 

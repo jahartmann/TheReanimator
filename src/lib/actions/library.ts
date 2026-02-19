@@ -2,6 +2,7 @@
 
 import db from '@/lib/db';
 import { createSSHClient, SSHClient } from '@/lib/ssh';
+import { sendTaskNotification } from '@/lib/monitoring/notification-manager';
 
 export interface LibraryItem {
     name: string;
@@ -249,9 +250,13 @@ async function processBackgroundTask(taskId: number, sourceServerId: number, tar
         db.prepare("UPDATE background_tasks SET log = log || ? || '\n' WHERE id = ?").run(`[${new Date().toLocaleTimeString()}] ${msg}`, taskId);
     };
 
+    const taskRow = db.prepare("SELECT description FROM background_tasks WHERE id = ?").get(taskId) as any;
+    const taskDescription = taskRow?.description || 'Library Sync';
+
     try {
         log('Starting background sync...');
         db.prepare("UPDATE background_tasks SET status = 'running' WHERE id = ?").run(taskId);
+        sendTaskNotification({ taskId: String(taskId), taskType: 'iso_sync', description: taskDescription, event: 'task_started' }).catch(() => {});
 
         const sourceServer = db.prepare('SELECT * FROM servers WHERE id = ?').get(sourceServerId) as Server;
         const targetServer = db.prepare('SELECT * FROM servers WHERE id = ?').get(targetServerId) as Server;
@@ -307,7 +312,7 @@ async function processBackgroundTask(taskId: number, sourceServerId: number, tar
         let taskState = db.prepare("SELECT status FROM background_tasks WHERE id = ?").get(taskId) as any;
         if (taskState.status === 'cancelled') throw new Error("Cancelled by user");
 
-        // 4. Stream Copy
+        // 4. Stream Copy with proper timeout and event handling
         log('Starting data stream...');
         const sourceStream = await sourceSSH.getExecStream(`cat "${sourcePath}"`);
         const targetStream = await targetSSH.getExecStream(`cat > "${targetFullPath}"`);
@@ -315,48 +320,98 @@ async function processBackgroundTask(taskId: number, sourceServerId: number, tar
         let processed = 0;
         let lastUpdate = Date.now();
         let bytesSinceLast = 0;
+        let transferTimeout: NodeJS.Timeout | null = null;
+
+        // Global timeout: 30 minutes (enough for large ISOs, but prevents infinite hangs)
+        const TRANSFER_TIMEOUT_MS = 30 * 60 * 1000;
 
         await new Promise<void>((resolve, reject) => {
+            let resolved = false;
+            const cleanup = () => {
+                if (transferTimeout) clearTimeout(transferTimeout);
+                sourceStream.removeAllListeners();
+                targetStream.removeAllListeners();
+            };
+
+            const handleResolve = () => {
+                if (resolved) return;
+                resolved = true;
+                cleanup();
+                resolve();
+            };
+
+            const handleReject = (err: Error) => {
+                if (resolved) return;
+                resolved = true;
+                cleanup();
+                sourceStream.destroy();
+                targetStream.destroy();
+                reject(err);
+            };
+
+            // Set global timeout
+            transferTimeout = setTimeout(() => {
+                handleReject(new Error('Transfer timeout (30 minutes exceeded)'));
+            }, TRANSFER_TIMEOUT_MS);
+
             sourceStream.on('data', (chunk: Buffer) => {
-                // Check cancellation periodically (every 100MB or 2s?)
-                // Doing DB check on every chunk is too expensive.
-                // Do it on time interval.
                 const now = Date.now();
                 processed += chunk.length;
                 bytesSinceLast += chunk.length;
 
-                if (now - lastUpdate > 1000) { // Every second
-                    // Calculate speed
+                // Reset timeout on every data chunk (shows transfer is progressing)
+                if (transferTimeout) clearTimeout(transferTimeout);
+                transferTimeout = setTimeout(() => {
+                    handleReject(new Error('Transfer stalled (no data for 5 minutes)'));
+                }, 5 * 60 * 1000);
+
+                if (now - lastUpdate > 1000) {
                     const speedBps = (bytesSinceLast / (now - lastUpdate)) * 1000;
                     const speedMBps = (speedBps / 1024 / 1024).toFixed(1) + ' MB/s';
 
-                    // Update DB
                     try {
                         const current = db.prepare("SELECT status FROM background_tasks WHERE id = ?").get(taskId) as any;
-                        if (current.status === 'cancelled') {
-                            sourceStream.destroy(); // Kill stream
-                            targetStream.destroy();
-                            reject(new Error("Cancelled by user"));
+                        if (current?.status === 'cancelled') {
+                            handleReject(new Error("Cancelled by user"));
                             return;
                         }
-
                         db.prepare("UPDATE background_tasks SET progress = ?, current_speed = ? WHERE id = ?").run(processed, speedMBps, taskId);
-                    } catch (e) { }
+                    } catch (e) {
+                        console.warn('[ISO Sync] DB update error:', e);
+                    }
 
                     lastUpdate = now;
                     bytesSinceLast = 0;
                 }
             });
 
-            targetStream.on('close', resolve);
-            targetStream.on('error', reject);
-            sourceStream.on('error', reject);
+            sourceStream.on('end', () => {
+                log('Source stream ended, closing target...');
+                targetStream.end();
+            });
 
-            sourceStream.pipe(targetStream);
+            sourceStream.on('error', (err: Error) => {
+                log(`Source stream error: ${err.message}`);
+                handleReject(err);
+            });
+
+            targetStream.on('finish', () => {
+                log('Target stream finished successfully');
+                handleResolve();
+            });
+
+            targetStream.on('error', (err: Error) => {
+                log(`Target stream error: ${err.message}`);
+                handleReject(err);
+            });
+
+            // Pipe with backpressure handling
+            sourceStream.pipe(targetStream, { end: false });
         });
 
         log('Transfer completed successfully.');
         db.prepare("UPDATE background_tasks SET status = 'completed', completed_at = datetime('now'), progress = ? WHERE id = ?").run(totalSize, taskId);
+        sendTaskNotification({ taskId: String(taskId), taskType: 'iso_sync', description: taskDescription, event: 'task_completed' }).catch(() => {});
 
         sourceSSH.disconnect();
         targetSSH.disconnect();
@@ -367,6 +422,7 @@ async function processBackgroundTask(taskId: number, sourceServerId: number, tar
         const current = db.prepare("SELECT status FROM background_tasks WHERE id = ?").get(taskId) as any;
         if (current.status !== 'cancelled') {
             db.prepare("UPDATE background_tasks SET status = 'failed', error = ?, completed_at = datetime('now') WHERE id = ?").run(e.message, taskId);
+            sendTaskNotification({ taskId: String(taskId), taskType: 'iso_sync', description: taskDescription, event: 'task_failed', error: e.message }).catch(() => {});
         }
     }
 }

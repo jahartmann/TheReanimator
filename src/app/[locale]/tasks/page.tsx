@@ -8,9 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, RefreshCw, ListTodo, AlertTriangle, CheckCircle2, XCircle, StopCircle, Terminal, Search, Clock, Activity, Copy, ArrowRightLeft, ScanLine } from "lucide-react";
+import { Loader2, RefreshCw, ListTodo, CheckCircle2, XCircle, StopCircle, Terminal, Search, Clock, Activity, ArrowRightLeft, ScanLine, Trash2, X } from "lucide-react";
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -22,7 +21,6 @@ export default function TasksPage() {
     const [loading, setLoading] = useState(true);
     const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null);
 
-    // Use ref to track selected task ID without causing re-renders
     const selectedTaskIdRef = useRef<string | null>(null);
 
     // Filters
@@ -30,7 +28,6 @@ export default function TasksPage() {
     const [filterType, setFilterType] = useState<string>('all');
     const [searchQuery, setSearchQuery] = useState<string>('');
 
-    // Keep ref in sync with state
     useEffect(() => {
         selectedTaskIdRef.current = selectedTask?.id ?? null;
     }, [selectedTask]);
@@ -40,18 +37,17 @@ export default function TasksPage() {
         setTasks(res.items);
         setLoading(false);
 
-        // Update selected task if it's in the new list (using ref to avoid dependency)
         if (selectedTaskIdRef.current) {
             const updated = res.items.find((t: TaskItem) => t.id === selectedTaskIdRef.current);
             if (updated) {
                 setSelectedTask(updated);
             }
         }
-    }, []); // No dependencies - uses ref instead
+    }, []);
 
     useEffect(() => {
         loadTasks();
-        const interval = setInterval(loadTasks, 2000); // Live update every 2s
+        const interval = setInterval(loadTasks, 2000);
         return () => clearInterval(interval);
     }, [loadTasks]);
 
@@ -87,13 +83,13 @@ export default function TasksPage() {
 
     const getStatusIcon = (status: string) => {
         switch (status) {
-            case 'running': return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
+            case 'running': return <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />;
             case 'completed':
-            case 'success': return <CheckCircle2 className="h-4 w-4 text-green-500" />;
-            case 'failed': return <XCircle className="h-4 w-4 text-red-500" />;
-            case 'cancelled': return <StopCircle className="h-4 w-4 text-orange-500" />;
-            case 'pending': return <Clock className="h-4 w-4 text-amber-500" />;
-            default: return <AlertTriangle className="h-4 w-4 text-muted-foreground" />;
+            case 'success': return <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />;
+            case 'failed': return <XCircle className="h-3.5 w-3.5 text-red-500" />;
+            case 'cancelled': return <StopCircle className="h-3.5 w-3.5 text-orange-500" />;
+            case 'pending': return <Clock className="h-3.5 w-3.5 text-amber-500" />;
+            default: return <Activity className="h-3.5 w-3.5 text-muted-foreground" />;
         }
     };
 
@@ -113,7 +109,6 @@ export default function TasksPage() {
         switch (type) {
             case 'scan': return <ScanLine className="h-3 w-3" />;
             case 'migration': return <ArrowRightLeft className="h-3 w-3" />;
-            case 'background': return <Copy className="h-3 w-3" />;
             default: return <Activity className="h-3 w-3" />;
         }
     };
@@ -128,170 +123,193 @@ export default function TasksPage() {
         return typeMap[type] || type;
     };
 
+    // Stats
     const runningCount = tasks.filter(t => t.status === 'running').length;
+    const completedCount = tasks.filter(t => t.status === 'completed').length;
+    const failedCount = tasks.filter(t => t.status === 'failed').length;
 
     return (
         <div className="h-[calc(100vh-2rem)] flex flex-col gap-4">
             {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-3xl font-bold flex items-center gap-3">
-                        <ListTodo className="h-8 w-8" />
-                        {t('taskCenter')}
-                        {runningCount > 0 && (
-                            <Badge variant="default" className="ml-2 bg-blue-600 animate-pulse">
-                                {runningCount} {t('active')}
-                            </Badge>
-                        )}
-                    </h1>
-                    <p className="text-muted-foreground mt-1">{t('description')}</p>
+            <div className="flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-4">
+                    <div className="bg-primary/10 p-2.5 rounded-xl">
+                        <ListTodo className="h-6 w-6 text-primary" />
+                    </div>
+                    <div>
+                        <h1 className="text-2xl font-bold tracking-tight">
+                            {t('taskCenter')}
+                        </h1>
+                        <p className="text-sm text-muted-foreground">{t('description')}</p>
+                    </div>
                 </div>
-                <Button variant="outline" onClick={() => loadTasks()} disabled={loading}>
-                    <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
-                    {t('refresh')}
-                </Button>
+
+                {/* Quick Stats */}
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-4 text-sm mr-4">
+                        {runningCount > 0 && (
+                            <div className="flex items-center gap-1.5">
+                                <span className="h-2 w-2 bg-blue-500 rounded-full animate-pulse" />
+                                <span className="font-medium text-blue-600">{runningCount} {t('active')}</span>
+                            </div>
+                        )}
+                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                            <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                            <span>{completedCount}</span>
+                        </div>
+                        {failedCount > 0 && (
+                            <div className="flex items-center gap-1.5 text-muted-foreground">
+                                <XCircle className="h-3.5 w-3.5 text-red-500" />
+                                <span>{failedCount}</span>
+                            </div>
+                        )}
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => loadTasks()} disabled={loading}>
+                        <RefreshCw className={cn("mr-2 h-3.5 w-3.5", loading && "animate-spin")} />
+                        {t('refresh')}
+                    </Button>
+                </div>
             </div>
 
             {/* Filters */}
-            <div className="flex gap-3 flex-wrap">
-                <div className="relative flex-1 min-w-[200px] max-w-[400px]">
+            <div className="flex gap-2 shrink-0">
+                <div className="relative flex-1 max-w-sm">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                         placeholder={t('searchPlaceholder')}
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="pl-10"
+                        className="pl-9 h-9"
                     />
+                    {searchQuery && (
+                        <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2">
+                            <X className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                        </button>
+                    )}
                 </div>
                 <Select value={filterType} onValueChange={setFilterType}>
-                    <SelectTrigger className="w-[160px]">
+                    <SelectTrigger className="w-[140px] h-9">
                         <SelectValue placeholder={t('taskType')} />
                     </SelectTrigger>
                     <SelectContent>
                         <SelectItem value="all">{t('allTypes')}</SelectItem>
-                        <SelectItem value="scan">🔍 {t('typeScan')}</SelectItem>
-                        <SelectItem value="migration">🚀 {t('typeMigration')}</SelectItem>
-                        <SelectItem value="background">📦 {t('typeBackground')}</SelectItem>
-                        <SelectItem value="config">💾 {t('typeConfig')}</SelectItem>
+                        <SelectItem value="scan">{t('typeScan')}</SelectItem>
+                        <SelectItem value="migration">{t('typeMigration')}</SelectItem>
+                        <SelectItem value="background">{t('typeBackground')}</SelectItem>
+                        <SelectItem value="config">{t('typeConfig')}</SelectItem>
                     </SelectContent>
                 </Select>
                 <Select value={filterStatus} onValueChange={setFilterStatus}>
-                    <SelectTrigger className="w-[160px]">
+                    <SelectTrigger className="w-[140px] h-9">
                         <SelectValue placeholder={t('status')} />
                     </SelectTrigger>
                     <SelectContent>
                         <SelectItem value="all">{t('allStatuses')}</SelectItem>
-                        <SelectItem value="running">⏳ {t('statusRunning')}</SelectItem>
-                        <SelectItem value="completed">✅ {t('statusCompleted')}</SelectItem>
-                        <SelectItem value="failed">❌ {t('statusFailed')}</SelectItem>
-                        <SelectItem value="cancelled">🛑 {t('statusCancelled')}</SelectItem>
+                        <SelectItem value="running">{t('statusRunning')}</SelectItem>
+                        <SelectItem value="completed">{t('statusCompleted')}</SelectItem>
+                        <SelectItem value="failed">{t('statusFailed')}</SelectItem>
+                        <SelectItem value="cancelled">{t('statusCancelled')}</SelectItem>
                     </SelectContent>
                 </Select>
             </div>
 
-            {/* Main Content: Split View */}
+            {/* Main Content */}
             <div className="flex-1 flex gap-4 min-h-0 overflow-hidden">
-                {/* Left: Task List */}
-                <Card className={cn("flex flex-col transition-all duration-300", selectedTask ? "w-[55%]" : "w-full")}>
-                    <CardHeader className="py-3 px-4 border-b">
-                        <CardTitle className="text-sm font-medium flex items-center justify-between">
-                            <span>{t('tasks')} ({filteredTasks.length})</span>
-                            <span className="text-xs text-muted-foreground font-normal">
-                                {t('updateEvery')} 2s
-                            </span>
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="flex-1 p-0 overflow-hidden">
-                        <ScrollArea className="h-full">
-                            <Table>
-                                <TableHeader className="sticky top-0 bg-card z-10">
-                                    <TableRow>
-                                        <TableHead className="w-[40px]"></TableHead>
-                                        <TableHead className="w-[140px]">{t('time')}</TableHead>
-                                        <TableHead className="w-[100px]">{t('node')}</TableHead>
-                                        <TableHead>{t('description')}</TableHead>
-                                        <TableHead className="w-[90px]">{t('duration')}</TableHead>
-                                        <TableHead className="w-[100px]">{t('status')}</TableHead>
-                                        <TableHead className="w-[60px]"></TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {filteredTasks.length === 0 ? (
-                                        <TableRow>
-                                            <TableCell colSpan={7} className="text-center h-32 text-muted-foreground">
-                                                {loading ? <Loader2 className="h-6 w-6 animate-spin mx-auto" /> : t('noTasksFound')}
-                                            </TableCell>
-                                        </TableRow>
-                                    ) : (
-                                        filteredTasks.map(task => (
-                                            <TableRow
-                                                key={task.id}
-                                                className={cn(
-                                                    "cursor-pointer transition-colors",
-                                                    selectedTask?.id === task.id
-                                                        ? "bg-primary/10 border-l-4 border-l-primary"
-                                                        : "hover:bg-muted/50"
-                                                )}
-                                                onClick={() => setSelectedTask(task)}
-                                            >
-                                                <TableCell>{getStatusIcon(task.status)}</TableCell>
-                                                <TableCell className="text-xs text-muted-foreground font-mono">
+                {/* Task List */}
+                <div className={cn("flex flex-col transition-all duration-300 min-h-0", selectedTask ? "w-[55%]" : "w-full")}>
+                    <div className="flex items-center justify-between px-1 pb-2">
+                        <span className="text-xs text-muted-foreground font-medium">
+                            {filteredTasks.length} {t('tasks')}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                            Auto-refresh 2s
+                        </span>
+                    </div>
+                    <ScrollArea className="flex-1 rounded-lg border bg-card">
+                        <div className="divide-y">
+                            {loading && filteredTasks.length === 0 ? (
+                                <div className="flex justify-center py-20">
+                                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                                </div>
+                            ) : filteredTasks.length === 0 ? (
+                                <div className="text-center py-20 text-muted-foreground">
+                                    <ListTodo className="h-10 w-10 mx-auto mb-3 opacity-20" />
+                                    <p className="text-sm">{t('noTasksFound')}</p>
+                                </div>
+                            ) : (
+                                filteredTasks.map(task => (
+                                    <div
+                                        key={task.id}
+                                        className={cn(
+                                            "flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors group",
+                                            selectedTask?.id === task.id
+                                                ? "bg-primary/5 border-l-2 border-l-primary"
+                                                : "hover:bg-muted/50 border-l-2 border-l-transparent"
+                                        )}
+                                        onClick={() => setSelectedTask(task)}
+                                    >
+                                        {/* Status Icon */}
+                                        <div className="shrink-0">
+                                            {getStatusIcon(task.status)}
+                                        </div>
+
+                                        {/* Main Content */}
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm font-medium truncate">{task.description || task.id}</span>
+                                                <Badge variant="outline" className="text-[9px] uppercase px-1.5 py-0 gap-1 shrink-0">
+                                                    {getTypeIcon(task.type)}
+                                                    {getTypeText(task.type)}
+                                                </Badge>
+                                            </div>
+                                            <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+                                                {task.node && <span>{task.node}</span>}
+                                                <span>
                                                     {new Date(task.startTime).toLocaleString(locale, {
                                                         day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
                                                     })}
-                                                </TableCell>
-                                                <TableCell className="font-medium text-sm">{task.node || '-'}</TableCell>
-                                                <TableCell>
-                                                    <div className="flex items-center gap-2">
-                                                        <Badge variant="outline" className="text-[9px] uppercase px-1.5 py-0 gap-1">
-                                                            {getTypeIcon(task.type)}
-                                                            {getTypeText(task.type)}
-                                                        </Badge>
-                                                        <span className="truncate max-w-[250px] text-sm" title={task.description}>
-                                                            {task.description}
-                                                        </span>
-                                                    </div>
-                                                </TableCell>
-                                                <TableCell className="text-xs text-muted-foreground">{task.duration || '-'}</TableCell>
-                                                <TableCell>
-                                                    <Badge variant={
-                                                        task.status === 'failed' ? 'destructive' :
-                                                            task.status === 'running' ? 'default' :
-                                                                task.status === 'cancelled' ? 'secondary' : 'outline'
-                                                    }>
-                                                        {getStatusText(task.status)}
-                                                    </Badge>
-                                                </TableCell>
-                                                <TableCell>
-                                                    {task.status === 'running' && (
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            className="h-7 w-7 text-red-500 hover:bg-red-500/10"
-                                                            onClick={(e) => { e.stopPropagation(); handleStopTask(task); }}
-                                                        >
-                                                            <StopCircle className="h-4 w-4" />
-                                                        </Button>
-                                                    )}
-                                                </TableCell>
-                                            </TableRow>
-                                        ))
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </ScrollArea>
-                    </CardContent>
-                </Card>
+                                                </span>
+                                                {task.duration && <span>{task.duration}</span>}
+                                            </div>
+                                        </div>
 
-                {/* Right: Log Panel (only if task selected) */}
+                                        {/* Right Side */}
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            <Badge variant={
+                                                task.status === 'failed' ? 'destructive' :
+                                                    task.status === 'running' ? 'default' :
+                                                        task.status === 'cancelled' ? 'secondary' : 'outline'
+                                            } className="text-[10px]">
+                                                {getStatusText(task.status)}
+                                            </Badge>
+                                            {task.status === 'running' && (
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-6 w-6 text-red-500 hover:bg-red-500/10 opacity-0 group-hover:opacity-100"
+                                                    onClick={(e) => { e.stopPropagation(); handleStopTask(task); }}
+                                                >
+                                                    <StopCircle className="h-3.5 w-3.5" />
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </ScrollArea>
+                </div>
+
+                {/* Detail Panel */}
                 {selectedTask && (
-                    <Card className="w-[45%] flex flex-col animate-in slide-in-from-right-5 duration-300">
-                        <CardHeader className="py-3 px-4 border-b flex flex-row items-center justify-between gap-4">
+                    <Card className="w-[45%] flex flex-col animate-in slide-in-from-right-5 duration-300 overflow-hidden">
+                        {/* Panel Header */}
+                        <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/20 shrink-0">
                             <div className="flex items-center gap-2 min-w-0">
-                                <Terminal className="h-4 w-4 text-primary shrink-0" />
+                                {getStatusIcon(selectedTask.status)}
                                 <span className="font-medium text-sm truncate">{selectedTask.description}</span>
                             </div>
-                            <div className="flex items-center gap-2 shrink-0">
+                            <div className="flex items-center gap-1.5 shrink-0">
                                 {selectedTask.status === 'running' && (
                                     <Button
                                         variant="destructive"
@@ -305,64 +323,67 @@ export default function TasksPage() {
                                 )}
                                 <Button
                                     variant="ghost"
-                                    size="sm"
-                                    className="h-7 text-xs"
+                                    size="icon"
+                                    className="h-7 w-7"
                                     onClick={() => setSelectedTask(null)}
                                 >
-                                    {t('close')}
+                                    <X className="h-4 w-4" />
                                 </Button>
                             </div>
-                        </CardHeader>
+                        </div>
 
-                        {/* Task Info Grid */}
-                        <div className="grid grid-cols-3 gap-4 p-4 border-b text-sm bg-muted/30">
+                        {/* Task Info */}
+                        <div className="grid grid-cols-3 gap-3 p-3 border-b text-xs shrink-0">
                             <div>
-                                <p className="text-xs text-muted-foreground">ID</p>
-                                <p className="font-mono text-xs truncate" title={selectedTask.id}>{selectedTask.id}</p>
+                                <p className="text-muted-foreground mb-0.5">{t('type')}</p>
+                                <p className="font-medium">{getTypeText(selectedTask.type)}</p>
                             </div>
                             <div>
-                                <p className="text-xs text-muted-foreground">{t('type')}</p>
-                                <p>{getTypeText(selectedTask.type)}</p>
+                                <p className="text-muted-foreground mb-0.5">{t('node')}</p>
+                                <p className="font-medium">{selectedTask.node || '-'}</p>
                             </div>
                             <div>
-                                <p className="text-xs text-muted-foreground">{t('node')}</p>
-                                <p>{selectedTask.node || '-'}</p>
+                                <p className="text-muted-foreground mb-0.5">{t('duration')}</p>
+                                <p className="font-medium">{selectedTask.duration || '-'}</p>
                             </div>
                             <div>
-                                <p className="text-xs text-muted-foreground">{t('start')}</p>
-                                <p>{new Date(selectedTask.startTime).toLocaleString(locale)}</p>
+                                <p className="text-muted-foreground mb-0.5">{t('start')}</p>
+                                <p className="font-medium">{new Date(selectedTask.startTime).toLocaleString(locale)}</p>
                             </div>
                             <div>
-                                <p className="text-xs text-muted-foreground">{t('end')}</p>
-                                <p>{selectedTask.endTime ? new Date(selectedTask.endTime).toLocaleString(locale) : '-'}</p>
+                                <p className="text-muted-foreground mb-0.5">{t('end')}</p>
+                                <p className="font-medium">{selectedTask.endTime ? new Date(selectedTask.endTime).toLocaleString(locale) : '-'}</p>
                             </div>
                             <div>
-                                <p className="text-xs text-muted-foreground">{t('duration')}</p>
-                                <p>{selectedTask.duration || '-'}</p>
+                                <p className="text-muted-foreground mb-0.5">ID</p>
+                                <p className="font-mono text-[10px] truncate" title={selectedTask.id}>{selectedTask.id}</p>
                             </div>
                         </div>
 
                         {/* Log Output */}
-                        <div className="flex-1 bg-black/95 overflow-hidden flex flex-col">
-                            <div className="px-3 py-2 border-b border-white/10 text-xs text-white/50 flex items-center justify-between">
-                                <span>{t('logOutput')}</span>
+                        <div className="flex-1 bg-[#0c0c0c] overflow-hidden flex flex-col min-h-0">
+                            <div className="px-3 py-2 border-b border-zinc-800 text-xs text-zinc-500 flex items-center justify-between shrink-0">
+                                <div className="flex items-center gap-2">
+                                    <Terminal className="h-3 w-3" />
+                                    <span>{t('logOutput')}</span>
+                                </div>
                                 {selectedTask.status === 'running' && (
-                                    <span className="flex items-center gap-1 text-green-400">
-                                        <span className="h-2 w-2 bg-green-400 rounded-full animate-pulse" />
+                                    <span className="flex items-center gap-1.5 text-green-400">
+                                        <span className="h-1.5 w-1.5 bg-green-400 rounded-full animate-pulse" />
                                         {t('live')}
                                     </span>
                                 )}
                             </div>
-                            <ScrollArea className="flex-1 p-4">
-                                <pre className="font-mono text-xs text-green-400 whitespace-pre-wrap leading-relaxed select-text">
-                                    {selectedTask.log || t('waitingForLogs')}
+                            <ScrollArea className="flex-1">
+                                <pre className="p-4 font-mono text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed select-text">
+                                    {selectedTask.log || <span className="text-zinc-600 italic">{t('waitingForLogs')}</span>}
                                     {selectedTask.status === 'running' && (
-                                        <span className="animate-pulse ml-1 text-primary">▌</span>
+                                        <span className="animate-pulse ml-0.5 text-zinc-500">|</span>
                                     )}
                                 </pre>
                             </ScrollArea>
-                            <div className="px-3 py-2 border-t border-white/10 text-[10px] text-white/30 flex justify-between">
-                                <span>UID: {selectedTask.id}</span>
+                            <div className="px-3 py-1.5 border-t border-zinc-800 text-[10px] text-zinc-600 flex justify-between shrink-0">
+                                <span>{selectedTask.id.slice(0, 16)}</span>
                                 <span className={cn(
                                     selectedTask.status === 'running' && 'text-blue-400',
                                     selectedTask.status === 'completed' && 'text-green-400',
