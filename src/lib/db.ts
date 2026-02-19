@@ -78,6 +78,271 @@ try {
   console.error('[DB] Failed to create node_stats table:', e);
 }
 
+// Add disk columns if missing (ALTER TABLE is idempotent via try/catch)
+for (const col of [
+  'ALTER TABLE node_stats ADD COLUMN disk REAL DEFAULT 0',
+  'ALTER TABLE node_stats ADD COLUMN disk_used INTEGER DEFAULT 0',
+  'ALTER TABLE node_stats ADD COLUMN disk_total INTEGER DEFAULT 0',
+]) {
+  try { db.exec(col); } catch { /* column already exists */ }
+}
+
+// Auto-migrate: node_stats_history for trend detection
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS node_stats_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      server_id INTEGER NOT NULL,
+      cpu REAL DEFAULT 0,
+      ram REAL DEFAULT 0,
+      recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(server_id) REFERENCES servers(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_node_stats_history_server_time
+      ON node_stats_history(server_id, recorded_at);
+  `);
+} catch (e) {
+  console.error('[DB] Failed to create node_stats_history table:', e);
+}
+
+// Auto-migrate: Agent Tables (Telegram, Chat, History)
+export function initAgentTables() {
+  try {
+    db.exec(`
+    CREATE TABLE IF NOT EXISTS telegram_users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id TEXT NOT NULL UNIQUE,
+      first_name TEXT,
+      username TEXT,
+      is_blocked INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS telegram_sessions (
+      chat_id TEXT PRIMARY KEY,
+      session_id INTEGER NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER, -- Optional link to local user
+      title TEXT DEFAULT 'Neue Konversation',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL,
+      role TEXT NOT NULL, -- user, assistant, system, tool
+      content TEXT,
+      tool_name TEXT,
+      tool_result TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+    );
+
+    -- Brain Memory System
+    CREATE TABLE IF NOT EXISTS brain_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT NOT NULL UNIQUE,
+      domain TEXT NOT NULL,
+      title TEXT NOT NULL,
+      summary TEXT,
+      content TEXT NOT NULL,
+      importance INTEGER DEFAULT 5,
+      access_count INTEGER DEFAULT 0,
+      last_accessed DATETIME,
+      tags TEXT DEFAULT '[]',
+      relationships TEXT DEFAULT '[]',
+      version INTEGER DEFAULT 1,
+      parent_id INTEGER,
+      embedding BLOB,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Embedding Queue
+    CREATE TABLE IF NOT EXISTS embedding_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      brain_entry_id INTEGER NOT NULL,
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'processing', 'done', 'failed')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(brain_entry_id) REFERENCES brain_entries(id) ON DELETE CASCADE
+    );
+
+    -- Daily Journal (Hippocampus)
+    CREATE TABLE IF NOT EXISTS daily_journal (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      event_type TEXT NOT NULL CHECK(event_type IN ('user_interaction', 'system_event', 'alert', 'action_taken', 'observation')),
+      source TEXT NOT NULL CHECK(source IN ('chat', 'scheduler', 'monitoring', 'telegram', 'brain', 'reflex')),
+      summary TEXT NOT NULL,
+      details TEXT,
+      server_id INTEGER,
+      severity TEXT DEFAULT 'info' CHECK(severity IN ('info', 'warning', 'critical'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_journal_timestamp ON daily_journal(timestamp DESC);
+
+    -- Reflex System
+    CREATE TABLE IF NOT EXISTS reflex_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      enabled INTEGER DEFAULT 1,
+      trigger_type TEXT NOT NULL CHECK(trigger_type IN ('service_down', 'disk_full', 'high_cpu', 'vm_stopped', 'backup_failed', 'custom')),
+      trigger_condition TEXT DEFAULT '{}',
+      action_type TEXT NOT NULL CHECK(action_type IN ('restart_service', 'clear_cache', 'notify', 'run_command', 'start_vm', 'custom')),
+      action_params TEXT DEFAULT '{}',
+      cooldown_seconds INTEGER DEFAULT 3600,
+      last_triggered DATETIME,
+      execution_count INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Working Memory (active session contexts)
+    CREATE TABLE IF NOT EXISTS working_memory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+    );
+
+    -- Memory Consolidation Log
+    CREATE TABLE IF NOT EXISTS memory_consolidation (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL,
+      brain_entry_id INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY(brain_entry_id) REFERENCES brain_entries(id) ON DELETE SET NULL
+    );
+
+    -- Full Text Search for Brain
+    CREATE VIRTUAL TABLE IF NOT EXISTS brain_search USING fts5(
+      title, content, summary, tags,
+      content='brain_entries',
+      content_rowid='id'
+    );
+
+    -- Triggers to keep FTS index in sync
+    CREATE TRIGGER IF NOT EXISTS brain_ai AFTER INSERT ON brain_entries BEGIN
+      INSERT INTO brain_search(rowid, title, content, summary, tags)
+      VALUES (new.id, new.title, new.content, new.summary, new.tags);
+    END;
+    CREATE TRIGGER IF NOT EXISTS brain_ad AFTER DELETE ON brain_entries BEGIN
+      INSERT INTO brain_search(brain_search, rowid, title, content, summary, tags)
+      VALUES('delete', old.id, old.title, old.content, old.summary, old.tags);
+    END;
+    CREATE TRIGGER IF NOT EXISTS brain_au AFTER UPDATE ON brain_entries BEGIN
+      INSERT INTO brain_search(brain_search, rowid, title, content, summary, tags)
+      VALUES('delete', old.id, old.title, old.content, old.summary, old.tags);
+      INSERT INTO brain_search(rowid, title, content, summary, tags)
+      VALUES (new.id, new.title, new.content, new.summary, new.tags);
+    END;
+
+    -- Organ System Logs (Heartbeat & sub-agent activity)
+    CREATE TABLE IF NOT EXISTS organ_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      organ TEXT NOT NULL, -- 'hearth', 'brain', 'nebula', etc.
+      status TEXT NOT NULL, -- 'pulse', 'waking', 'sleeping', 'error'
+      message TEXT,
+      details TEXT, -- JSON
+      next_run DATETIME,
+      execution_time_ms INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    CREATE INDEX IF NOT EXISTS idx_organ_logs_organ ON organ_logs(organ);
+    CREATE INDEX IF NOT EXISTS idx_organ_logs_created_at ON organ_logs(created_at DESC);
+  `);
+    console.log('[DB] Agent, Brain & Organ tables ready');
+  } catch (e) {
+    console.error('[DB] Failed to create Agent tables:', e);
+  }
+}
+initAgentTables();
+
+// Auto-migrate: Settings & Notifications (Critical for persistence)
+export function initSettingsTables() {
+  try {
+    db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_routing (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      enabled INTEGER DEFAULT 1,
+      priority INTEGER DEFAULT 0,
+      notification_types TEXT DEFAULT '["all"]',
+      severity_levels TEXT DEFAULT '["warning", "critical"]',
+      source_servers TEXT DEFAULT '["all"]',
+      source_vms TEXT DEFAULT '["all"]',
+      channel TEXT NOT NULL CHECK(channel IN ('email', 'telegram')),
+      recipients TEXT NOT NULL DEFAULT '[]',
+      quiet_hours_start TEXT,
+      quiet_hours_end TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Notification Preferences (legacy per-user channel prefs, quiet hours)
+    CREATE TABLE IF NOT EXISTS notification_preferences (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      channel TEXT NOT NULL CHECK(channel IN ('email', 'telegram')),
+      check_types TEXT DEFAULT '["all"]',
+      severity_levels TEXT DEFAULT '["warning", "critical"]',
+      quiet_hours_start TEXT,
+      quiet_hours_end TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    -- Notification History (log of all sent notifications)
+    CREATE TABLE IF NOT EXISTS notification_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      check_id INTEGER,
+      notification_type TEXT NOT NULL,
+      recipient TEXT,
+      subject TEXT,
+      message TEXT,
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'sent', 'failed', 'queued')),
+      error TEXT,
+      sent_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+    console.log('[DB] Settings & Notification tables ready');
+  } catch (e) {
+    console.error('[DB] Failed to create Settings tables:', e);
+  }
+}
+initSettingsTables();
+
+// Auto-migrate: Tags table
+export function initTagsTable() {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        color TEXT NOT NULL
+      );
+    `);
+    console.log('[DB] Tags table ready');
+  } catch (e) {
+    console.error('[DB] Failed to create tags table:', e);
+  }
+}
+initTagsTable();
+
 export default db;
 export function getDb() {
   return db;
