@@ -15,7 +15,7 @@ interface StorageStats {
     lastBackup: string | null;
 }
 
-interface ServerStorage {
+export interface ServerStorage {
     serverId: number;
     serverName: string;
     serverType: 'pve' | 'pbs';
@@ -27,7 +27,7 @@ interface ServerStorage {
         available: number;
         usagePercent: number;
         active: boolean;
-        isShared?: boolean; // For cluster-wide shared storage (Ceph)
+        isShared: boolean; // For cluster-wide shared storage (Ceph)
     }[];
 }
 
@@ -239,5 +239,47 @@ export async function getServerStorages(): Promise<ServerStorage[]> {
     finalResults.push(...localResults);
 
     return finalResults;
+}
+
+export async function getStorageContent(serverId: number, storageName: string, content: 'iso' | 'vztmpl' = 'iso'): Promise<{ volid: string, size: number, format: string }[]> {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+
+    const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId) as any;
+    if (!server) throw new Error('Server not found');
+
+    const ssh = createSSHClient(server);
+    await ssh.connect();
+
+    try {
+        // pvesm list <storage> --content <content>
+        // Output: <volid> <format> <size>
+        const output = await ssh.exec(`pvesm list ${storageName} --content ${content} 2>/dev/null || echo ""`);
+        const lines = output.trim().split('\n');
+
+        const results = [];
+        // Skip header if exists (Volid Format Size)
+        const startIdx = lines[0]?.toLowerCase().startsWith('volid') ? 1 : 0;
+
+        for (let i = startIdx; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            const parts = line.split(/\s+/);
+            if (parts.length >= 3) {
+                results.push({
+                    volid: parts[0],
+                    format: parts[1],
+                    size: parseInt(parts[2])
+                });
+            }
+        }
+        return results;
+
+    } catch (e) {
+        console.error(`Failed to list content for ${storageName}:`, e);
+        return [];
+    } finally {
+        ssh.disconnect();
+    }
 }
 

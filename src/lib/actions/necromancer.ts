@@ -90,11 +90,13 @@ export async function raiseUndead(params: {
     const pubPath = params.publicKeyPath || path.join(homedir(), '.ssh', 'id_rsa.pub');
 
     try {
-        if (!fs.existsSync(pubPath)) {
+        const { keyExists, readPublicKey } = await import('@/lib/ssh-keys');
+
+        if (!keyExists(pubPath)) {
             // Generate one? Too complex for now. Ask user to ensure it exists.
             return { success: false, error: `Public key not found at ${pubPath}. Please generate an SSH key on the Reanimator host first.` };
         }
-        pubKeyContent = fs.readFileSync(pubPath, 'utf-8').trim();
+        pubKeyContent = readPublicKey(pubPath).trim();
     } catch (e: any) {
         return { success: false, error: 'Failed to read public key: ' + e.message };
     }

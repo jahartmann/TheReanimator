@@ -5,9 +5,15 @@ import { revalidatePath } from 'next/cache';
 import { runJob as libRunJob } from '@/lib/scheduler'; // We'll access the library directly
 
 export async function getAllJobs() {
-    const jobs = db.prepare('SELECT * FROM jobs ORDER BY id DESC').all();
-    // Calculate stats if needed
-    return jobs as any[];
+    const jobs = db.prepare('SELECT * FROM jobs ORDER BY id DESC').all() as any[];
+
+    return jobs.map(job => {
+        let next_run: string | null = null;
+        if (job.enabled && job.schedule === '@manual') {
+            next_run = 'Manual';
+        }
+        return { ...job, next_run };
+    });
 }
 
 export async function deleteJob(id: number) {

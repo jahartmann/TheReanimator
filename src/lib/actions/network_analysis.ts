@@ -50,53 +50,89 @@ export async function runNetworkAnalysis(serverId: number): Promise<string> {
     const locale = await getServerLocale();
     const t = await getTranslations({ locale, namespace: 'servers' });
     const settings = await getAISettings();
-    if (!settings.enabled) throw new Error('KI-Funktionen sind deaktiviert.');
 
+    // 1. Fetch Config (always works, even without AI)
+    let config;
     try {
-        // 1. Fetch Config
-        const config = await getNetworkConfig(serverId);
-        if (!config.success || !config.interfaces) {
-            const errorMsg = config.error || 'Netzwerkkonfiguration konnte nicht abgerufen werden';
-            console.error(`[AI Analysis] Config fetch failed: ${errorMsg}`);
-            throw new Error(`Konfigurationsfehler: ${errorMsg}`);
-        }
-
-        // Ensure we have valid interfaces data
-        if (!Array.isArray(config.interfaces) || config.interfaces.length === 0) {
-            throw new Error('Keine Netzwerk-Interfaces gefunden');
-        }
-
-        // 2. AI Analysis
-        let analysisResult;
-        try {
-            analysisResult = await explainNetworkConfig(config.interfaces);
-        } catch (aiError: any) {
-            console.error(`[AI Analysis] AI processing failed:`, aiError);
-            throw new Error(`${t('aiAnalysisFailed')} ${aiError.message}`);
-        }
-
-        // Serialize for DB/Frontend
-        const analysisContent = JSON.stringify(analysisResult);
-
-        // 3. Save to DB
-        try {
-            const stmt = db.prepare(`
-                INSERT INTO server_ai_analysis (server_id, type, content)
-                VALUES (?, 'network', ?)
-            `);
-            stmt.run(serverId, analysisContent);
-        } catch (dbError: any) {
-            console.error(`[AI Analysis] DB save failed:`, dbError);
-            // Still return the explanation even if save fails
-            console.warn('[AI Analysis] Returning result despite DB save failure');
-            return analysisContent;
-        }
-
-        console.log(`[AI Analysis] Completed & Saved for Server ${serverId}.`);
-        return analysisContent;
-
-    } catch (error: any) {
-        console.error(`[AI Analysis] Failed for Server ${serverId}:`, error);
-        throw error; // Re-throw with improved error message
+        config = await getNetworkConfig(serverId);
+    } catch (fetchError: any) {
+        console.error(`[AI Analysis] Config fetch threw:`, fetchError);
+        throw new Error(`SSH-Verbindungsfehler: ${fetchError.message}`);
     }
+
+    if (!config.success || !config.interfaces) {
+        const errorMsg = config.error || 'Netzwerkkonfiguration konnte nicht abgerufen werden';
+        console.error(`[AI Analysis] Config fetch failed: ${errorMsg}`);
+        throw new Error(`Konfigurationsfehler: ${errorMsg}`);
+    }
+
+    if (!Array.isArray(config.interfaces) || config.interfaces.length === 0) {
+        throw new Error('Keine Netzwerk-Interfaces gefunden');
+    }
+
+    let analysisContent: string;
+
+    // 2. Try AI analysis, fall back to raw data display
+    if (settings.enabled && settings.model) {
+        try {
+            const analysisResult = await explainNetworkConfig(config.interfaces);
+            analysisContent = JSON.stringify(analysisResult);
+        } catch (aiError: any) {
+            console.warn(`[AI Analysis] AI processing failed, using raw fallback:`, aiError.message);
+            // Build a structured fallback from the raw network data
+            analysisContent = JSON.stringify(buildRawAnalysis(config.interfaces));
+        }
+    } else {
+        // AI disabled - build structured result from raw data
+        analysisContent = JSON.stringify(buildRawAnalysis(config.interfaces));
+    }
+
+    // 3. Save to DB
+    try {
+        const stmt = db.prepare(`
+            INSERT INTO server_ai_analysis (server_id, type, content)
+            VALUES (?, 'network', ?)
+        `);
+        stmt.run(serverId, analysisContent);
+    } catch (dbError: any) {
+        console.error(`[AI Analysis] DB save failed:`, dbError);
+    }
+
+    console.log(`[AI Analysis] Completed for Server ${serverId}.`);
+    return analysisContent;
+}
+
+/**
+ * Build a structured analysis from raw interface data when AI is unavailable.
+ */
+function buildRawAnalysis(interfaces: any[]) {
+    const topology = interfaces.map((iface: any) => ({
+        interface: iface.iface || iface.name || 'unknown',
+        type: iface.type || detectInterfaceType(iface.iface || ''),
+        status: iface.active ? 'UP' : (iface.exists !== false ? 'DOWN' : 'MISSING'),
+        ip_connect: iface.cidr || iface.address || '-',
+        usage: iface.comments || iface.bridge_ports ? `Bridge: ${iface.bridge_ports}` : '-',
+    }));
+
+    return {
+        summary: `Netzwerkübersicht: ${interfaces.length} Interfaces erkannt. Daten wurden ohne KI-Analyse direkt aus der Konfiguration gelesen.`,
+        topology,
+        security_analysis: [],
+        performance_analysis: [],
+        recommendations: [{
+            action: 'KI-Analyse aktivieren',
+            reason: 'Für detaillierte Sicherheits- und Performance-Analysen aktivieren Sie die KI in den Einstellungen.',
+        }],
+    };
+}
+
+function detectInterfaceType(name: string): string {
+    if (name.startsWith('vmbr')) return 'Linux Bridge';
+    if (name.startsWith('bond')) return 'Bond';
+    if (name.startsWith('vlan') || name.includes('.')) return 'VLAN';
+    if (name.startsWith('lo')) return 'Loopback';
+    if (name.startsWith('eth') || name.startsWith('en')) return 'Physical';
+    if (name.startsWith('wl')) return 'WiFi';
+    if (name.startsWith('tap') || name.startsWith('veth')) return 'Virtual';
+    return 'Unknown';
 }

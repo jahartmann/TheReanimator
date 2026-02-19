@@ -297,14 +297,34 @@ export async function performFullBackup(serverId: number, server: Server) {
 
         // Get translations for success message
         const tSuccess = await getTranslations({ locale: await getServerLocale(), namespace: 'backupLogic' });
+        const successMsg = tSuccess('backupSuccess', { files: totalFiles, size: formatBytes(totalSize) });
+
+        // Notification
+        try {
+            const { broadcastMessage } = await import('@/lib/agent/telegram');
+            const notifyMsg = `✅ *Backup erfolgreich*\n\n` +
+                `🖥️ *Server:* ${server.name}\n` +
+                `📁 *Dateien:* ${totalFiles}\n` +
+                `💾 *Größe:* ${formatBytes(totalSize)}`;
+            await broadcastMessage(notifyMsg);
+        } catch (e) {
+            console.error('[BackupLogic] Notification failed:', e);
+        }
 
         return {
             success: true,
-            message: tSuccess('backupSuccess', { files: totalFiles, size: formatBytes(totalSize) }),
+            message: successMsg,
             backupId: result.lastInsertRowid as number
         };
 
     } catch (err) {
+        try {
+            const { broadcastMessage } = await import('@/lib/agent/telegram');
+            const errMsg = `❌ *Backup fehlgeschlagen*\n\n` +
+                `🖥️ *Server:* ${server.name}\n` +
+                `⚠️ *Fehler:*\n\`\`\`\n${err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500)}\n\`\`\``;
+            await broadcastMessage(errMsg);
+        } catch { }
         ssh.disconnect();
         throw err;
     }
@@ -333,6 +353,17 @@ export async function restoreFileToRemote(serverId: number, backupId: number, re
     try {
         // CRITICAL: Use absolute path on remote (must start with /)
         const remotePath = '/' + normalized;
+
+        // FIX: Create parent directory structure before upload
+        const remoteDir = path.dirname(remotePath).replace(/\\/g, '/');
+        if (remoteDir !== '/' && remoteDir !== '.') {
+            try {
+                await ssh.exec(`mkdir -p "${remoteDir}"`, 5000);
+            } catch (e) {
+                console.warn(`[Restore] mkdir -p failed for ${remoteDir}, may already exist`, e);
+            }
+        }
+
         await ssh.uploadFile(localPath, remotePath);
         ssh.disconnect();
         return { success: true, message: t('fileRestored', { path: remotePath }) };
