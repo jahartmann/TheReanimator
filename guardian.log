@@ -1,0 +1,32 @@
+[2026-02-17T12:10:24.041Z] Guardian started.
+[2026-02-17T12:10:24.138Z] ❌ System Check Failed (1/3): fetch failed
+[2026-02-17T12:10:34.073Z] ❌ System Check Failed (2/3): fetch failed
+[2026-02-17T12:10:44.088Z] ❌ System Check Failed (3/3): fetch failed
+[2026-02-17T12:10:44.103Z] ⚠️  INITIATING SELF-REPAIR PROTOCOLS...
+[2026-02-17T12:10:44.107Z] 🚨 Fatal: Database missing. Attempting migration...
+[2026-02-17T12:10:44.780Z] CMD FAIL: Command failed: npm run migrate
+node:internal/modules/cjs/loader:1372
+  throw err;
+  ^
+
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- D:\Dokumente & Inhalte\Programmierung\Reanimator\scripts\migrate.js
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1369:15)
+    at defaultResolveImpl (node:internal/modules/cjs/loader:1025:19)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1030:22)
+    at Module._load (node:internal/modules/cjs/loader:1179:37)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Module.require (node:internal/modules/cjs/loader:1449:12)
+    at require (node:internal/modules/helpers:135:16)
+    at Object.<anonymous> (D:\Dokumente & Inhalte\Programmierung\Reanimator\scripts\migrate.js:1:18)
+    at Module._compile (node:internal/modules/cjs/loader:1692:14) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [
+    'D:\\Dokumente & Inhalte\\Programmierung\\Reanimator\\scripts\\migrate.js'
+  ]
+}
+
+Node.js v24.4.0
+
