@@ -36,6 +36,7 @@ export default async function ConfigDetailPage({
         <ConfigDetailClient
             backupId={backupId}
             serverName={server?.name || 'Unbekannt'}
+            serverId={backup.server_id}
             backupDate={backup.backup_date}
             totalSize={backup.total_size}
         />

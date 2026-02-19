@@ -1,10 +1,9 @@
 'use client';
 
-import { useState, useEffect, use } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useRef, use } from 'react';
 import { useTranslations } from 'next-intl';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Link, useRouter } from '@/i18n/routing';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -12,7 +11,7 @@ import {
     ArrowLeft, ArrowRightLeft, CheckCircle, XCircle,
     Loader2, Clock, AlertTriangle, StopCircle, Trash2, Terminal
 } from "lucide-react";
-import { MigrationTask, MigrationStep } from '@/lib/actions/migration';
+import { MigrationTask, MigrationStep, getMigrationTask, cancelMigration, deleteMigrationTask } from '@/lib/actions/migration';
 
 export default function MigrationDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
@@ -20,22 +19,33 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
     const t = useTranslations('migrationDetail');
     const [task, setTask] = useState<MigrationTask | null>(null);
     const [loading, setLoading] = useState(true);
+    const logEndRef = useRef<HTMLDivElement>(null);
+    const logContainerRef = useRef<HTMLDivElement>(null);
+    const [autoScroll, setAutoScroll] = useState(true);
 
     useEffect(() => {
         fetchTask();
-        const interval = setInterval(fetchTask, 2000); // Poll every 2s
+        const interval = setInterval(fetchTask, 2000);
         return () => clearInterval(interval);
     }, [id]);
 
+    // Auto-scroll log to bottom when new content arrives
+    useEffect(() => {
+        if (autoScroll && logEndRef.current) {
+            logEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, [task?.log, autoScroll]);
+
+    const handleLogScroll = (e: React.UIEvent<HTMLDivElement>) => {
+        const el = e.currentTarget;
+        const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        setAutoScroll(isNearBottom);
+    };
+
     async function fetchTask() {
         try {
-            const res = await fetch(`/api/migrations/${id}`);
-            if (res.ok) {
-                const data = await res.json();
-                setTask(data);
-            } else if (res.status === 404) {
-                setTask(null);
-            }
+            const data = await getMigrationTask(parseInt(id));
+            setTask(data);
         } catch (e) {
             console.error(e);
         } finally {
@@ -46,7 +56,7 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
     async function handleCancel() {
         if (!confirm(t('cancelConfirm'))) return;
         try {
-            await fetch(`/api/migrations/${id}`, { method: 'DELETE' });
+            await cancelMigration(parseInt(id));
             router.push('/migrations');
         } catch (e) { console.error(e); }
     }
@@ -54,7 +64,7 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
     async function handleDelete() {
         if (!confirm(t('deleteConfirm'))) return;
         try {
-            await fetch(`/api/migrations/${id}`, { method: 'DELETE' });
+            await deleteMigrationTask(parseInt(id));
             router.push('/migrations');
         } catch (e) { console.error(e); }
     }
@@ -79,6 +89,11 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
     const Icon = config.icon;
     const progressPercent = task.total_steps > 0 ? Math.round((task.progress / task.total_steps) * 100) : 0;
 
+    // Calculate result summary
+    const vmSteps = task.steps.filter(s => s.type === 'vm' || s.type === 'lxc');
+    const failedVmSteps = vmSteps.filter(s => s.status === 'failed');
+    const completedVmSteps = vmSteps.filter(s => s.status === 'completed');
+
     return (
         <div className="space-y-6 max-w-7xl mx-auto h-[calc(100vh-100px)] flex flex-col">
             {/* Header */}
@@ -90,6 +105,21 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
                     <div className="flex items-center gap-3">
                         <h1 className="text-2xl font-bold">Migration Details</h1>
                         <Badge className={`${config.bg} ${config.color} hover:${config.bg}`}>{config.label}</Badge>
+                        {task.status === 'completed' && failedVmSteps.length > 0 && (
+                            <Badge variant="secondary" className="bg-amber-500/10 text-amber-600">
+                                {completedVmSteps.length}/{vmSteps.length} erfolgreich
+                            </Badge>
+                        )}
+                        {task.status === 'completed' && failedVmSteps.length === 0 && vmSteps.length > 0 && (
+                            <Badge variant="secondary" className="bg-green-500/10 text-green-600">
+                                {vmSteps.length}/{vmSteps.length} erfolgreich
+                            </Badge>
+                        )}
+                        {task.status === 'failed' && (
+                            <Badge variant="secondary" className="bg-red-500/10 text-red-600">
+                                {failedVmSteps.length} fehlgeschlagen
+                            </Badge>
+                        )}
                     </div>
                     <div className="flex items-center gap-2 text-muted-foreground mt-1">
                         <span className="font-mono">{task.source_name}</span>
@@ -197,6 +227,15 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
                             {task.status === 'failed' && (
                                 <AIAnalysisButton log={task.log || ''} />
                             )}
+                            <button
+                                onClick={() => {
+                                    setAutoScroll(true);
+                                    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                                }}
+                                className={`text-[10px] px-2 py-0.5 rounded font-mono transition-colors ${autoScroll ? 'bg-green-500/20 text-green-400' : 'bg-zinc-700/50 text-zinc-500 hover:text-zinc-300'}`}
+                            >
+                                Auto-Scroll {autoScroll ? 'ON' : 'OFF'}
+                            </button>
                             <div className="flex gap-1.5">
                                 <div className="h-2.5 w-2.5 rounded-full bg-zinc-700" />
                                 <div className="h-2.5 w-2.5 rounded-full bg-zinc-700" />
@@ -204,7 +243,11 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
                             </div>
                         </div>
                     </CardHeader>
-                    <ScrollArea className="flex-1">
+                    <div
+                        ref={logContainerRef}
+                        onScroll={handleLogScroll}
+                        className="flex-1 overflow-y-auto"
+                    >
                         <div className="p-4 font-mono text-sm text-zinc-300 whitespace-pre-wrap leading-relaxed relative">
                             {task.log ? (
                                 <>
@@ -216,8 +259,9 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
                             ) : (
                                 <span className="text-zinc-500 italic">{t('noLogEntries')}</span>
                             )}
+                            <div ref={logEndRef} />
                         </div>
-                    </ScrollArea>
+                    </div>
                 </Card>
             </div>
         </div>
@@ -226,6 +270,7 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
 
 import { analyzeLogWithAI } from '@/lib/actions/ai';
 import { Sparkles } from "lucide-react";
+import { toast } from "sonner";
 
 function AIAnalysisButton({ log }: { log: string }) {
     const [analyzing, setAnalyzing] = useState(false);
@@ -274,6 +319,3 @@ function AIAnalysisButton({ log }: { log: string }) {
         </div>
     );
 }
-
-// Ensure toast is imported or available globally. If not, import it.
-import { toast } from "sonner";

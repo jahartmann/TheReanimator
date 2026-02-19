@@ -2,12 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
-import Link from 'next/link';
+import { Link } from '@/i18n/routing';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRightLeft, Plus, Clock, CheckCircle, XCircle, Loader2, AlertTriangle, Trash2 } from "lucide-react";
-import { MigrationTask } from '@/lib/actions/migration';
+import { MigrationTask, getAllMigrationTasks, clearMigrationHistory } from '@/lib/actions/migration';
 
 export default function MigrationsPage() {
     const t = useTranslations('migrations');
@@ -17,17 +17,14 @@ export default function MigrationsPage() {
 
     useEffect(() => {
         fetchTasks();
-        const interval = setInterval(fetchTasks, 3000); // Poll every 3s
+        const interval = setInterval(fetchTasks, 3000);
         return () => clearInterval(interval);
     }, []);
 
     async function fetchTasks() {
         try {
-            const res = await fetch('/api/migrations');
-            if (res.ok) {
-                const data = await res.json();
-                setTasks(data);
-            }
+            const data = await getAllMigrationTasks();
+            setTasks(data);
         } catch (e) {
             console.error(e);
         } finally {
@@ -38,7 +35,7 @@ export default function MigrationsPage() {
     async function handleClearHistory() {
         if (!confirm(t('clearHistoryConfirm'))) return;
         try {
-            await fetch('/api/migrations?all=true', { method: 'DELETE' });
+            await clearMigrationHistory();
             fetchTasks();
         } catch (e) { console.error(e); }
     }
@@ -157,6 +154,7 @@ export default function MigrationsPage() {
                                             <th className="p-3 font-medium">{t('statusColumn')}</th>
                                             <th className="p-3 font-medium">{t('from')}</th>
                                             <th className="p-3 font-medium">{t('to')}</th>
+                                            <th className="p-3 font-medium">{t('result')}</th>
                                             <th className="p-3 font-medium text-right">{t('date')}</th>
                                             <th className="p-3 font-medium text-right">{t('details')}</th>
                                         </tr>
@@ -165,6 +163,8 @@ export default function MigrationsPage() {
                                         {historyTasks.map(task => {
                                             const config = statusConfig[task.status] || statusConfig.failed;
                                             const Icon = config.icon;
+                                            const failedSteps = task.steps.filter(s => (s.type === 'vm' || s.type === 'lxc') && s.status === 'failed');
+                                            const totalVmSteps = task.steps.filter(s => s.type === 'vm' || s.type === 'lxc');
                                             return (
                                                 <tr key={task.id} className="hover:bg-muted/5 transition-colors">
                                                     <td className="p-3">
@@ -175,6 +175,28 @@ export default function MigrationsPage() {
                                                     </td>
                                                     <td className="p-3 font-medium">{task.source_name}</td>
                                                     <td className="p-3 font-medium">{task.target_name}</td>
+                                                    <td className="p-3">
+                                                        {task.status === 'completed' && failedSteps.length === 0 && (
+                                                            <Badge variant="secondary" className="bg-green-500/10 text-green-600 text-xs">
+                                                                {totalVmSteps.length}/{totalVmSteps.length} OK
+                                                            </Badge>
+                                                        )}
+                                                        {task.status === 'completed' && failedSteps.length > 0 && (
+                                                            <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 text-xs">
+                                                                {totalVmSteps.length - failedSteps.length}/{totalVmSteps.length} OK
+                                                            </Badge>
+                                                        )}
+                                                        {task.status === 'failed' && (
+                                                            <Badge variant="secondary" className="bg-red-500/10 text-red-600 text-xs">
+                                                                {failedSteps.length} Fehler
+                                                            </Badge>
+                                                        )}
+                                                        {task.status === 'cancelled' && (
+                                                            <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 text-xs">
+                                                                Abgebrochen
+                                                            </Badge>
+                                                        )}
+                                                    </td>
                                                     <td className="p-3 text-right text-muted-foreground font-mono">
                                                         {new Date(task.created_at).toLocaleDateString()}
                                                     </td>
@@ -188,7 +210,7 @@ export default function MigrationsPage() {
                                         })}
                                         {historyTasks.length === 0 && (
                                             <tr>
-                                                <td colSpan={5} className="p-8 text-center text-muted-foreground">{t('historyEmpty')}</td>
+                                                <td colSpan={6} className="p-8 text-center text-muted-foreground">{t('historyEmpty')}</td>
                                             </tr>
                                         )}
                                     </tbody>

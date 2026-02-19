@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import Link from 'next/link';
+import { Link } from '@/i18n/routing';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -113,12 +113,12 @@ export default function ServersClient({ servers, groups, onDeleteServer }: Serve
                         {searchTerm && ` (${displayedServers} {t('of')} ${totalServers})`}
                     </p>
                 </div>
-                <Link href="/servers/new">
-                    <Button>
+                <Button asChild>
+                    <Link href="/servers/new">
                         <Plus className="mr-2 h-4 w-4" />
                         {t('addServer')}
-                    </Button>
-                </Link>
+                    </Link>
+                </Button>
             </div>
 
             {/* Search and Group Controls */}
@@ -152,9 +152,9 @@ export default function ServersClient({ servers, groups, onDeleteServer }: Serve
                         <p className="text-muted-foreground text-center mb-4">
                             {t('noServersDesc')}
                         </p>
-                        <Link href="/servers/new">
-                            <Button>{t('addServer')}</Button>
-                        </Link>
+                        <Button asChild>
+                            <Link href="/servers/new">{t('addServer')}</Link>
+                        </Button>
                     </CardContent>
                 </Card>
             ) : (
@@ -169,9 +169,9 @@ export default function ServersClient({ servers, groups, onDeleteServer }: Serve
                         const pbsCount = groupServers.filter(s => s.type === 'pbs').length;
 
                         return (
-                            <Card key={groupName} className="overflow-hidden">
+                            <Card key={groupName} className="overflow-hidden border border-border shadow-sm">
                                 <CardHeader
-                                    className="py-3 px-4 bg-gradient-to-r from-primary/5 to-transparent cursor-pointer hover:bg-primary/10 transition-colors"
+                                    className="py-3 px-4 bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors border-b border-border"
                                     onClick={() => toggleGroup(groupName)}
                                 >
                                     <div className="flex items-center justify-between">
@@ -182,20 +182,20 @@ export default function ServersClient({ servers, groups, onDeleteServer }: Serve
                                                 <ChevronRight className="h-5 w-5 text-muted-foreground" />
                                             )}
                                             <FolderOpen className="h-5 w-5 text-primary" />
-                                            <CardTitle className="text-base">{groupName}</CardTitle>
+                                            <CardTitle className="text-base font-medium text-foreground">{groupName}</CardTitle>
                                         </div>
                                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                             {pveCount > 0 && (
-                                                <span className="px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-600 text-xs font-medium">
+                                                <span className="px-2 py-0.5 rounded-md bg-orange-500/10 text-orange-600 text-xs font-medium">
                                                     {pveCount} PVE
                                                 </span>
                                             )}
                                             {pbsCount > 0 && (
-                                                <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 text-xs font-medium">
+                                                <span className="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 text-xs font-medium">
                                                     {pbsCount} PBS
                                                 </span>
                                             )}
-                                            <span className="ml-2">{groupServers.length} {t('servers')}</span>
+                                            <span className="ml-2 pl-2 border-l border-border">{groupServers.length} {t('servers')}</span>
                                         </div>
                                     </div>
                                 </CardHeader>
@@ -287,32 +287,39 @@ function ServerRow({
     t: (key: string) => string;
 }) {
     return (
-        <div className="flex items-center justify-between p-4 hover:bg-muted/5 transition-colors">
-            <Link href={`/servers/${server.id}`} className="flex items-center gap-4 flex-1">
-                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${server.type === 'pve' ? 'bg-orange-500/20' : 'bg-blue-500/20'
+        <div className="flex items-center justify-between p-4 hover:bg-accent/50 transition-colors border-b last:border-0 border-border first:rounded-t-lg last:rounded-b-lg">
+            {/* Main Clickable Area - Standard Link wrapping the content */}
+            <Link
+                href={`/servers/${server.id}`}
+                className="flex items-center gap-4 flex-1 group"
+            >
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${server.type === 'pve' ? 'bg-orange-500/10 text-orange-500 group-hover:bg-orange-500/20' : 'bg-blue-500/10 text-blue-500 group-hover:bg-blue-500/20'
                     }`}>
-                    <Server className={`h-5 w-5 ${server.type === 'pve' ? 'text-orange-500' : 'text-blue-500'
-                        }`} />
+                    <Server className="h-5 w-5" />
                 </div>
                 <div>
-                    <h3 className="font-medium">{server.name}</h3>
+                    <h3 className="font-semibold text-lg text-foreground group-hover:text-primary transition-colors tracking-tight">{server.name}</h3>
                     <p className="text-sm text-muted-foreground">
                         {server.type.toUpperCase()} · {server.ssh_host || new URL(server.url).hostname}
                     </p>
                 </div>
             </Link>
-            <div className="flex items-center gap-2">
+
+            {/* Actions - Completely separate from the link */}
+            <div className="flex items-center gap-2 pl-4">
                 <ServerJobsDialog serverId={server.id} serverName={server.name} />
-                <Link href={`/servers/${server.id}`}>
-                    <Button variant="outline" size="sm">
+
+                <Button variant="outline" size="sm" asChild>
+                    <Link href={`/servers/${server.id}`}>
                         <ExternalLink className="mr-2 h-4 w-4" />
                         {t('moreDetails')}
-                    </Button>
-                </Link>
+                    </Link>
+                </Button>
+
                 <Button
                     variant="ghost"
                     size="icon"
-                    className="text-red-500 hover:text-red-600 hover:bg-red-50"
+                    className="text-red-500 hover:text-red-600 hover:bg-red-500/10"
                     onClick={() => onDelete(server.id)}
                     disabled={isDeleting}
                 >

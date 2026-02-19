@@ -161,8 +161,6 @@ export function VirtualMachineList({ vms, currentServerId, otherServers, availab
                                         selectedTags={vm.tags || []}
                                         onTagsChange={(tags) => handleTagsChange(vm, tags)}
                                         isLoading={loadingTags[vm.vmid]}
-                                        compact={true}
-                                        maxVisibleTags={2}
                                     />
                                 </div>
                             </div>

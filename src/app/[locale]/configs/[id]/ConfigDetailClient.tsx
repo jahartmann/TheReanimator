@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Download, Copy, Check, Upload, Loader2, HardDrive, Info, BookOpen, Terminal, Network, ShieldCheck, FileText, Folder, Files, Archive, CheckSquare } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { ArrowLeft, Download, Copy, Check, Upload, Loader2, HardDrive, Info, BookOpen, Terminal, Network, ShieldCheck, FileText, Folder, Files, Archive, CheckSquare, Server as ServerIcon } from "lucide-react";
 import { FileBrowser, FolderInfo, SelectionInfo } from "@/components/ui/FileBrowser";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -57,15 +59,18 @@ type SelectedItem =
 export default function ConfigDetailClient({
     backupId,
     serverName,
+    serverId,
     backupDate,
     totalSize
 }: {
     backupId: number;
     serverName: string;
+    serverId: number;
     backupDate: string;
     totalSize: number;
 }) {
     const t = useTranslations('configDetail');
+    const locale = useLocale();
     const [files, setFiles] = useState<FileEntry[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedItem, setSelectedItem] = useState<SelectedItem>(null);
@@ -74,6 +79,10 @@ export default function ConfigDetailClient({
     const [copied, setCopied] = useState(false);
     const [restoring, setRestoring] = useState(false);
     const [downloading, setDownloading] = useState(false);
+
+    // Cross-node restore: server selection
+    const [availableServers, setAvailableServers] = useState<Array<{id: number, name: string}>>([]);
+    const [targetServerId, setTargetServerId] = useState<number>(serverId);
 
     // Track current selection paths for download
     const [currentSelectionPaths, setCurrentSelectionPaths] = useState<string[]>([]);
@@ -88,7 +97,18 @@ export default function ConfigDetailClient({
 
     useEffect(() => {
         loadFiles();
+        loadAvailableServers();
     }, [backupId]);
+
+    async function loadAvailableServers() {
+        try {
+            const res = await fetch(`/${locale}/api/servers`);
+            const data = await res.json();
+            setAvailableServers(data.map((s: any) => ({ id: s.id, name: s.name })));
+        } catch (err) {
+            console.error('Failed to load servers:', err);
+        }
+    }
 
     // Parse System Info when raw data is available
     useEffect(() => {
@@ -167,15 +187,15 @@ export default function ConfigDetailClient({
     async function loadFiles() {
         setLoading(true);
         try {
-            const res = await fetch(`/api/config-backups/${backupId}`);
+            const res = await fetch(`/${locale}/api/config-backups/${backupId}`);
             const data = await res.json();
             setFiles(data);
 
-            const guideRes = await fetch(`/api/config-backups/${backupId}?file=WIEDERHERSTELLUNG.md`);
+            const guideRes = await fetch(`/${locale}/api/config-backups/${backupId}?file=WIEDERHERSTELLUNG.md`);
             const guideData = await guideRes.json();
             if (guideData.content) setGuideContent(guideData.content);
 
-            const infoRes = await fetch(`/api/config-backups/${backupId}?file=SYSTEM_INFO.txt`);
+            const infoRes = await fetch(`/${locale}/api/config-backups/${backupId}?file=SYSTEM_INFO.txt`);
             const infoData = await infoRes.json();
             if (infoData.content) setSystemInfoRaw(infoData.content);
         } catch (err) {
@@ -188,7 +208,7 @@ export default function ConfigDetailClient({
         setSelectedItem({ type: 'file', path });
         setLoadingContent(true);
         try {
-            const res = await fetch(`/api/config-backups/${backupId}?file=${encodeURIComponent(path)}`);
+            const res = await fetch(`/${locale}/api/config-backups/${backupId}?file=${encodeURIComponent(path)}`);
             const data = await res.json();
             setFileContent(data.content || t('errorLoading'));
         } catch {
@@ -228,7 +248,7 @@ export default function ConfigDetailClient({
 
         setDownloading(true);
         try {
-            const res = await fetch(`/api/config-backups/${backupId}/download`, {
+            const res = await fetch(`/${locale}/api/config-backups/${backupId}/download`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ files: paths })
@@ -329,10 +349,13 @@ export default function ConfigDetailClient({
 
         for (const filePath of pathsToRestore) {
             try {
-                const res = await fetch(`/api/config-backups/${backupId}/restore`, {
+                const res = await fetch(`/${locale}/api/config-backups/${backupId}/restore`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filePath })
+                    body: JSON.stringify({
+                        filePath,
+                        targetServerId: targetServerId !== serverId ? targetServerId : null
+                    })
                 });
                 const result = await res.json();
                 if (result.success) successCount++;
@@ -533,6 +556,43 @@ export default function ConfigDetailClient({
                     </div>
                 )}
             </div>
+
+            {/* Cross-Node Restore: Server Selection */}
+            {availableServers.length > 1 && (
+                <Card className="border-amber-500/30 bg-amber-500/5">
+                    <CardContent className="py-3 px-4">
+                        <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                <ServerIcon className="h-4 w-4" />
+                                <Label htmlFor="target-server">{t('restoreTarget') || 'Restore Ziel:'}</Label>
+                            </div>
+                            <Select
+                                value={String(targetServerId)}
+                                onValueChange={(value) => setTargetServerId(parseInt(value))}
+                            >
+                                <SelectTrigger id="target-server" className="w-[280px] h-9">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {availableServers.map((server) => (
+                                        <SelectItem key={server.id} value={String(server.id)}>
+                                            {server.name}
+                                            {server.id === serverId && (
+                                                <span className="ml-2 text-xs text-muted-foreground">({t('original') || 'Original'})</span>
+                                            )}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            {targetServerId !== serverId && (
+                                <Badge variant="outline" className="text-amber-600 border-amber-600/50">
+                                    {t('crossNodeRestore') || 'Cross-Node Restore'}
+                                </Badge>
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
                 <div className="border-b shrink-0 bg-background/95 backdrop-blur z-10">

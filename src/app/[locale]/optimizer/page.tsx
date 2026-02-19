@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, RefreshCw, BarChart3, TrendingUp, AlertTriangle, ArrowRight, CheckCircle2, Server, Cpu } from "lucide-react";
+import { Loader2, RefreshCw, BarChart3, TrendingUp, AlertTriangle, ArrowRight, CheckCircle2, Server, Cpu, HardDrive, Play } from "lucide-react";
 import { getNodeStats, getOptimizationSuggestions, NodeStats, OptimizationSuggestion } from '@/lib/actions/optimizer_actions';
 import { getAISettings } from '@/lib/actions/ai';
 import { useRouter } from 'next/navigation';
@@ -60,6 +60,19 @@ export default function OptimizerPage() {
         if (usage > 90) return "bg-red-500";
         if (usage > 70) return "bg-yellow-500";
         return "bg-blue-500";
+    };
+
+    const getDiskColor = (usage: number) => {
+        if (usage > 90) return "bg-red-500";
+        if (usage > 75) return "bg-orange-500";
+        return "bg-slate-500";
+    };
+
+    const formatUptime = (seconds: number) => {
+        const d = Math.floor(seconds / 86400);
+        const h = Math.floor((seconds % 86400) / 3600);
+        if (d > 0) return `${d}d ${h}h`;
+        return `${h}h`;
     };
 
     if (!loading && !aiEnabled) {
@@ -121,23 +134,46 @@ export default function OptimizerPage() {
                                     {node.status}
                                 </Badge>
                             </CardHeader>
-                            <CardContent className="space-y-4">
+                            <CardContent className="space-y-3">
+                                {/* CPU */}
                                 <div>
                                     <div className="flex justify-between text-sm mb-1">
-                                        <span className="text-muted-foreground flex items-center gap-1"><Cpu className="h-3 w-3" /> {t('cpuLoad')}</span>
+                                        <span className="text-muted-foreground flex items-center gap-1"><Cpu className="h-3 w-3" /> CPU (2h Ø)</span>
                                         <span className="font-mono font-bold">{node.cpu.toFixed(1)}%</span>
                                     </div>
-                                    <Progress value={node.cpu} className="h-2" indicatorColor={getCpuColor(node.cpu)} />
+                                    <Progress value={node.cpu} className="h-1.5" indicatorColor={getCpuColor(node.cpu)} />
                                 </div>
+                                {/* RAM */}
                                 <div>
                                     <div className="flex justify-between text-sm mb-1">
-                                        <span className="text-muted-foreground flex items-center gap-1"><BarChart3 className="h-3 w-3" /> {t('ramUsage')}</span>
+                                        <span className="text-muted-foreground flex items-center gap-1"><BarChart3 className="h-3 w-3" /> RAM</span>
                                         <span className="font-mono font-bold">{node.ram.toFixed(1)}%</span>
                                     </div>
-                                    <Progress value={node.ram} className="h-2" indicatorColor={getRamColor(node.ram)} />
-                                    <p className="text-xs text-muted-foreground text-right mt-1 font-mono">
-                                        {(node.ramUsed / 1024 / 1024 / 1024).toFixed(1)} GB / {(node.ramTotal / 1024 / 1024 / 1024).toFixed(1)} GB
+                                    <Progress value={node.ram} className="h-1.5" indicatorColor={getRamColor(node.ram)} />
+                                    <p className="text-xs text-muted-foreground text-right mt-0.5 font-mono">
+                                        {(node.ramUsed / 1073741824).toFixed(1)} / {(node.ramTotal / 1073741824).toFixed(1)} GB
                                     </p>
+                                </div>
+                                {/* Disk */}
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-muted-foreground flex items-center gap-1"><HardDrive className="h-3 w-3" /> Disk</span>
+                                        <span className="font-mono font-bold">{node.disk.toFixed(1)}%</span>
+                                    </div>
+                                    <Progress value={node.disk} className="h-1.5" indicatorColor={getDiskColor(node.disk)} />
+                                    {node.diskTotal > 0 && (
+                                        <p className="text-xs text-muted-foreground text-right mt-0.5 font-mono">
+                                            {(node.diskUsed / 1073741824).toFixed(1)} / {(node.diskTotal / 1073741824).toFixed(1)} GB
+                                        </p>
+                                    )}
+                                </div>
+                                {/* VMs + Uptime */}
+                                <div className="flex items-center justify-between pt-1 border-t border-border/40 text-xs text-muted-foreground">
+                                    <span className="flex items-center gap-1">
+                                        <Play className="h-3 w-3 text-green-500" />
+                                        {node.runningVms}/{node.vmCount} VMs
+                                    </span>
+                                    {node.uptime > 0 && <span>Up {formatUptime(node.uptime)}</span>}
                                 </div>
                             </CardContent>
                         </Card>
