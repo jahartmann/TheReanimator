@@ -1,53 +1,58 @@
+import type { Metadata } from 'next';
+import '../globals.css';
+import { ThemeProvider } from '@/components/theme-provider';
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages } from 'next-intl/server';
-import { Geist, Geist_Mono } from "next/font/google";
-import "@/app/globals.css";
-import { Sidebar } from "@/components/layout/Sidebar";
-import { UserNav } from '@/components/layout/UserNav';
-import TaskManager from "@/components/TaskManager";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { notFound } from 'next/navigation';
 import { routing } from '@/i18n/routing';
+import { Sidebar } from '@/components/layout/Sidebar';
+import { Toaster } from '@/components/ui/sonner';
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+export const metadata: Metadata = {
+  title: 'Reanimator',
+  description: 'Proxmox High Availability & Automation',
+};
 
 export default async function LocaleLayout({
   children,
-  params,
+  params
 }: {
   children: React.ReactNode;
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
 
+  // Ensure that the incoming `locale` is valid
   if (!routing.locales.includes(locale as any)) {
     notFound();
   }
 
+  // Providing all messages to the client
+  // side is the easiest way to get started
   const messages = await getMessages();
 
   return (
-    <NextIntlClientProvider messages={messages}>
-      <html lang={locale} className="dark">
-        <body
-          className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground min-h-screen`}
-        >
-          <Sidebar />
-          <main className="pl-64 min-h-screen">
-            <div className="container mx-auto p-8">
-              {children}
+    <html lang={locale} suppressHydrationWarning>
+      <body className="antialiased min-h-screen bg-background">
+        <NextIntlClientProvider messages={messages}>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+          >
+            <div className="flex h-screen overflow-hidden">
+              <Sidebar />
+              <div className="ml-64 flex-1 flex flex-col overflow-hidden">
+                <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
+                  {children}
+                </main>
+              </div>
             </div>
-          </main>
-        </body>
-      </html>
-    </NextIntlClientProvider>
+            <Toaster richColors position="top-right" />
+          </ThemeProvider>
+        </NextIntlClientProvider>
+      </body>
+    </html>
   );
 }
