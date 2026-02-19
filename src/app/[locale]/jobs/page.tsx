@@ -153,94 +153,96 @@ export default function JobsPage() {
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-3">
-                                        <div className="text-right text-sm">
-                                            <div className="font-medium text-green-600">{t('active')}</div>
-                                            {/* Future: Show next run calculation */}
-                                        </div>
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <Button variant="ghost" size="icon"><MoreVertical className="h-4 w-4" /></Button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end">
-                                                <DropdownMenuItem onClick={() => handleRunNow(job.id)}><Play className="h-4 w-4 mr-2" /> {t('runNow')}</DropdownMenuItem>
-                                                <DropdownMenuSeparator />
-                                                <DropdownMenuItem className="text-red-600" onClick={() => handleDelete(job.id)}><Trash2 className="h-4 w-4 mr-2" /> {tCommon('delete')}</DropdownMenuItem>
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
+                                        <div className="font-medium text-green-600">{t('active')}</div>
+                                        {job.next_run && (
+                                            <div className="text-xs text-muted-foreground mt-1">
+                                                {t('nextRun')}: {job.next_run === 'Manual' || job.next_run === 'Invalid Schedule' ? job.next_run : new Date(job.next_run).toLocaleString(locale)}
+                                            </div>
+                                        )}
                                     </div>
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <Button variant="ghost" size="icon"><MoreVertical className="h-4 w-4" /></Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end">
+                                            <DropdownMenuItem onClick={() => handleRunNow(job.id)}><Play className="h-4 w-4 mr-2" /> {t('runNow')}</DropdownMenuItem>
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuItem className="text-red-600" onClick={() => handleDelete(job.id)}><Trash2 className="h-4 w-4 mr-2" /> {tCommon('delete')}</DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
                                 </div>
-                            ))}
-                        </div>
+                    ))}
+                </div>
                     )}
-                </CardContent>
-            </Card>
+            </CardContent>
+        </Card>
 
-            {/* History Section */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2"><Clock className="h-5 w-5" /> {t('history')}</CardTitle>
-                    <CardDescription>{t('historyDesc', { count: historyTotal })}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="space-y-2">
-                        {history.map(task => (
-                            <div key={task.id} className="flex items-center justify-between p-3 border-b last:border-0 text-sm">
-                                <div className="flex items-center gap-3">
-                                    <StatusIcon status={task.status} />
-                                    <div>
-                                        <div className="font-medium">{task.description}</div>
-                                        <div className="text-xs text-muted-foreground flex gap-2">
-                                            <span>{new Date(task.startTime).toLocaleString(locale)}</span>
-                                            {task.duration && <span>• {t('duration')}: {task.duration}</span>}
-                                            {task.node && <span>• {task.node}</span>}
-                                        </div>
-                                    </div>
+            {/* History Section */ }
+    <Card>
+        <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Clock className="h-5 w-5" /> {t('history')}</CardTitle>
+            <CardDescription>{t('historyDesc', { count: historyTotal })}</CardDescription>
+        </CardHeader>
+        <CardContent>
+            <div className="space-y-2">
+                {history.map(task => (
+                    <div key={task.id} className="flex items-center justify-between p-3 border-b last:border-0 text-sm">
+                        <div className="flex items-center gap-3">
+                            <StatusIcon status={task.status} />
+                            <div>
+                                <div className="font-medium">{task.description}</div>
+                                <div className="text-xs text-muted-foreground flex gap-2">
+                                    <span>{new Date(task.startTime).toLocaleString(locale)}</span>
+                                    {task.duration && <span>• {t('duration')}: {task.duration}</span>}
+                                    {task.node && <span>• {task.node}</span>}
                                 </div>
-                                <Badge variant={task.status === 'completed' ? 'secondary' : (task.status === 'failed' ? 'destructive' : 'default')}>
-                                    {formatStatus(task.status)}
-                                </Badge>
                             </div>
-                        ))}
+                        </div>
+                        <Badge variant={task.status === 'completed' ? 'secondary' : (task.status === 'failed' ? 'destructive' : 'default')}>
+                            {formatStatus(task.status)}
+                        </Badge>
                     </div>
+                ))}
+            </div>
 
-                    {/* Pagination Footer */}
-                    {historyTotal > historyPageSize && (
-                        <div className="border-t mt-4 pt-3 flex items-center justify-between">
-                            <span className="text-xs text-muted-foreground">
-                                {t('showing', {
-                                    from: historyPage * historyPageSize + 1,
-                                    to: Math.min((historyPage + 1) * historyPageSize, historyTotal),
-                                    total: historyTotal
-                                })}
-                            </span>
-                            <div className="flex items-center gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setHistoryPage(p => Math.max(0, p - 1))}
-                                    disabled={!canHistoryPrev}
-                                >
-                                    <ChevronLeft className="h-4 w-4 mr-1" />
-                                    {t('back')}
-                                </Button>
-                                <span className="text-sm text-muted-foreground">
-                                    {t('page', { page: historyPage + 1, total: historyTotalPages })}
-                                </span>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setHistoryPage(p => p + 1)}
-                                    disabled={!canHistoryNext}
-                                >
-                                    {t('next')}
-                                    <ChevronRight className="h-4 w-4 ml-1" />
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
-        </div>
+            {/* Pagination Footer */}
+            {historyTotal > historyPageSize && (
+                <div className="border-t mt-4 pt-3 flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">
+                        {t('showing', {
+                            from: historyPage * historyPageSize + 1,
+                            to: Math.min((historyPage + 1) * historyPageSize, historyTotal),
+                            total: historyTotal
+                        })}
+                    </span>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setHistoryPage(p => Math.max(0, p - 1))}
+                            disabled={!canHistoryPrev}
+                        >
+                            <ChevronLeft className="h-4 w-4 mr-1" />
+                            {t('back')}
+                        </Button>
+                        <span className="text-sm text-muted-foreground">
+                            {t('page', { page: historyPage + 1, total: historyTotalPages })}
+                        </span>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setHistoryPage(p => p + 1)}
+                            disabled={!canHistoryNext}
+                        >
+                            {t('next')}
+                            <ChevronRight className="h-4 w-4 ml-1" />
+                        </Button>
+                    </div>
+                </div>
+            )}
+        </CardContent>
+    </Card>
+        </div >
     );
 }
 
