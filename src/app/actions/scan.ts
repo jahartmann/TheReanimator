@@ -32,6 +32,12 @@ export async function scanAllVMs(serverId: number) {
     const user = await getCurrentUser();
     if (!user) throw new Error('Unauthorized');
 
+    return _scanAllVMs(serverId);
+}
+
+// Internal function without auth check for background jobs
+export async function _scanAllVMs(serverId: number) {
+
     try {
         const settings = await getAISettings();
         if (!settings.enabled) return { success: false, error: 'AI ist deaktiviert.' };
@@ -77,6 +83,12 @@ export async function scanAllVMs(serverId: number) {
 export async function scanHost(serverId: number) {
     const user = await getCurrentUser();
     if (!user) throw new Error('Unauthorized');
+
+    return _scanHost(serverId);
+}
+
+// Internal function without auth check for background jobs
+export async function _scanHost(serverId: number) {
 
     const settings = await getAISettings();
     if (!settings.enabled) return { success: false, error: 'AI ist deaktiviert.' };
@@ -175,7 +187,7 @@ export async function runServerScan(serverId: number) {
     try {
         // 1. Scan Host Files
         updateLog(`[1/3] Fetching system files...`);
-        const hostRes = await scanHost(server.id);
+        const hostRes = await _scanHost(server.id);
         if (!hostRes.success) throw new Error(hostRes.error);
 
         // 2. Network Analysis
@@ -189,7 +201,7 @@ export async function runServerScan(serverId: number) {
 
         // 3. Scan VMs
         updateLog(`[3/3] Scanning VMs & Containers...`);
-        const vmRes = await scanAllVMs(server.id);
+        const vmRes = await _scanAllVMs(server.id);
         if (vmRes.success) {
             updateLog(`  -> Processed ${vmRes.count} VMs.`);
         }

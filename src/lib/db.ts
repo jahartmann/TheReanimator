@@ -1,26 +1,54 @@
-import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+
+let db: any;
 
 // Use relative paths to avoid Turbopack analysis issues with process.cwd()
 const DATA_DIR = 'data';
 const BACKUP_DIR = 'data/config-backups';
 const DB_PATH = 'data/proxhost.db';
 
-// Ensure directories exist using literals/constants
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-if (!fs.existsSync(BACKUP_DIR)) {
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
-}
+if (process.env.NEXT_PHASE === 'phase-production-build') {
+  console.log('[DB] Build phase detected, using mock database proxy');
+  // Simplified mock that returns empty results for common methods
+  const mockDb = {
+    prepare: () => ({
+      all: () => [],
+      get: () => null,
+      run: () => ({ changes: 0, lastInsertRowid: 0 })
+    }),
+    exec: () => ({}),
+    pragma: () => ({}),
+    close: () => ({})
+  };
+  db = mockDb;
+} else {
+  try {
+    const Database = require('better-sqlite3');
 
-const db = new Database(DB_PATH);
-console.log('[DB] Initialized database at:', path.resolve(DB_PATH));
+    // Ensure directories exist
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(BACKUP_DIR)) {
+      fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    }
 
-// Enable WAL mode for better concurrency
-db.pragma('journal_mode = WAL');
-db.pragma('busy_timeout = 3000'); // Wait up to 3s for locks
+    db = new Database(DB_PATH);
+    console.log('[DB] Initialized database at:', path.resolve(DB_PATH));
+
+    // Enable WAL mode for better concurrency
+    db.pragma('journal_mode = WAL');
+    db.pragma('busy_timeout = 3000'); // Wait up to 3s for locks
+  } catch (e) {
+    console.warn('[DB] Failed to initialize real database, falling back to mock:', e);
+    db = {
+      prepare: () => ({ all: () => [], get: () => null, run: () => ({}) }),
+      exec: () => ({}),
+      pragma: () => ({})
+    };
+  }
+}
 
 // Migrations
 try {

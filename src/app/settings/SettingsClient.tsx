@@ -9,9 +9,10 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { getAISettings, saveAISettings, checkOllamaConnection, type OllamaModel } from "@/app/actions/ai";
-import { getNotificationSettings, saveNotificationSettings } from "@/app/actions/notifications";
+import { getNotificationSettings, saveNotificationSettings, getSmtpSettings, saveSmtpSettings } from "@/app/actions/notifications";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface VersionInfo {
     currentVersion: string;
@@ -248,12 +249,6 @@ export default function SettingsClient() {
                             )}
                         </CardContent>
                     </Card>
-
-                    {/* AI INTEGRATION CARD */}
-                    <AICard />
-
-                    {/* NOTIFICATIONS CARD */}
-                    <NotificationsCard />
                 </div>
 
                 {/* RIGHT COLUMN: MAINTENANCE & INFO */}
@@ -339,6 +334,36 @@ export default function SettingsClient() {
                     </Card>
                 </div>
             </div>
+
+            <Tabs defaultValue="system" className="w-full mt-8">
+                <TabsList className="bg-muted border w-full justify-start h-auto p-1 rounded-xl">
+                    <TabsTrigger value="system" className="px-6 py-2 rounded-lg gap-2">
+                        <Settings className="w-4 h-4" /> System
+                    </TabsTrigger>
+                    <TabsTrigger value="ai" className="px-6 py-2 rounded-lg gap-2">
+                        <Sparkles className="w-4 h-4" /> KI (Ollama)
+                    </TabsTrigger>
+                    <TabsTrigger value="notifications" className="px-6 py-2 rounded-lg gap-2">
+                        <Bell className="w-4 h-4" /> Benachrichtigungen
+                    </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="system" className="mt-6">
+                    {/* System stuff is mostly at the top, but we could put more here if needed. 
+                        For now, keeping the top layout as-is and just using tabs for the lower cards. */}
+                    <p className="text-muted-foreground text-sm">Weitere Systemeinstellungen finden Sie hier in Kürze.</p>
+                </TabsContent>
+
+                <TabsContent value="ai" className="mt-6">
+                    <AICard />
+                </TabsContent>
+
+                <TabsContent value="notifications" className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <NotificationsCard />
+                    <SmtpCard />
+                </TabsContent>
+            </Tabs>
+
         </div>
     );
 }
@@ -560,6 +585,77 @@ function NotificationsCard() {
                 </div>
                 <div className="pt-2 flex justify-end">
                     <Button onClick={() => handleSave(token, chatId, enabled)} disabled={saving} className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm">
+                        Einstellungen Speichern
+                    </Button>
+                </div>
+            </CardContent>
+        </Card>
+    );
+}
+
+function SmtpCard() {
+    const [host, setHost] = useState('');
+    const [port, setPort] = useState('587');
+    const [user, setUser] = useState('');
+    const [pass, setPass] = useState('');
+    const [sender, setSender] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        getSmtpSettings().then(s => {
+            setHost(s.host);
+            setPort(s.port);
+            setUser(s.user);
+            setPass(s.pass);
+            setSender(s.sender);
+        });
+    }, []);
+
+    async function handleSave() {
+        setSaving(true);
+        await saveSmtpSettings(host, port, user, pass, sender);
+        setSaving(false);
+        toast.success('SMTP Einstellungen gespeichert');
+    }
+
+    return (
+        <Card className="overflow-hidden border-muted/60 shadow-sm">
+            <CardHeader className="bg-gradient-to-r from-orange-500/5 to-transparent pb-4">
+                <CardTitle className="flex items-center gap-2">
+                    <Server className="h-5 w-5 text-orange-500" />
+                    SMTP E-Mail Server
+                </CardTitle>
+                <CardDescription>
+                    Konfigurieren Sie einen E-Mail-Server für den täglichen Mail-Versand von Berichten.
+                </CardDescription>
+            </CardHeader>
+            <CardContent className="p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                        <Label>SMTP Host</Label>
+                        <Input value={host} onChange={(e) => setHost(e.target.value)} placeholder="mail.example.com" />
+                    </div>
+                    <div className="space-y-2">
+                        <Label>Port</Label>
+                        <Input value={port} onChange={(e) => setPort(e.target.value)} placeholder="587" />
+                    </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                        <Label>Benutzername</Label>
+                        <Input value={user} onChange={(e) => setUser(e.target.value)} placeholder="user@example.com" />
+                    </div>
+                    <div className="space-y-2">
+                        <Label>Passwort</Label>
+                        <Input type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="••••••••" />
+                    </div>
+                </div>
+                <div className="space-y-2">
+                    <Label>Absender-Adresse (From)</Label>
+                    <Input value={sender} onChange={(e) => setSender(e.target.value)} placeholder="reanimator@example.com" />
+                </div>
+                <div className="pt-2 flex justify-end">
+                    <Button onClick={handleSave} disabled={saving} className="bg-orange-600 hover:bg-orange-700 text-white shadow-sm">
                         Einstellungen Speichern
                     </Button>
                 </div>

@@ -21,3 +21,29 @@ export async function saveNotificationSettings(telegramToken: string, telegramCh
     upsert.run('notifications_enabled', String(enabled));
     return { success: true };
 }
+
+export async function getSmtpSettings() {
+    const host = db.prepare("SELECT value FROM settings WHERE key = 'smtp_host'").get() as { value: string } | undefined;
+    const port = db.prepare("SELECT value FROM settings WHERE key = 'smtp_port'").get() as { value: string } | undefined;
+    const user = db.prepare("SELECT value FROM settings WHERE key = 'smtp_user'").get() as { value: string } | undefined;
+    const pass = db.prepare("SELECT value FROM settings WHERE key = 'smtp_pass'").get() as { value: string } | undefined;
+    const sender = db.prepare("SELECT value FROM settings WHERE key = 'smtp_sender'").get() as { value: string } | undefined;
+
+    return {
+        host: host?.value || '',
+        port: port?.value || '587',
+        user: user?.value || '',
+        pass: pass?.value || '',
+        sender: sender?.value || ''
+    };
+}
+
+export async function saveSmtpSettings(host: string, port: string, user: string, pass: string, sender: string) {
+    const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    upsert.run('smtp_host', host);
+    upsert.run('smtp_port', String(port));
+    upsert.run('smtp_user', user);
+    upsert.run('smtp_pass', pass);
+    upsert.run('smtp_sender', sender);
+    return { success: true };
+}

@@ -165,15 +165,15 @@ export default function ConfigDetailClient({
     async function loadFiles() {
         setLoading(true);
         try {
-            const res = await fetch(`/api/config-backups/${backupId}`);
+            const res = await fetch(`/api/config-backups/detail?id=${backupId}`);
             const data = await res.json();
             setFiles(data);
 
-            const guideRes = await fetch(`/api/config-backups/${backupId}?file=WIEDERHERSTELLUNG.md`);
+            const guideRes = await fetch(`/api/config-backups/detail?id=${backupId}&file=WIEDERHERSTELLUNG.md`);
             const guideData = await guideRes.json();
             if (guideData.content) setGuideContent(guideData.content);
 
-            const infoRes = await fetch(`/api/config-backups/${backupId}?file=SYSTEM_INFO.txt`);
+            const infoRes = await fetch(`/api/config-backups/detail?id=${backupId}&file=SYSTEM_INFO.txt`);
             const infoData = await infoRes.json();
             if (infoData.content) setSystemInfoRaw(infoData.content);
         } catch (err) {
@@ -186,7 +186,7 @@ export default function ConfigDetailClient({
         setSelectedItem({ type: 'file', path });
         setLoadingContent(true);
         try {
-            const res = await fetch(`/api/config-backups/${backupId}?file=${encodeURIComponent(path)}`);
+            const res = await fetch(`/api/config-backups/detail?id=${backupId}&file=${encodeURIComponent(path)}`);
             const data = await res.json();
             setFileContent(data.content || 'Fehler beim Laden');
         } catch {
@@ -226,10 +226,10 @@ export default function ConfigDetailClient({
 
         setDownloading(true);
         try {
-            const res = await fetch(`/api/config-backups/${backupId}/download`, {
+            const res = await fetch(`/api/config-backups/download`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ files: paths })
+                body: JSON.stringify({ backupId, files: paths })
             });
 
             if (!res.ok) {
@@ -327,10 +327,10 @@ export default function ConfigDetailClient({
 
         for (const filePath of pathsToRestore) {
             try {
-                const res = await fetch(`/api/config-backups/${backupId}/restore`, {
+                const res = await fetch(`/api/config-backups/restore`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filePath })
+                    body: JSON.stringify({ backupId, filePath })
                 });
                 const result = await res.json();
                 if (result.success) successCount++;

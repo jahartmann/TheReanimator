@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import db from './db';
 import { performFullBackup } from './backup-logic';
-import { scanAllVMs, scanHost, scanEntireInfrastructure } from '@/app/actions/scan';
+import { _scanAllVMs, _scanHost, scanEntireInfrastructure } from '@/app/actions/scan';
 import { migrateVM } from '@/app/actions/vm';
 import { runNetworkAnalysis } from '@/app/actions/network_analysis';
 
@@ -236,11 +236,11 @@ export async function runJob(job: any) {
             console.log(`[Scheduler] Starting Health Scan for Server ${job.source_server_id}`);
 
             // 1. Scan Host
-            const hostRes = await scanHost(job.source_server_id);
+            const hostRes = await _scanHost(job.source_server_id);
             if (!hostRes.success) throw new Error(`Host Scan Failed: ${hostRes.error}`);
 
             // 2. Scan VMs
-            const vmRes = await scanAllVMs(job.source_server_id);
+            const vmRes = await _scanAllVMs(job.source_server_id);
             if (!vmRes.success) throw new Error(`VM Scan Failed: ${vmRes.error}`);
 
             db.prepare('UPDATE history SET status = ?, end_time = ?, log = ? WHERE id = ?')

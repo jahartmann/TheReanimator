@@ -2,17 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { restoreFile } from '@/app/actions/configBackup';
 import db from '@/lib/db';
 
-export async function POST(
-    request: NextRequest,
-    { params }: { params: Promise<{ id: string }> }
-) {
-    const { id } = await params;
-    const backupId = parseInt(id);
+export async function POST(request: NextRequest) {
     const body = await request.json();
-    const { filePath } = body;
+    const { backupId, filePath } = body;
 
-    if (!filePath) {
-        return NextResponse.json({ success: false, message: 'filePath required' }, { status: 400 });
+    if (!backupId || !filePath) {
+        return NextResponse.json({ success: false, message: 'backupId and filePath required' }, { status: 400 });
     }
 
     // Get server ID from backup

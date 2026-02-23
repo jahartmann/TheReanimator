@@ -102,42 +102,37 @@ export async function syncTagsFromProxmox(serverId: number): Promise<{ success: 
     try {
         await ssh.connect();
 
-        // Get cluster options to find tag-style
-        // pvesh get /cluster/options --output-format json
-        const output = await ssh.exec('pvesh get /cluster/options --output-format json');
-        const options = JSON.parse(output);
-        const tagStyle = options['tag-style'];
+        // Getting all resources to extract tags
+        const output = await ssh.exec('pvesh get /cluster/resources --output-format json');
+        const resources = JSON.parse(output);
 
-        // Handle case where tagStyle is not a string (could be undefined or object)
-        if (!tagStyle || typeof tagStyle !== 'string') {
-            console.log('No tag-style found or invalid format');
-            return { success: true, message: 'Keine Tags zum Synchronisieren gefunden' };
-        }
-
-        const colorMapMatch = tagStyle.match(/color-map=([^,]+)/);
-        if (!colorMapMatch) {
-            console.log('No color-map found in tag-style');
-            return { success: true, message: 'Keine Farbzuordnung gefunden' };
-        }
-
-        const colorMap = colorMapMatch[1];
-        const tags = colorMap.split(';').map((t: string) => { // Explicit type here too
-            const [name, color] = t.split(':');
-            return { name, color };
-        }).filter((t: { name: string, color: string }) => t.name && t.color);
-
-        // Update local DB
-        const insertStmt = db.prepare('INSERT INTO tags (name, color) VALUES (@name, @color) ON CONFLICT(name) DO UPDATE SET color=excluded.color');
-
-        const updateTags = db.transaction((tagsToInsert) => {
-            for (const tag of tagsToInsert) {
-                insertStmt.run(tag);
+        const foundTags = new Set<string>();
+        resources.forEach((r: any) => {
+            if (r.tags) {
+                const tList = r.tags.split(',').map((t: string) => t.trim()).filter((t: string) => t);
+                tList.forEach((t: string) => foundTags.add(t));
             }
         });
 
-        updateTags(tags);
+        // Sync found tags to DB (if not exist)
+        const insertStmt = db.prepare('INSERT OR IGNORE INTO tags (name, color) VALUES (?, ?)');
+        let newCount = 0;
+        const existingTags = new Set((db.prepare('SELECT name FROM tags').all() as Tag[]).map(t => t.name));
 
-        return { success: true, message: `Synced ${tags.length} tags` };
+        const defaultColors = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#1A535C', '#F7FFF7'];
+
+        db.transaction(() => {
+            for (const tagName of Array.from(foundTags)) {
+                if (!existingTags.has(tagName)) {
+                    // Assign random default color
+                    const color = defaultColors[Math.floor(Math.random() * defaultColors.length)];
+                    insertStmt.run(tagName, color);
+                    newCount++;
+                }
+            }
+        })();
+
+        return { success: true, message: `Synced ${foundTags.size} tags. Added ${newCount} new tags.` };
     } catch (e) {
         console.error('[Tags] Sync failed:', e);
         return { success: false, message: String(e) };
@@ -165,21 +160,7 @@ export async function assignTagsToResource(
     try {
         await ssh.connect();
 
-        // Prepare tags string: tag1,tag2,tag3
-        // Need to handle spaces or special chars if any, generally proxmox tags are simple strings
-        // But comma separated
-        const tagString = tags.map(t => t.trim()).join(',');
-
-        // We don't know if it's qemu or lxc easily without checking, but pvesh path differs.
-        // However, we can try to find where the VM is.
-        // Or simpler: The user of this function might know.
-        // Actually, 'pvesh set /nodes/{node}/{type}/{vmid} -tags {tags}'
-        // We need the node and type (qemu/lxc).
-        // Let's assume we can find it via pvesh or we update the UI to pass it.
-        // For now, let's try to find it. But wait, `pvesh` is cluster wide? 
-        // No, we need node.
-
-        // Let's first search for the VM to get node and type
+        // Check if vmid exists and if it is qemu or lxc (plus which node it is on!)
         const findCmd = `pvesh get /cluster/resources --type vm --output-format json`;
         const resourcesJson = await ssh.exec(findCmd);
         const resources = JSON.parse(resourcesJson);
@@ -187,38 +168,13 @@ export async function assignTagsToResource(
 
         if (!resource) return { success: false, message: 'Resource not found' };
 
-        if (!resource) return { success: false, message: 'Resource not found' };
-
         const { node, type } = resource; // type is 'qemu' or 'lxc'
 
-        let cmd = '';
-        if (type === 'qemu') {
-            cmd = `qm set ${vmid} --tags "${tagString}"`;
-        } else if (type === 'lxc') {
-            cmd = `pct set ${vmid} --tags "${tagString}"`;
-        } else {
-            return { success: false, message: 'Unknown resource type: ' + type };
-        }
+        const tagString = tags.map(t => t.trim().replace(/\s/g, '_')).filter(Boolean).join(',');
 
-        // Execute on the specific node? No, qm/pct need to run on the node where VM is? 
-        // Or cluster-wide? qm usually runs on any node in cluster if shared? 
-        // Actually qm needs to run on the node OR we use ssh to connect to THAT node.
-        // My SSH client connects to `server.ssh_host`. Is that the node?
-        // If `server` represents the cluster entry point, we might be on a different node.
-        // But `server` in DB usually is a specific node.
-        // If the VM is on another node (resource.node), we might need to forward the command?
-        // Simple fix: `ssh node "qm ..."` if we are on a different node.
-        // But wait, `pvesh` handles forwarding. `qm` might not.
-        // If I use `pvesh set /nodes/{node}/{type}/{vmid}/config -tags ...` it works via API.
-        // Let's try the API path properly first: `/nodes/{node}/qemu/{vmid}/config`.
+        // Using safe API assignment method that doesn't overwrite unrelated VM config properties!
+        const cmd = `pvesh set /nodes/${node}/${type}/${vmid}/config -tags "${tagString}"`;
 
-        // Retry with proper API path first (maybe I missed /config or something?)
-        // Docs: PUT /nodes/{node}/qemu/{vmid}/config
-        // Params: tags
-
-        cmd = `pvesh set /nodes/${node}/${type}/${vmid}/config -tags "${tagString}"`;
-
-        // Debug
         console.log(`[Tags] Assigning to ${vmid} on ${node}: ${cmd}`);
         await ssh.exec(cmd);
 

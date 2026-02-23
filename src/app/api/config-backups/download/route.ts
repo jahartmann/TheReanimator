@@ -9,17 +9,12 @@ interface ConfigBackup {
     backup_path: string;
 }
 
-export async function POST(
-    request: NextRequest,
-    { params }: { params: Promise<{ id: string }> }
-) {
-    const { id } = await params;
-    const backupId = parseInt(id);
+export async function POST(request: NextRequest) {
     const body = await request.json();
-    const { files } = body as { files: string[] };
+    const { backupId, files } = body as { backupId: number, files: string[] };
 
-    if (!files || !Array.isArray(files) || files.length === 0) {
-        return NextResponse.json({ error: 'No files specified' }, { status: 400 });
+    if (!backupId || !files || !Array.isArray(files) || files.length === 0) {
+        return NextResponse.json({ error: 'No files or backupId specified' }, { status: 400 });
     }
 
     const backup = db.prepare('SELECT * FROM config_backups WHERE id = ?').get(backupId) as ConfigBackup | undefined;
