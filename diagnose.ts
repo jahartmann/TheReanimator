@@ -1,7 +1,7 @@
 
 import db from './src/lib/db';
-import { scanAllClusterTags, getTags } from './src/lib/actions/tags';
-import { getAISettings } from './src/lib/actions/ai';
+import { scanAllClusterTags, getTags } from './src/app/actions/tags';
+import { getAISettings } from './src/app/actions/ai';
 
 async function diagnose() {
     console.log('--- DIAGNOSTIC START ---');

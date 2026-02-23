@@ -52,3 +52,12 @@ data/*.db-shm
 
 data/config-backups/
 !data/.keep
+
+# AI / Vibe Coding Artifacts
+CONCEPT.md
+task.md
+implementation_plan.md
+walkthrough.md
+.claude/
+.gemini/
+brain/
