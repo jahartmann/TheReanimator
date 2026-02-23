@@ -32,12 +32,16 @@ export async function GET() {
             const { stdout: commitHash } = await execAsync('git rev-parse HEAD', { cwd: projectRoot });
             currentCommit = commitHash.trim().substring(0, 7);
 
-            // Fetch latest from remote
-            await execAsync('git fetch origin main', { cwd: projectRoot });
+            // Fetch current branch name dynamically
+            const { stdout: branchNameOut } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: projectRoot });
+            const currentBranch = branchNameOut.trim() || 'main'; // Fallback to main just in case
+
+            // Fetch latest from remote for the current branch
+            await execAsync(`git fetch origin ${currentBranch}`, { cwd: projectRoot });
 
             // Check if we're behind
             const { stdout: behindCount } = await execAsync(
-                'git rev-list HEAD..origin/main --count',
+                `git rev-list HEAD..origin/${currentBranch} --count`,
                 { cwd: projectRoot }
             );
             commitsBehind = parseInt(behindCount.trim()) || 0;
@@ -45,7 +49,7 @@ export async function GET() {
 
             if (updateAvailable) {
                 const { stdout: remoteHash } = await execAsync(
-                    'git rev-parse origin/main',
+                    `git rev-parse origin/${currentBranch}`,
                     { cwd: projectRoot }
                 );
                 remoteCommit = remoteHash.trim().substring(0, 7);
@@ -123,9 +127,11 @@ export async function POST(request: NextRequest) {
                     send('ℹ️ Stash skipped or failed (ignoring)');
                 }
 
-                // 3. Git Pull
-                send('⬇️ Pulling latest changes...');
-                await runStep('git', ['pull', 'origin', 'main'], projectRoot);
+                // 3. Git Pull (dynamic branch)
+                const { stdout: branchNameOut } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: projectRoot });
+                const currentBranch = branchNameOut.trim() || 'main';
+                send(`⬇️ Pulling latest changes from branch ${currentBranch}...`);
+                await runStep('git', ['pull', 'origin', currentBranch], projectRoot);
 
                 // 4. Restore Data
                 if (fs.existsSync(dbBackupPath)) {

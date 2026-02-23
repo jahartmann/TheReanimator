@@ -392,7 +392,7 @@ export function MigrationDialog({ vm, sourceId, otherServers, open, onOpenChange
                                     </>
                                 ) : (
                                     <>
-                                        {online ? <ArrowRightLeft className="h-4 w-4 mr-2" /> : <Loader2 className="h-4 w-4 mr-2" />}
+                                        <ArrowRightLeft className="h-4 w-4 mr-2" />
                                         {online ? 'Start Online Migration' : 'Start Offline Migration'}
                                     </>
                                 )}

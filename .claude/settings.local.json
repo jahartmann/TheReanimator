@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(npm run build:*)",
+      "Bash(npx next build:*)",
+      "Bash(node node_modules/next/dist/bin/next build:*)",
+      "Bash(node:*)",
+      "Bash(npx tsc:*)",
+      "Bash(sqlite3:*)",
+      "Bash(wc:*)",
+      "Bash(npm run dev:*)",
+      "Bash(while read f)",
+      "Bash(do grep -l \"autonomous\\\\|agent\\\\|hearth\\\\|organ\" \"$f\")",
+      "Bash(done)",
+      "Bash(python3:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git rm:*)",
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)",
+      "Bash(git pull:*)",
+      "Bash(git diff:*)"
+    ]
+  }
+}

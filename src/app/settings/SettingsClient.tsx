@@ -3,12 +3,13 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Settings, RefreshCw, Download, CheckCircle2, AlertCircle, Loader2, Terminal, GitBranch, Copy, Database, Server, Info, Power, HardDrive, Sparkles, BrainCircuit } from "lucide-react";
+import { Settings, RefreshCw, Download, CheckCircle2, AlertCircle, Loader2, Terminal, GitBranch, Copy, Database, Server, Info, Power, HardDrive, Sparkles, BrainCircuit, Bell } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { getAISettings, saveAISettings, checkOllamaConnection, type OllamaModel } from "@/app/actions/ai";
+import { getNotificationSettings, saveNotificationSettings } from "@/app/actions/notifications";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 
@@ -250,6 +251,9 @@ export default function SettingsClient() {
 
                     {/* AI INTEGRATION CARD */}
                     <AICard />
+
+                    {/* NOTIFICATIONS CARD */}
+                    <NotificationsCard />
                 </div>
 
                 {/* RIGHT COLUMN: MAINTENANCE & INFO */}
@@ -486,6 +490,79 @@ function AICard() {
                         </div>
                     </>
                 )}
+            </CardContent>
+        </Card>
+    );
+}
+
+function NotificationsCard() {
+    const [token, setToken] = useState('');
+    const [chatId, setChatId] = useState('');
+    const [enabled, setEnabled] = useState(false);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        getNotificationSettings().then(s => {
+            setToken(s.telegramToken);
+            setChatId(s.telegramChatId);
+            setEnabled(s.enabled);
+        });
+    }, []);
+
+    async function handleSave(newToken: string, newChatId: string, newEnabled: boolean) {
+        setSaving(true);
+        setEnabled(newEnabled);
+
+        await saveNotificationSettings(newToken, newChatId, newEnabled);
+        setSaving(false);
+        toast.success(newEnabled ? 'Benachrichtigungen aktiviert' : 'Benachrichtigungen deaktiviert');
+    }
+
+    return (
+        <Card className="overflow-hidden border-muted/60 shadow-sm mt-6">
+            <CardHeader className="bg-gradient-to-r from-blue-500/5 to-transparent pb-4">
+                <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2">
+                        <Bell className="h-5 w-5 text-blue-500" />
+                        Benachrichtigungen (Telegram)
+                    </CardTitle>
+                    <Switch
+                        checked={enabled}
+                        onCheckedChange={(checked) => handleSave(token, chatId, checked)}
+                        disabled={saving}
+                    />
+                </div>
+                <CardDescription>
+                    Erhalten Sie Benachrichtigungen über wichtige Ereignisse (wie Backups, Migrationen und Warnungen) direkt auf Telegram.
+                </CardDescription>
+            </CardHeader>
+            <CardContent className="p-6 space-y-4">
+                <div className="space-y-2">
+                    <Label>Telegram Bot Token</Label>
+                    <Input
+                        type="password"
+                        value={token}
+                        onChange={(e) => setToken(e.target.value)}
+                        placeholder="123456789:ABCdefGHIjklMNO..."
+                        className="font-mono"
+                    />
+                    <p className="text-[10px] text-muted-foreground pt-1">Den Token erhalten Sie beim BotFather auf Telegram.</p>
+                </div>
+                <div className="space-y-2">
+                    <Label>Chat ID</Label>
+                    <Input
+                        value={chatId}
+                        onChange={(e) => setChatId(e.target.value)}
+                        placeholder="123456789"
+                        className="font-mono"
+                    />
+                    <p className="text-[10px] text-muted-foreground pt-1">Die ID des Chats, in den der Bot Nachrichten senden soll.</p>
+                </div>
+                <div className="pt-2 flex justify-end">
+                    <Button onClick={() => handleSave(token, chatId, enabled)} disabled={saving} className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm">
+                        Einstellungen Speichern
+                    </Button>
+                </div>
             </CardContent>
         </Card>
     );

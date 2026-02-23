@@ -76,13 +76,15 @@ export async function syncServerVMs(serverId: number) {
                 vmid: vm.vmid,
                 name: vm.name,
                 status: vm.status,
-                type: 'qemu'
+                type: 'qemu',
+                tags: vm.tags ? JSON.stringify(vm.tags.split(/[;,]/).map((t: string) => t.trim()).filter(Boolean)) : '[]'
             }));
             lxcList.forEach((ct: any) => vms.push({
                 vmid: ct.vmid,
                 name: ct.name,
                 status: ct.status,
-                type: 'lxc'
+                type: 'lxc',
+                tags: ct.tags ? JSON.stringify(ct.tags.split(/[;,]/).map((t: string) => t.trim()).filter(Boolean)) : '[]'
             }));
 
             if (vms.length > 0) method = 'node-api';
@@ -105,7 +107,8 @@ export async function syncServerVMs(serverId: number) {
                         vmid: r.vmid,
                         name: r.name || (r.type === 'qemu' ? `VM ${r.vmid}` : `CT ${r.vmid}`),
                         status: r.status,
-                        type: r.type
+                        type: r.type,
+                        tags: r.tags ? JSON.stringify(r.tags.split(/[;,]/).map((t: string) => t.trim()).filter(Boolean)) : '[]'
                     });
                 });
                 if (vms.length > 0) method = 'cluster-api';
@@ -124,7 +127,7 @@ export async function syncServerVMs(serverId: number) {
                     const match = line.match(/\/(\d+)\.conf$/);
                     if (match) {
                         const vmid = parseInt(match[1]);
-                        vms.push({ vmid, name: `VM-${vmid} (Config Found)`, status: 'unknown', type: 'qemu' });
+                        vms.push({ vmid, name: `VM-${vmid} (Config Found)`, status: 'unknown', type: 'qemu', tags: '[]' });
                     }
                 });
 
@@ -134,7 +137,7 @@ export async function syncServerVMs(serverId: number) {
                     const match = line.match(/\/(\d+)\.conf$/);
                     if (match) {
                         const vmid = parseInt(match[1]);
-                        vms.push({ vmid, name: `CT-${vmid} (Config Found)`, status: 'unknown', type: 'lxc' });
+                        vms.push({ vmid, name: `CT-${vmid} (Config Found)`, status: 'unknown', type: 'lxc', tags: '[]' });
                     }
                 });
                 if (vms.length > 0) method = 'files';
@@ -149,11 +152,12 @@ export async function syncServerVMs(serverId: number) {
         // Update DB
         const insert = db.prepare(`
             INSERT INTO vms (vmid, name, server_id, type, status, tags)
-            VALUES (@vmid, @name, @server_id, @type, @status, '[]')
+            VALUES (@vmid, @name, @server_id, @type, @status, @tags)
             ON CONFLICT(vmid, server_id) DO UPDATE SET
                 name = excluded.name,
                 status = excluded.status,
-                type = excluded.type
+                type = excluded.type,
+                tags = excluded.tags
         `);
 
         // We should also remove VMs that no longer exist on this server?
@@ -182,7 +186,8 @@ export async function syncServerVMs(serverId: number) {
                     name: vm.name,
                     server_id: serverId,
                     type: vm.type,
-                    status: vm.status
+                    status: vm.status,
+                    tags: vm.tags
                 });
             }
         });

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, RefreshCw, Plus, Trash2, Upload, Search, X } from 'lucide-react';
+import { Loader2, RefreshCw, Plus, Trash2, Upload, Search, X, Tag as TagIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
@@ -192,8 +192,10 @@ export default function TagManagement({ serverId }: { serverId: number }) {
                             <Loader2 className="h-6 w-6 animate-spin" />
                         </div>
                     ) : filteredTags.length === 0 ? (
-                        <div className="text-center text-muted-foreground p-4">
-                            {searchQuery ? 'Keine passenden Tags gefunden.' : 'Keine Tags vorhanden. Starten Sie einen Scan.'}
+                        <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-8 bg-muted/20 rounded-lg border border-dashed m-2">
+                            <TagIcon className="h-10 w-10 mb-3 opacity-20" />
+                            <p className="text-sm font-medium text-foreground/70">{searchQuery ? 'Keine passenden Tags gefunden.' : 'Keine Tags vorhanden.'}</p>
+                            {!searchQuery && <p className="text-xs opacity-60 mt-1">Starten Sie einen Sync oder fügen Sie manuell Tags hinzu.</p>}
                         </div>
                     ) : (
                         <div className="space-y-3">

@@ -11,17 +11,38 @@ import { Button } from '@/components/ui/button';
 import { UserNav } from './UserNav';
 import { APP_VERSION, IS_BETA } from '@/lib/constants';
 
-const navItems = [
-    { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-    { name: 'Optimizer', href: '/optimizer', icon: TrendingUp },
-    { name: 'Server', href: '/servers', icon: Server },
-    { name: 'Migrationen', href: '/migrations', icon: ArrowRightLeft },
-    { name: 'Tasks', href: '/tasks', icon: ListTodo },
-    { name: 'Zeitplan', href: '/jobs', icon: Calendar },
-    { name: 'Bibliothek', href: '/library', icon: Disc },
-    { name: 'Tags', href: '/tags', icon: TagIcon },
-    { name: 'Speicher', href: '/storage', icon: HardDrive },
-    { name: 'Konfigurationen', href: '/configs', icon: FolderCog },
+const navGroups = [
+    {
+        title: 'Übersicht',
+        items: [
+            { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+            { name: 'Optimizer', href: '/optimizer', icon: TrendingUp },
+        ]
+    },
+    {
+        title: 'Infrastruktur',
+        items: [
+            { name: 'Server', href: '/servers', icon: Server },
+            { name: 'Speicher', href: '/storage', icon: HardDrive },
+            { name: 'Bibliothek', href: '/library', icon: Disc },
+        ]
+    },
+    {
+        title: 'Operationen',
+        items: [
+            { name: 'Migrationen', href: '/migrations', icon: ArrowRightLeft },
+            { name: 'Tasks', href: '/tasks', icon: ListTodo },
+            { name: 'Zeitplan', href: '/jobs', icon: Calendar },
+        ]
+    },
+    {
+        title: 'Verwaltung',
+        items: [
+            { name: 'Tags', href: '/tags', icon: TagIcon },
+            { name: 'Konfigurationen', href: '/configs', icon: FolderCog },
+            { name: 'Einstellungen', href: '/settings', icon: Settings },
+        ]
+    }
 ];
 
 const adminNavItems = [
@@ -49,10 +70,13 @@ export function Sidebar() {
     }
 
     // Filter nav items based on AI settings
-    const filteredNavItems = navItems.filter(item => {
-        if (item.name === 'Optimizer' && !aiEnabled) return false;
-        return true;
-    });
+    const filteredGroups = navGroups.map(group => ({
+        ...group,
+        items: group.items.filter(item => {
+            if (item.name === 'Optimizer' && !aiEnabled) return false;
+            return true;
+        })
+    })).filter(group => group.items.length > 0);
 
     return (
         <div className="flex flex-col w-64 glass-panel h-screen fixed left-0 top-0 z-30 transition-all duration-300">
@@ -70,25 +94,34 @@ export function Sidebar() {
                 </div>
                 <p className="text-xs text-muted-foreground ml-1">Proxmox Management Suite</p>
             </div>
-            <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
-                {filteredNavItems.map((item) => (
-                    <Link
-                        key={item.href}
-                        href={item.href}
-                        className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${pathname === item.href || pathname.startsWith(item.href + '/')
-                            ? 'text-primary bg-primary/10 shadow-sm border border-primary/20'
-                            : 'text-muted-foreground hover:text-foreground hover:bg-white/5 hover:translate-x-1'
-                            }`}
-                    >
-                        <item.icon className="h-4 w-4" />
-                        {item.name}
-                    </Link>
+            <nav className="flex-1 px-4 space-y-4 overflow-y-auto py-2">
+                {filteredGroups.map((group) => (
+                    <div key={group.title} className="space-y-1">
+                        <p className="px-4 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 mb-2">
+                            {group.title}
+                        </p>
+                        {group.items.map((item) => (
+                            <Link
+                                key={item.href}
+                                href={item.href}
+                                className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${pathname === item.href || pathname.startsWith(item.href + '/')
+                                    ? 'text-primary bg-primary/10 shadow-sm border border-primary/20'
+                                    : 'text-muted-foreground hover:text-foreground hover:bg-white/5 hover:translate-x-1'
+                                    }`}
+                            >
+                                <item.icon className="h-4 w-4" />
+                                {item.name}
+                            </Link>
+                        ))}
+                    </div>
                 ))}
 
                 {/* Admin-only items */}
                 {user?.is_admin && (
                     <div className="pt-2 mt-2 border-t border-border/50">
-                        <p className="px-4 py-2 text-xs text-muted-foreground font-medium">Admin</p>
+                        <p className="px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 mb-1">
+                            System
+                        </p>
                         {adminNavItems.map((item) => (
                             <Link
                                 key={item.href}

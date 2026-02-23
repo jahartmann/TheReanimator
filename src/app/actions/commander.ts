@@ -34,7 +34,8 @@ export async function runBulkNodeCommand(serverIds: number[], command: string): 
     const user = await getCurrentUser();
     if (!user) throw new Error('Unauthorized');
 
-    const servers = db.prepare(`SELECT * FROM servers WHERE id IN (${serverIds.join(',')})`).all() as Server[];
+    const placeholders = serverIds.map(() => '?').join(',');
+    const servers = db.prepare(`SELECT * FROM servers WHERE id IN (${placeholders})`).all(...serverIds) as Server[];
     const results: CommandResult[] = [];
 
     // Parallel Execution
@@ -69,7 +70,8 @@ export async function runBulkVMCommand(vmIds: number[], command: string): Promis
     const user = await getCurrentUser();
     if (!user) throw new Error('Unauthorized');
 
-    const vms = db.prepare(`SELECT * FROM vms WHERE id IN (${vmIds.join(',')})`).all() as VM[];
+    const vmPlaceholders = vmIds.map(() => '?').join(',');
+    const vms = db.prepare(`SELECT * FROM vms WHERE id IN (${vmPlaceholders})`).all(...vmIds) as VM[];
     const serversMap = new Map<number, Server>();
     const results: CommandResult[] = [];
 
