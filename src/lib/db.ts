@@ -78,6 +78,37 @@ try {
   console.error('[DB] Failed to create node_stats table:', e);
 }
 
+// Auto-migrate: tags table
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      color TEXT NOT NULL DEFAULT '4ECDC4'
+    );
+  `);
+  console.log('[DB] tags table ready');
+} catch (e) {
+  console.error('[DB] Failed to create tags table:', e);
+}
+
+// Auto-migrate: server_ai_analysis table
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS server_ai_analysis (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      server_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      content TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(server_id) REFERENCES servers(id) ON DELETE CASCADE
+    );
+  `);
+  console.log('[DB] server_ai_analysis table ready');
+} catch (e) {
+  console.error('[DB] Failed to create server_ai_analysis table:', e);
+}
+
 export default db;
 export function getBackupDir() {
   // Return relative path string to avoid Turbopack resolving it as a glob

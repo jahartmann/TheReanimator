@@ -25,13 +25,13 @@ export default function Dashboard() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-bold">Dashboard</h1>
+        <h1 className="text-4xl font-extrabold tracking-tight text-gradient mb-2">Dashboard</h1>
         <p className="text-muted-foreground">Übersicht über Ihre Proxmox-Backups</p>
       </div>
 
       {/* Stats */}
       <div className="grid gap-4 md:grid-cols-3">
-        <Card className="overflow-hidden">
+        <Card className="overflow-hidden glass-card group">
           <div className="h-1 bg-gradient-to-r from-orange-500 to-red-500" />
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Server</CardTitle>
@@ -41,7 +41,7 @@ export default function Dashboard() {
             <div className="text-2xl font-bold">{servers.count}</div>
           </CardContent>
         </Card>
-        <Card className="overflow-hidden">
+        <Card className="overflow-hidden glass-card group">
           <div className="h-1 bg-gradient-to-r from-blue-500 to-cyan-500" />
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Jobs</CardTitle>
@@ -51,7 +51,7 @@ export default function Dashboard() {
             <div className="text-2xl font-bold">{jobs.count}</div>
           </CardContent>
         </Card>
-        <Card className="overflow-hidden">
+        <Card className="overflow-hidden glass-card group">
           <div className="h-1 bg-gradient-to-r from-purple-500 to-pink-500" />
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Backups</CardTitle>
@@ -64,7 +64,7 @@ export default function Dashboard() {
       </div>
 
       {/* Quick Actions */}
-      <Card className="overflow-hidden border-muted/60">
+      <Card className="overflow-hidden glass-card">
         <CardHeader>
           <CardTitle>Schnellaktionen</CardTitle>
         </CardHeader>
@@ -104,7 +104,7 @@ export default function Dashboard() {
       </div>
 
       {/* Recent Backups */}
-      <Card className="overflow-hidden border-muted/60">
+      <Card className="overflow-hidden glass-card">
         <CardHeader>
           <CardTitle>Letzte Backups</CardTitle>
         </CardHeader>

@@ -33,10 +33,10 @@ export function UserNav({ user }: UserNavProps) {
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-14 w-full justify-start gap-4 px-2 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group">
-                    <Avatar className="h-10 w-10 border border-border/50 transition-colors group-hover:border-primary/50">
+                <Button variant="ghost" className="relative h-14 w-full justify-start gap-4 px-2 hover:bg-primary/5 hover:text-primary transition-all duration-300 group rounded-xl">
+                    <Avatar className="h-10 w-10 border border-primary/20 shadow-sm transition-all duration-300 group-hover:border-primary/50 group-hover:shadow-md">
                         <AvatarImage src="" alt={user.username} />
-                        <AvatarFallback className="bg-primary/10 text-primary font-bold">
+                        <AvatarFallback className="bg-gradient-to-br from-primary to-blue-500 text-white font-bold shadow-inner">
                             {user.username.substring(0, 2).toUpperCase()}
                         </AvatarFallback>
                     </Avatar>
@@ -52,10 +52,10 @@ export function UserNav({ user }: UserNavProps) {
                     </div>
                 </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-56" align="end" forceMount>
+            <DropdownMenuContent className="w-56 glass-card border-white/10" align="end" forceMount>
                 <DropdownMenuLabel className="font-normal">
                     <div className="flex flex-col space-y-1">
-                        <p className="text-sm font-medium leading-none">{user.username}</p>
+                        <p className="text-sm font-semibold tracking-tight text-gradient leading-none">{user.username}</p>
                         <p className="text-xs leading-none text-muted-foreground">
                             {user.is_admin ? 'Admin Rechte' : 'Eingeschränkt'}
                         </p>

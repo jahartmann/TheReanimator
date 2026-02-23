@@ -307,53 +307,80 @@ async function processBackgroundTask(taskId: number, sourceServerId: number, tar
         let taskState = db.prepare("SELECT status FROM background_tasks WHERE id = ?").get(taskId) as any;
         if (taskState.status === 'cancelled') throw new Error("Cancelled by user");
 
-        // 4. Stream Copy
-        log('Starting data stream...');
-        const sourceStream = await sourceSSH.getExecStream(`cat "${sourcePath}"`);
-        const targetStream = await targetSSH.getExecStream(`cat > "${targetFullPath}"`);
+        // 4. Server-to-Server SCP
+        log('Starting direct server-to-server SCP transfer...');
 
-        let processed = 0;
-        let lastUpdate = Date.now();
-        let bytesSinceLast = 0;
+        let targetHost = targetServer.ssh_host;
+        if (!targetHost && targetServer.url) {
+            try { targetHost = new URL(targetServer.url).hostname; } catch { targetHost = targetServer.url; }
+        }
 
-        await new Promise<void>((resolve, reject) => {
-            sourceStream.on('data', (chunk: Buffer) => {
-                // Check cancellation periodically (every 100MB or 2s?)
-                // Doing DB check on every chunk is too expensive.
-                // Do it on time interval.
-                const now = Date.now();
-                processed += chunk.length;
-                bytesSinceLast += chunk.length;
+        // Ensure target directory exists
+        await targetSSH.exec(`mkdir -p ${storagePath}/${subdir}`);
 
-                if (now - lastUpdate > 1000) { // Every second
-                    // Calculate speed
-                    const speedBps = (bytesSinceLast / (now - lastUpdate)) * 1000;
-                    const speedMBps = (speedBps / 1024 / 1024).toFixed(1) + ' MB/s';
+        const scpLog = `/tmp/scp_sync_${taskId}.log`;
+        const scpRc = `/tmp/scp_sync_${taskId}.rc`;
+        try { await sourceSSH.exec(`rm -f ${scpLog} ${scpRc}`); } catch { }
 
-                    // Update DB
-                    try {
-                        const current = db.prepare("SELECT status FROM background_tasks WHERE id = ?").get(taskId) as any;
-                        if (current.status === 'cancelled') {
-                            sourceStream.destroy(); // Kill stream
-                            targetStream.destroy();
-                            reject(new Error("Cancelled by user"));
-                            return;
-                        }
+        // Use detached SCP
+        const scpCmd = `scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "${sourcePath}" root@${targetHost}:"${targetFullPath}"`;
+        const scpCmdDetached = `/usr/bin/nohup sh -c "${scpCmd} > ${scpLog} 2>&1; echo \\$?>${scpRc}" >/dev/null 2>&1 & echo $!`;
 
-                        db.prepare("UPDATE background_tasks SET progress = ?, current_speed = ? WHERE id = ?").run(processed, speedMBps, taskId);
-                    } catch (e) { }
+        const scpPid = (await sourceSSH.exec(scpCmdDetached)).trim();
+        log(`Started SCP background process PID: ${scpPid}`);
 
-                    lastUpdate = now;
-                    bytesSinceLast = 0;
+        // Polling Progress
+        let scpRunning = true;
+        let lastProcessed = 0;
+        let lastUpdateTime = Date.now();
+
+        while (scpRunning) {
+            await new Promise(r => setTimeout(r, 2000));
+
+            // Check Cancellation
+            taskState = db.prepare("SELECT status FROM background_tasks WHERE id = ?").get(taskId) as any;
+            if (taskState.status === 'cancelled') {
+                // Try to kill the process on source
+                try { await sourceSSH.exec(`kill -9 ${scpPid}`); } catch { }
+                throw new Error("Cancelled by user");
+            }
+
+            // Check RC file
+            try {
+                const rcMatch = await sourceSSH.exec(`cat ${scpRc}`);
+                if (rcMatch.trim() !== '') {
+                    scpRunning = false;
+                    if (rcMatch.trim() !== '0') {
+                        const errLog = await sourceSSH.exec(`tail -n 10 ${scpLog}`);
+                        throw new Error(`SCP failed with exit code ${rcMatch.trim()}: ${errLog}`);
+                    }
                 }
-            });
+            } catch {
+                // RC file missing, process is likely running.
+                // Update Progress by checking target file size
+                try {
+                    const currentSizeRaw = await targetSSH.exec(`stat -c%s "${targetFullPath}"`);
+                    const currentSize = parseInt(currentSizeRaw.trim()) || 0;
 
-            targetStream.on('close', resolve);
-            targetStream.on('error', reject);
-            sourceStream.on('error', reject);
+                    const now = Date.now();
+                    const secondsPassed = (now - lastUpdateTime) / 1000;
+                    if (secondsPassed >= 1 && currentSize > lastProcessed) {
+                        const bytesSec = (currentSize - lastProcessed) / secondsPassed;
+                        const speedMBps = (bytesSec / 1024 / 1024).toFixed(1) + ' MB/s';
 
-            sourceStream.pipe(targetStream);
-        });
+                        db.prepare("UPDATE background_tasks SET progress = ?, current_speed = ? WHERE id = ?").run(currentSize, speedMBps, taskId);
+
+                        lastProcessed = currentSize;
+                        lastUpdateTime = now;
+                    }
+                } catch {
+                    // Ignore transient errors
+                }
+            }
+        }
+
+        // Cleanup temp files on source
+        try { await sourceSSH.exec(`rm -f ${scpLog} ${scpRc}`); } catch { }
 
         log('Transfer completed successfully.');
         db.prepare("UPDATE background_tasks SET status = 'completed', completed_at = datetime('now'), progress = ? WHERE id = ?").run(totalSize, taskId);

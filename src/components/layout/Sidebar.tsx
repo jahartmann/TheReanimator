@@ -55,14 +55,14 @@ export function Sidebar() {
     });
 
     return (
-        <div className="flex flex-col w-64 border-r border-border bg-card h-screen fixed left-0 top-0 z-30">
+        <div className="flex flex-col w-64 glass-panel h-screen fixed left-0 top-0 z-30 transition-all duration-300">
             <div className="p-6 pb-2">
-                <div className="flex items-center gap-2 mb-1">
-                    <div className="bg-primary/10 p-2 rounded-lg">
-                        <Activity className="h-6 w-6 text-primary" />
+                <div className="flex items-center gap-2 mb-2">
+                    <div className="bg-gradient-to-br from-primary to-blue-500 p-2 rounded-xl shadow-lg shadow-primary/20">
+                        <Activity className="h-6 w-6 text-white" />
                     </div>
                     <div>
-                        <h1 className="text-lg font-bold tracking-tight text-white uppercase">Reanimator</h1>
+                        <h1 className="text-lg font-bold tracking-tight text-gradient uppercase">Reanimator</h1>
                         {IS_BETA && (
                             <span className="text-[10px] bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded-full font-bold ml-[-2px] border border-amber-500/20">BETA</span>
                         )}
@@ -75,9 +75,9 @@ export function Sidebar() {
                     <Link
                         key={item.href}
                         href={item.href}
-                        className={`flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors ${pathname === item.href || pathname.startsWith(item.href + '/')
-                            ? 'text-foreground bg-white/10'
-                            : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+                        className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${pathname === item.href || pathname.startsWith(item.href + '/')
+                            ? 'text-primary bg-primary/10 shadow-sm border border-primary/20'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-white/5 hover:translate-x-1'
                             }`}
                     >
                         <item.icon className="h-4 w-4" />
@@ -93,9 +93,9 @@ export function Sidebar() {
                             <Link
                                 key={item.href}
                                 href={item.href}
-                                className={`flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors ${pathname === item.href
-                                    ? 'text-foreground bg-white/10'
-                                    : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+                                className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${pathname === item.href
+                                    ? 'text-primary bg-primary/10 shadow-sm border border-primary/20'
+                                    : 'text-muted-foreground hover:text-foreground hover:bg-white/5 hover:translate-x-1'
                                     }`}
                             >
                                 <item.icon className="h-4 w-4" />
