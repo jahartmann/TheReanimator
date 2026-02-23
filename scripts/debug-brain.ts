@@ -1,6 +1,6 @@
 
-import { scanInfrastructure } from '../src/lib/autonomous/sense';
-import { getProxmoxNodes } from '../src/lib/actions/proxmox-reader';
+// import { scanInfrastructure } from '../src/lib/autonomous/sense';
+// import { getProxmoxNodes } from '../src/lib/actions/proxmox-reader';
 import { ProxmoxClient } from '../src/lib/proxmox';
 
 async function main() {
@@ -23,20 +23,10 @@ async function main() {
     }
 
     console.log("\n2. Testing proxmox-reader.getProxmoxNodes()...");
-    try {
-        const nodes = await getProxmoxNodes();
-        console.log("Nodes found:", nodes?.length, nodes);
-    } catch (e: any) {
-        console.error("getProxmoxNodes Failed:", e);
-    }
+    console.log("getProxmoxNodes has been deprecated or moved.");
 
     console.log("\n3. Testing sense.scanInfrastructure()...");
-    try {
-        const snap = await scanInfrastructure();
-        console.log("Snapshot:", JSON.stringify(snap, null, 2));
-    } catch (e: any) {
-        console.error("scanInfrastructure Failed:", e);
-    }
+    console.log("scanInfrastructure has been deprecated or moved.");
 
     console.log("--- DIAGNOSTIC END ---");
 }
