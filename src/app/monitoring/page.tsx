@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { getServers } from '@/app/actions/server';
 import { MonitoringClient } from './MonitoringClient';
 
