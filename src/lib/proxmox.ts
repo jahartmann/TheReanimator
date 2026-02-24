@@ -357,6 +357,101 @@ export class ProxmoxClient {
         const data = await res.json() as { data: { t: string }[] };
         return data.data.map(l => l.t);
     }
+
+    // RRD historical data for a node
+    async getNodeRRDData(node: string, timeframe: string, cf: string = 'AVERAGE'): Promise<RRDPoint[]> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(
+            `${this.config.url}/api2/json/nodes/${node}/rrddata?timeframe=${timeframe}&cf=${cf}`,
+            { headers }
+        );
+        if (!res.ok) throw new Error(`Failed to get node RRD data: ${res.status}`);
+        const data = await res.json() as { data: RRDPoint[] };
+        return data.data || [];
+    }
+
+    // RRD historical data for a VM (qemu or lxc)
+    async getVMRRDData(node: string, vmid: number, type: 'qemu' | 'lxc', timeframe: string, cf: string = 'AVERAGE'): Promise<RRDPoint[]> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(
+            `${this.config.url}/api2/json/nodes/${node}/${type}/${vmid}/rrddata?timeframe=${timeframe}&cf=${cf}`,
+            { headers }
+        );
+        if (!res.ok) throw new Error(`Failed to get VM RRD data: ${res.status}`);
+        const data = await res.json() as { data: RRDPoint[] };
+        return data.data || [];
+    }
+
+    // Cluster resources overview
+    async getClusterResources(): Promise<ClusterResource[]> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/cluster/resources`, { headers });
+        if (!res.ok) throw new Error(`Failed to get cluster resources: ${res.status}`);
+        const data = await res.json() as { data: ClusterResource[] };
+        return data.data || [];
+    }
+
+    // Node task list
+    async getNodeTaskList(node: string, limit: number = 50): Promise<PVETask[]> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(
+            `${this.config.url}/api2/json/nodes/${node}/tasks?limit=${limit}`,
+            { headers }
+        );
+        if (!res.ok) throw new Error(`Failed to get node tasks: ${res.status}`);
+        const data = await res.json() as { data: PVETask[] };
+        return data.data || [];
+    }
+
+    // ZFS pools
+    async getZFSPools(node: string): Promise<ZFSPool[]> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(
+            `${this.config.url}/api2/json/nodes/${node}/disks/zfs`,
+            { headers }
+        );
+        if (!res.ok) throw new Error(`Failed to get ZFS pools: ${res.status}`);
+        const data = await res.json() as { data: ZFSPool[] };
+        return data.data || [];
+    }
+
+    // Storage content (backups per VM)
+    async getStorageContent(node: string, storage: string, vmid?: number): Promise<StorageContentItem[]> {
+        const headers = await this.getHeaders();
+        let url = `${this.config.url}/api2/json/nodes/${node}/storage/${storage}/content?content=backup`;
+        if (vmid !== undefined) url += `&vmid=${vmid}`;
+        const res = await this.secureFetch(url, { headers });
+        if (!res.ok) throw new Error(`Failed to get storage content: ${res.status}`);
+        const data = await res.json() as { data: StorageContentItem[] };
+        return data.data || [];
+    }
+
+    // Get LXC containers from PVE node
+    async getLXCs(node: string): Promise<VMInfo[]> {
+        if (this.config.type !== 'pve') {
+            throw new Error('getLXCs is only available for PVE servers');
+        }
+
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/lxc`, { headers });
+
+        if (!res.ok) throw new Error('Failed to get LXCs');
+        const data = await res.json() as { data: PVEVM[] };
+
+        return data.data.map(vm => ({
+            vmid: vm.vmid,
+            name: vm.name || `CT ${vm.vmid}`,
+            status: vm.status,
+            cpu: vm.cpu || 0,
+            memory: {
+                used: vm.mem || 0,
+                total: vm.maxmem || 0
+            },
+            disk: vm.disk || 0,
+            uptime: vm.uptime || 0,
+            tags: vm.tags ? vm.tags.split(',').map(t => t.trim()).filter(Boolean) : []
+        }));
+    }
 }
 
 // Type definitions
@@ -472,4 +567,73 @@ export interface TaskStatus {
     type: string;
     upid: string;
     user: string;
+}
+
+export interface RRDPoint {
+    time: number;
+    cpu?: number;
+    mem?: number;
+    maxmem?: number;
+    netin?: number;
+    netout?: number;
+    diskread?: number;
+    diskwrite?: number;
+    maxdisk?: number;
+    disk?: number;
+    [key: string]: number | undefined;
+}
+
+export interface ClusterResource {
+    id: string;
+    type: 'node' | 'qemu' | 'lxc' | 'storage' | 'pool';
+    node?: string;
+    name?: string;
+    status?: string;
+    cpu?: number;
+    maxcpu?: number;
+    mem?: number;
+    maxmem?: number;
+    disk?: number;
+    maxdisk?: number;
+    uptime?: number;
+    vmid?: number;
+    template?: number;
+}
+
+export interface PVETask {
+    upid: string;
+    node: string;
+    pid: number;
+    pstart: number;
+    starttime: number;
+    endtime?: number;
+    type: string;
+    id?: string;
+    user: string;
+    status?: string;
+    exitstatus?: string;
+}
+
+export interface ZFSPool {
+    name: string;
+    health: string;
+    size: number;
+    alloc: number;
+    free: number;
+    frag: number;
+    dedup: number;
+    scan?: {
+        state?: string;
+        end_time?: number;
+    };
+}
+
+export interface StorageContentItem {
+    volid: string;
+    content: string;
+    format: string;
+    size: number;
+    ctime?: number;
+    vmid?: number;
+    notes?: string;
 }

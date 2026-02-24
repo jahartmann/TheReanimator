@@ -22,7 +22,9 @@
       "Bash(git checkout:*)",
       "Bash(git merge:*)",
       "Bash(git pull:*)",
-      "Bash(git diff:*)"
+      "Bash(git diff:*)",
+      "WebSearch",
+      "Bash(cat:*)"
     ]
   }
 }

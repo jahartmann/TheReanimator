@@ -47,3 +47,64 @@ export async function saveSmtpSettings(host: string, port: string, user: string,
     upsert.run('smtp_sender', sender);
     return { success: true };
 }
+
+export type NotificationChannel = 'telegram' | 'email';
+export type NotificationRouting = Record<string, NotificationChannel[]>;
+
+const DEFAULT_ROUTING: NotificationRouting = {
+    backup_success: [],
+    backup_failure: ['telegram'],
+    server_offline: ['telegram'],
+    server_online: [],
+    vm_created: [],
+    vm_deleted: ['telegram'],
+    migration_complete: ['telegram'],
+    migration_failure: ['telegram'],
+    iso_sync_complete: [],
+    iso_sync_failure: ['telegram'],
+    update_available: ['telegram'],
+};
+
+export async function getNotificationRouting(): Promise<NotificationRouting> {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'notification_routing'").get() as { value: string } | undefined;
+    if (row?.value) {
+        try {
+            return { ...DEFAULT_ROUTING, ...JSON.parse(row.value) };
+        } catch {
+            // ignore parse errors, fall through to default
+        }
+    }
+    return DEFAULT_ROUTING;
+}
+
+export async function saveNotificationRouting(routing: NotificationRouting) {
+    const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    upsert.run('notification_routing', JSON.stringify(routing));
+    return { success: true };
+}
+
+export interface AlertThresholds {
+    cpu: number;   // 0-100
+    ram: number;   // 0-100
+    disk: number;  // 0-100
+}
+
+export async function getAlertThresholds(): Promise<AlertThresholds> {
+    const cpu = db.prepare("SELECT value FROM settings WHERE key = 'alert_threshold_cpu'").get() as { value: string } | undefined;
+    const ram = db.prepare("SELECT value FROM settings WHERE key = 'alert_threshold_ram'").get() as { value: string } | undefined;
+    const disk = db.prepare("SELECT value FROM settings WHERE key = 'alert_threshold_disk'").get() as { value: string } | undefined;
+
+    return {
+        cpu: parseInt(cpu?.value ?? '80'),
+        ram: parseInt(ram?.value ?? '80'),
+        disk: parseInt(disk?.value ?? '80'),
+    };
+}
+
+export async function saveAlertThresholds(thresholds: AlertThresholds) {
+    const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    upsert.run('alert_threshold_cpu', String(thresholds.cpu));
+    upsert.run('alert_threshold_ram', String(thresholds.ram));
+    upsert.run('alert_threshold_disk', String(thresholds.disk));
+    return { success: true };
+}

@@ -41,12 +41,17 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-markdown": "^9.0.3",
+    "recharts": "^2.15.0",
     "remark-gfm": "^4.0.0",
     "sonner": "^2.0.7",
     "ssh2": "^1.17.0",
     "tailwind-merge": "^3.4.0",
     "tar": "^7.5.2",
     "undici": "^7.18.2"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=9.0.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

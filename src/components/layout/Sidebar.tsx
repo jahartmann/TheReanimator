@@ -16,6 +16,7 @@ const navGroups = [
         title: 'Übersicht',
         items: [
             { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+            { name: 'Monitoring', href: '/monitoring', icon: Activity },
             { name: 'Optimizer', href: '/optimizer', icon: TrendingUp },
         ]
     },

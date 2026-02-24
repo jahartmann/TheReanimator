@@ -115,34 +115,42 @@ function initPeriodicScans() {
     }, 5 * 60 * 60 * 1000); // Every 5 hours
 }
 
-// Refresh node stats and cache to DB
+// Refresh node stats and cache to DB using Proxmox API (no SSH required)
 async function refreshNodeStats() {
-    console.log('[Node Stats] Refreshing all server stats...');
+    console.log('[Node Stats] Refreshing all server stats via Proxmox API...');
 
-    const servers = db.prepare('SELECT id, name FROM servers').all() as { id: number, name: string }[];
+    const servers = db.prepare("SELECT * FROM servers WHERE type = 'pve'").all() as any[];
 
     for (const server of servers) {
+        const prevStatus = (db.prepare('SELECT status FROM node_stats WHERE server_id = ?').get(server.id) as any)?.status;
+
         try {
-            const { getServer, determineNodeName } = await import('@/app/actions/vm');
-            const { createSSHClient } = await import('@/lib/ssh');
+            const { ProxmoxClient } = await import('@/lib/proxmox');
+            const client = new ProxmoxClient({
+                url: server.url,
+                token: server.auth_token || undefined,
+                username: server.ssh_user ? `${server.ssh_user}@pam` : undefined,
+                type: 'pve',
+            });
 
-            const srv = await getServer(server.id);
-            const ssh = createSSHClient(srv);
+            const nodes = await client.getNodes();
+            if (!nodes.length) throw new Error('No nodes returned');
 
-            await ssh.connect();
-            const nodeName = await determineNodeName(ssh);
+            // Aggregate across all nodes
+            let totalCpu = 0;
+            let totalMemUsed = 0;
+            let totalMemMax = 0;
+            let maxUptime = 0;
 
-            // Get Status via pvesh
-            const json = await ssh.exec(`pvesh get /nodes/${nodeName}/status --output-format json`);
-            await ssh.disconnect();
+            for (const node of nodes) {
+                totalCpu += node.cpu;
+                totalMemUsed += node.memory.used;
+                totalMemMax += node.memory.total;
+                maxUptime = Math.max(maxUptime, node.uptime);
+            }
 
-            const data = JSON.parse(json);
-
-            const cpu = (data.cpu || 0) * 100;
-            const ram = (data.memory?.used / data.memory?.total) * 100 || 0;
-            const ramUsed = data.memory?.used || 0;
-            const ramTotal = data.memory?.total || 0;
-            const uptime = data.uptime || 0;
+            const cpu = (nodes.length > 0 ? totalCpu / nodes.length : 0) * 100;
+            const ram = totalMemMax > 0 ? (totalMemUsed / totalMemMax) * 100 : 0;
 
             // Upsert to cache
             db.prepare(`
@@ -156,9 +164,39 @@ async function refreshNodeStats() {
                     uptime = excluded.uptime,
                     status = 'online',
                     last_updated = datetime('now')
-            `).run(server.id, cpu, ram, ramUsed, ramTotal, uptime);
+            `).run(server.id, cpu, ram, totalMemUsed, totalMemMax, maxUptime);
 
             console.log(`[Node Stats] ${server.name}: CPU=${cpu.toFixed(1)}%, RAM=${ram.toFixed(1)}%`);
+
+            // Notify if server came back online
+            if (prevStatus === 'offline') {
+                console.log(`[Node Stats] ${server.name}: Back ONLINE — sending notification`);
+                try {
+                    const { sendNotification } = await import('@/lib/notifications');
+                    await sendNotification('server_online', `✅ Server *${server.name}* ist wieder erreichbar.`);
+                } catch (ne) {
+                    console.error('[Node Stats] Failed to send online notification:', ne);
+                }
+            }
+
+            // Check alert thresholds
+            try {
+                const { getAlertThresholds } = await import('@/app/actions/notifications');
+                const thresholds = await getAlertThresholds();
+
+                const alerts: string[] = [];
+                if (cpu > thresholds.cpu) alerts.push(`CPU ${cpu.toFixed(1)}% > ${thresholds.cpu}%`);
+                if (ram > thresholds.ram) alerts.push(`RAM ${ram.toFixed(1)}% > ${thresholds.ram}%`);
+
+                if (alerts.length > 0) {
+                    const { sendNotification } = await import('@/lib/notifications');
+                    await sendNotification('server_offline',
+                        `⚠️ *${server.name}* überschreitet Schwellenwerte:\n${alerts.map(a => `• ${a}`).join('\n')}`
+                    ).catch(e => console.error('[Node Stats] Threshold alert failed:', e));
+                }
+            } catch (te) {
+                console.error('[Node Stats] Threshold check failed:', te);
+            }
 
         } catch (e) {
             // Mark as offline in cache
@@ -171,6 +209,16 @@ async function refreshNodeStats() {
             `).run(server.id);
 
             console.error(`[Node Stats] ${server.name}: Failed - ${e}`);
+
+            // Notify if server went offline
+            if (prevStatus !== 'offline') {
+                try {
+                    const { sendNotification } = await import('@/lib/notifications');
+                    await sendNotification('server_offline', `🔴 Server *${server.name}* ist nicht mehr erreichbar.`);
+                } catch (ne) {
+                    console.error('[Node Stats] Failed to send offline notification:', ne);
+                }
+            }
         }
     }
 
