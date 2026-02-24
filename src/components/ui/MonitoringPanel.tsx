@@ -1,11 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Server, HardDrive, CheckCircle2, AlertCircle, XCircle, Clock, RefreshCw, Activity, Wifi, WifiOff, ChevronRight, Cpu, MemoryStick, AlertTriangle, Bell, TrendingUp } from "lucide-react";
+import { Server, HardDrive, CheckCircle2, AlertCircle, XCircle, Clock, RefreshCw, Activity, Wifi, WifiOff, ChevronRight, Cpu, MemoryStick, AlertTriangle, Bell, TrendingUp, Zap } from "lucide-react";
 import { motion } from 'framer-motion';
+import { useTranslations, useLocale } from 'next-intl';
+import { wakeOnLan } from "@/lib/actions/necromancer";
+import { toast } from "sonner";
 
 interface ServerMetrics {
     cpuUsage: number;
@@ -20,7 +23,7 @@ interface ServerMetrics {
 interface ServerStatus {
     id: number;
     name: string;
-    type: 'pve' | 'pbs';
+    type: 'pve' | 'pbs' | 'linux';
     group_name: string | null;
     online: boolean;
     lastBackup: string | null;
@@ -29,6 +32,7 @@ interface ServerStatus {
     totalBackups: number;
     totalSize: number;
     metrics: ServerMetrics | null;
+    mac_address?: string;
 }
 
 interface Alert {
@@ -84,12 +88,12 @@ function formatBytes(bytes: number): string {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-function formatBackupAge(hours: number | null): string {
-    if (hours === null) return 'Nie';
-    if (hours < 1) return 'Gerade eben';
-    if (hours < 24) return `vor ${hours}h`;
+function formatBackupAgeI18n(hours: number | null, t: (key: string, params?: any) => string): string {
+    if (hours === null) return t('never');
+    if (hours < 1) return t('justNow');
+    if (hours < 24) return t('hoursAgo', { hours });
     const days = Math.floor(hours / 24);
-    return `vor ${days}d`;
+    return t('daysAgo', { days });
 }
 
 function UsageGauge({ value, label, color, icon: Icon }: { value: number; label: string; color: string; icon: any }) {
@@ -126,22 +130,52 @@ function UsageGauge({ value, label, color, icon: Icon }: { value: number; label:
 }
 
 export function MonitoringPanel() {
+    const t = useTranslations('monitoringPanel');
+    const locale = useLocale();
     const [data, setData] = useState<MonitoringData | null>(null);
     const [loading, setLoading] = useState(true);
     const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
     const [showAllServers, setShowAllServers] = useState(false);
+    const fetchingRef = useRef(false);
 
     async function fetchData() {
+        if (fetchingRef.current) return;
+        fetchingRef.current = true;
         setLoading(true);
         try {
-            const res = await fetch('/api/monitoring');
+            const res = await fetch(`/${locale}/api/monitoring`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const json = await res.json();
             setData(json);
             setLastUpdate(new Date());
         } catch (err) {
             console.error('Failed to fetch monitoring data:', err);
+        } finally {
+            setLoading(false);
+            fetchingRef.current = false;
         }
-        setLoading(false);
+    }
+
+    async function handleWakeUp(e: React.MouseEvent, server: ServerStatus) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Calculate REAL ID (handling the negative ones for Linux)
+        const realId = Math.abs(server.id);
+        const type = server.type === 'linux' ? 'linux' : 'pve';
+
+        const toastId = toast.loading(`Waking up ${server.name}...`);
+
+        try {
+            const res = await wakeOnLan(realId, type);
+            if (res.success) {
+                toast.success(res.message, { id: toastId });
+            } else {
+                toast.error(res.error, { id: toastId });
+            }
+        } catch (error) {
+            toast.error('Failed to cast spell', { id: toastId });
+        }
     }
 
     useEffect(() => {
@@ -165,7 +199,7 @@ export function MonitoringPanel() {
         return (
             <Card className="border-muted/60">
                 <CardContent className="p-8 text-center text-muted-foreground">
-                    <p>Monitoring-Daten konnten nicht geladen werden.</p>
+                    <p>{t('loadError')}</p>
                 </CardContent>
             </Card>
         );
@@ -186,13 +220,13 @@ export function MonitoringPanel() {
                         <div className="flex items-start gap-3">
                             <AlertTriangle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />
                             <div className="flex-1">
-                                <p className="font-medium text-red-500">Kritische Probleme ({criticalAlerts.length})</p>
+                                <p className="font-medium text-red-500">{t('criticalIssues', { count: criticalAlerts.length })}</p>
                                 <ul className="text-sm text-red-400/80 mt-1 space-y-1">
                                     {criticalAlerts.slice(0, 3).map((alert, i) => (
                                         <li key={i}>• {alert.message}</li>
                                     ))}
                                     {criticalAlerts.length > 3 && (
-                                        <li className="text-red-400/60">... und {criticalAlerts.length - 3} weitere</li>
+                                        <li className="text-red-400/60">{t('andMore', { count: criticalAlerts.length - 3 })}</li>
                                     )}
                                 </ul>
                             </div>
@@ -205,17 +239,17 @@ export function MonitoringPanel() {
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 {/* Server Status */}
                 <Card className="overflow-hidden">
-                    <div className={`h-1 ${summary.offlineServers === 0 ? 'bg-gradient-to-r from-green-500 to-emerald-500' : 'bg-gradient-to-r from-red-500 to-orange-500'}`} />
+                    <div className={`h-0.5 ${summary.offlineServers === 0 ? 'bg-green-500' : 'bg-red-500'}`} />
                     <CardContent className="p-4">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-sm text-muted-foreground">Server Status</p>
+                                <p className="text-sm text-muted-foreground">{t('serversStatus')}</p>
                                 <p className="text-2xl font-bold">
                                     {summary.onlineServers}
                                     <span className="text-muted-foreground text-lg font-normal">/{summary.totalServers}</span>
                                 </p>
                                 <p className={`text-xs mt-1 ${summary.offlineServers === 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                    {summary.offlineServers === 0 ? 'Alle online' : `${summary.offlineServers} offline`}
+                                    {summary.offlineServers === 0 ? t('allOnline') : `${summary.offlineServers} ${t('offline')}`}
                                 </p>
                             </div>
                             <div className={`w-12 h-12 rounded-full flex items-center justify-center ${summary.offlineServers === 0 ? 'bg-green-500/10' : 'bg-red-500/10'
@@ -229,9 +263,9 @@ export function MonitoringPanel() {
 
                 {/* Resource Usage */}
                 <Card className="overflow-hidden">
-                    <div className="h-1 bg-gradient-to-r from-blue-500 to-cyan-500" />
+                    <div className="h-0.5 bg-border" />
                     <CardContent className="p-4">
-                        <p className="text-sm text-muted-foreground mb-3">Durchschnittliche Auslastung</p>
+                        <p className="text-sm text-muted-foreground mb-3">{t('avgLoad')}</p>
                         <div className="flex justify-around">
                             <UsageGauge
                                 value={summary.avgCpuUsage}
@@ -257,11 +291,11 @@ export function MonitoringPanel() {
 
                 {/* Backup Health */}
                 <Card className="overflow-hidden">
-                    <div className="h-1 bg-gradient-to-r from-purple-500 to-pink-500" />
+                    <div className="h-0.5 bg-border" />
                     <CardContent className="p-4">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-sm text-muted-foreground">Backup-Status</p>
+                                <p className="text-sm text-muted-foreground">{t('backupStatus')}</p>
                                 <div className="flex items-center gap-4 mt-2">
                                     <div className="flex items-center gap-1.5">
                                         <div className="w-3 h-3 rounded-full bg-green-500" />
@@ -277,11 +311,11 @@ export function MonitoringPanel() {
                                     </div>
                                 </div>
                                 <p className="text-xs text-muted-foreground mt-2">
-                                    {summary.healthCounts.none > 0 && `${summary.healthCounts.none} ohne Backup`}
+                                    {summary.healthCounts.none > 0 && `${summary.healthCounts.none} ${t('noBackup')}`}
                                 </p>
                             </div>
-                            <div className="w-12 h-12 rounded-full bg-purple-500/10 flex items-center justify-center">
-                                <Clock className="h-6 w-6 text-purple-500" />
+                            <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+                                <Clock className="h-6 w-6 text-muted-foreground" />
                             </div>
                         </div>
                     </CardContent>
@@ -289,18 +323,18 @@ export function MonitoringPanel() {
 
                 {/* Storage */}
                 <Card className="overflow-hidden">
-                    <div className="h-1 bg-gradient-to-r from-orange-500 to-amber-500" />
+                    <div className="h-0.5 bg-border" />
                     <CardContent className="p-4">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-sm text-muted-foreground">Backup-Speicher</p>
+                                <p className="text-sm text-muted-foreground">{t('backupStorage')}</p>
                                 <p className="text-2xl font-bold">{formatBytes(summary.totalSize)}</p>
                                 <p className="text-xs text-muted-foreground mt-1">
-                                    {summary.totalBackups} Backups gesamt
+                                    {summary.totalBackups} {summary.totalBackups === 1 ? 'Backup' : t('totalBackups')}
                                 </p>
                             </div>
-                            <div className="w-12 h-12 rounded-full bg-orange-500/10 flex items-center justify-center">
-                                <HardDrive className="h-6 w-6 text-orange-500" />
+                            <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+                                <HardDrive className="h-6 w-6 text-muted-foreground" />
                             </div>
                         </div>
                     </CardContent>
@@ -314,7 +348,7 @@ export function MonitoringPanel() {
                         <div className="flex items-start gap-3">
                             <Bell className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
                             <div className="flex-1">
-                                <p className="font-medium text-amber-500">Warnungen ({warningAlerts.length})</p>
+                                <p className="font-medium text-amber-500">{t('warnings', { count: warningAlerts.length })}</p>
                                 <div className="flex flex-wrap gap-2 mt-2">
                                     {warningAlerts.slice(0, 5).map((alert, i) => (
                                         <span key={i} className="text-xs px-2 py-1 rounded bg-amber-500/10 text-amber-500">
@@ -334,11 +368,11 @@ export function MonitoringPanel() {
             {/* Server Grid */}
             <Card className="overflow-hidden border-muted/60">
                 <CardHeader className="py-3 px-4 bg-muted/10 flex flex-row items-center justify-between">
-                    <CardTitle className="text-base">Server-Übersicht</CardTitle>
+                    <CardTitle className="text-base">{t('serverOverview')}</CardTitle>
                     <div className="flex items-center gap-2">
                         {lastUpdate && (
                             <span className="text-xs text-muted-foreground">
-                                {lastUpdate.toLocaleTimeString('de-DE')}
+                                {lastUpdate.toLocaleTimeString(locale)}
                             </span>
                         )}
                         <Button variant="ghost" size="sm" onClick={fetchData} disabled={loading}>
@@ -351,13 +385,35 @@ export function MonitoringPanel() {
                         {displayedServers.map((server) => (
                             <Link
                                 key={server.id}
-                                href={`/servers/${server.id}`}
+                                href={server.type === 'linux' ? `/linux-servers/${Math.abs(server.id)}` : `/servers/${server.id}`}
                                 className="flex flex-col p-4 rounded-lg border hover:border-primary/30 transition-colors bg-muted/5 hover:bg-muted/10 group"
                             >
                                 <div className="flex items-center gap-3 mb-3">
                                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${server.online ? 'bg-green-500/10' : 'bg-red-500/10'
                                         }`}>
-                                        {server.online ? (
+                                        {server.type === 'linux' ? (
+                                            // Generic Linux Icon
+                                            <div className={server.online ? "text-green-500" : "text-red-500"}>
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    width="20"
+                                                    height="20"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    strokeWidth="2"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                >
+                                                    <rect width="20" height="16" x="2" y="4" rx="2" />
+                                                    <path d="M6 8h.01" />
+                                                    <path d="M10 8h.01" />
+                                                    <path d="M14 8h.01" />
+                                                    <path d="M12 16v-4" />
+                                                    <path d="M12 12h4" />
+                                                </svg>
+                                            </div>
+                                        ) : server.online ? (
                                             <Wifi className="h-5 w-5 text-green-500" />
                                         ) : (
                                             <WifiOff className="h-5 w-5 text-red-500" />
@@ -366,7 +422,9 @@ export function MonitoringPanel() {
                                     <div className="flex-1 min-w-0">
                                         <p className="font-medium truncate">{server.name}</p>
                                         <div className="flex items-center gap-2">
-                                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${server.type === 'pve' ? 'bg-orange-500/10 text-orange-500' : 'bg-blue-500/10 text-blue-500'
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${server.type === 'pve' ? 'bg-orange-500/10 text-orange-500' :
+                                                server.type === 'pbs' ? 'bg-blue-500/10 text-blue-500' :
+                                                    'bg-zinc-500/10 text-zinc-500' // Linux
                                                 }`}>
                                                 {server.type.toUpperCase()}
                                             </span>
@@ -378,11 +436,25 @@ export function MonitoringPanel() {
                                     <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                                 </div>
 
+                                { /* WOL Button when Offline */}
+                                {!server.online && server.mac_address && (
+                                    <div className="mb-3 flex justify-end">
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-7 text-xs gap-1 border-yellow-500/50 hover:bg-yellow-500/10 hover:text-yellow-600"
+                                            onClick={(e) => handleWakeUp(e, server)}
+                                        >
+                                            <Zap className="h-3 w-3" /> Wake Up
+                                        </Button>
+                                    </div>
+                                )}
+
                                 {server.metrics && (
                                     <div className="grid grid-cols-3 gap-2 mb-3">
                                         <div className="text-center p-2 rounded bg-background/50">
                                             <p className={`text-sm font-bold ${server.metrics.cpuUsage > 80 ? 'text-red-500' :
-                                                    server.metrics.cpuUsage > 50 ? 'text-amber-500' : 'text-green-500'
+                                                server.metrics.cpuUsage > 50 ? 'text-amber-500' : 'text-green-500'
                                                 }`}>
                                                 {server.metrics.cpuUsage.toFixed(0)}%
                                             </p>
@@ -390,7 +462,7 @@ export function MonitoringPanel() {
                                         </div>
                                         <div className="text-center p-2 rounded bg-background/50">
                                             <p className={`text-sm font-bold ${server.metrics.memoryUsage > 80 ? 'text-red-500' :
-                                                    server.metrics.memoryUsage > 50 ? 'text-amber-500' : 'text-green-500'
+                                                server.metrics.memoryUsage > 50 ? 'text-amber-500' : 'text-green-500'
                                                 }`}>
                                                 {server.metrics.memoryUsage.toFixed(0)}%
                                             </p>
@@ -398,7 +470,7 @@ export function MonitoringPanel() {
                                         </div>
                                         <div className="text-center p-2 rounded bg-background/50">
                                             <p className={`text-sm font-bold ${server.metrics.diskUsage > 80 ? 'text-red-500' :
-                                                    server.metrics.diskUsage > 50 ? 'text-amber-500' : 'text-green-500'
+                                                server.metrics.diskUsage > 50 ? 'text-amber-500' : 'text-green-500'
                                                 }`}>
                                                 {server.metrics.diskUsage.toFixed(0)}%
                                             </p>
@@ -414,15 +486,15 @@ export function MonitoringPanel() {
                                         {server.backupHealth === 'critical' && <XCircle className="h-3.5 w-3.5 text-red-500" />}
                                         {server.backupHealth === 'none' && <Clock className="h-3.5 w-3.5 text-muted-foreground" />}
                                         <span className={`${server.backupHealth === 'good' ? 'text-green-500' :
-                                                server.backupHealth === 'warning' ? 'text-yellow-500' :
-                                                    server.backupHealth === 'critical' ? 'text-red-500' :
-                                                        'text-muted-foreground'
+                                            server.backupHealth === 'warning' ? 'text-yellow-500' :
+                                                server.backupHealth === 'critical' ? 'text-red-500' :
+                                                    'text-muted-foreground'
                                             }`}>
-                                            {formatBackupAge(server.backupAge)}
+                                            {formatBackupAgeI18n(server.backupAge, t)}
                                         </span>
                                     </div>
                                     <span className="text-muted-foreground">
-                                        {server.totalBackups} Backups
+                                        {server.totalBackups} {server.totalBackups === 1 ? 'Backup' : t('backups')}
                                     </span>
                                 </div>
                             </Link>
@@ -436,54 +508,13 @@ export function MonitoringPanel() {
                                 size="sm"
                                 onClick={() => setShowAllServers(!showAllServers)}
                             >
-                                {showAllServers ? 'Weniger anzeigen' : `Alle ${servers.length} Server anzeigen`}
+                                {showAllServers ? t('showLess') : t('showAll', { count: servers.length })}
                             </Button>
                         </div>
                     )}
                 </CardContent>
             </Card>
 
-            {/* Recent Backups */}
-            {summary.recentBackups && summary.recentBackups.length > 0 && (
-                <Card className="overflow-hidden border-muted/60">
-                    <CardHeader className="py-3 px-4 bg-muted/10">
-                        <CardTitle className="text-base flex items-center gap-2">
-                            <TrendingUp className="h-4 w-4" />
-                            Letzte Backups
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-0">
-                        <div className="divide-y divide-border/50">
-                            {summary.recentBackups.slice(0, 5).map((backup) => (
-                                <Link
-                                    key={backup.id}
-                                    href={`/configs/${backup.id}`}
-                                    className="flex items-center gap-4 p-3 hover:bg-muted/5 transition-colors"
-                                >
-                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${backup.serverType === 'pve' ? 'bg-orange-500/10' : 'bg-blue-500/10'
-                                        }`}>
-                                        <Server className={`h-4 w-4 ${backup.serverType === 'pve' ? 'text-orange-500' : 'text-blue-500'
-                                            }`} />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-medium truncate">{backup.serverName}</p>
-                                        <p className="text-xs text-muted-foreground">
-                                            {new Date(backup.backup_date).toLocaleString('de-DE', {
-                                                dateStyle: 'medium',
-                                                timeStyle: 'short'
-                                            })}
-                                        </p>
-                                    </div>
-                                    <div className="text-right text-xs text-muted-foreground">
-                                        <p>{backup.file_count} Dateien</p>
-                                        <p>{formatBytes(backup.total_size)}</p>
-                                    </div>
-                                </Link>
-                            ))}
-                        </div>
-                    </CardContent>
-                </Card>
-            )}
         </div>
     );
 }

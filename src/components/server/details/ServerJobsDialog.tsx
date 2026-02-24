@@ -9,8 +9,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Clock, Plus, Trash2, Play, AlertCircle, RefreshCw } from "lucide-react";
-import { getJobsForServer, createConfigBackupSchedule, createScanSchedule, toggleJob, deleteScheduledJob, ScheduledJob } from '@/app/actions/schedule';
+import { getJobsForServer, createConfigBackupSchedule, createScanSchedule, toggleJob, deleteScheduledJob, ScheduledJob } from '@/lib/actions/schedule';
 import { toast } from 'sonner';
+import { useTranslations } from 'next-intl';
 
 interface ServerJobsDialogProps {
     serverId: number;
@@ -18,6 +19,8 @@ interface ServerJobsDialogProps {
 }
 
 export function ServerJobsDialog({ serverId, serverName }: ServerJobsDialogProps) {
+    const t = useTranslations('servers');
+    const tJobs = useTranslations('serverJobsDialog');
     const [open, setOpen] = useState(false);
     const [jobs, setJobs] = useState<ScheduledJob[]>([]);
     const [loading, setLoading] = useState(false);
@@ -38,7 +41,7 @@ export function ServerJobsDialog({ serverId, serverName }: ServerJobsDialogProps
             const res = await getJobsForServer(serverId);
             setJobs(res);
         } catch (e) {
-            toast.error("Failed to load jobs");
+            toast.error(tJobs('errorLoadingJobs'));
         } finally {
             setLoading(false);
         }
@@ -48,16 +51,16 @@ export function ServerJobsDialog({ serverId, serverName }: ServerJobsDialogProps
         const res = await toggleJob(id);
         if (res.success) {
             setJobs(jobs.map(j => j.id === id ? { ...j, enabled: res.enabled } : j));
-            toast.success(res.enabled ? "Job aktiviert" : "Job deaktiviert");
+            toast.success(res.enabled ? tJobs('jobActivated') : tJobs('jobDeactivated'));
         }
     }
 
     async function handleDelete(id: number) {
-        if (!confirm("Job wirklich löschen?")) return;
+        if (!confirm(tJobs('confirmDeleteJob'))) return;
         const res = await deleteScheduledJob(id);
         if (res.success) {
             setJobs(jobs.filter(j => j.id !== id));
-            toast.success("Job gelöscht");
+            toast.success(tJobs('jobDeleted'));
         }
     }
 
@@ -71,14 +74,14 @@ export function ServerJobsDialog({ serverId, serverName }: ServerJobsDialogProps
             }
 
             if (res.success) {
-                toast.success("Job erstellt!");
+                toast.success(tJobs('jobCreated'));
                 setCreateMode(false);
                 loadJobs();
             } else {
-                toast.error(res.error || "Fehler beim Erstellen");
+                toast.error(res.error || tJobs('errorCreating'));
             }
         } catch (e) {
-            toast.error("Fehler: " + e);
+            toast.error(tJobs('error') + e);
         }
     }
 
@@ -87,16 +90,16 @@ export function ServerJobsDialog({ serverId, serverName }: ServerJobsDialogProps
             <DialogTrigger asChild>
                 <Button variant="outline" size="sm">
                     <Clock className="mr-2 h-4 w-4" />
-                    Jobs
+                    {t('jobs')}
                 </Button>
             </DialogTrigger>
             <DialogContent className="max-w-3xl">
                 <DialogHeader>
                     <DialogTitle className="flex justify-between items-center">
-                        <span>Background Jobs: {serverName}</span>
+                        <span>{t('backgroundTasks')}: {serverName}</span>
                         {!createMode && (
                             <Button size="sm" onClick={() => setCreateMode(true)}>
-                                <Plus className="mr-2 h-4 w-4" /> Neuen Job planen
+                                <Plus className="mr-2 h-4 w-4" /> {t('scheduleNewTask')}
                             </Button>
                         )}
                     </DialogTitle>
@@ -104,54 +107,54 @@ export function ServerJobsDialog({ serverId, serverName }: ServerJobsDialogProps
 
                 {createMode ? (
                     <div className="space-y-4 py-4 border rounded-lg p-4 bg-muted/20">
-                        <h3 className="font-semibold">Neuen Job erstellen</h3>
+                        <h3 className="font-semibold">{t('createNewTask')}</h3>
 
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
-                                <Label>Job Typ</Label>
+                                <Label>{t('taskType')}</Label>
                                 <Select value={newJobType} onValueChange={(v: any) => setNewJobType(v)}>
                                     <SelectTrigger>
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="scan">🛡️ Security & Health Scan (AI)</SelectItem>
-                                        <SelectItem value="config">💾 Config Backup (/etc, pve config)</SelectItem>
+                                        <SelectItem value="scan">{tJobs('taskTypeScan')}</SelectItem>
+                                        <SelectItem value="config">{tJobs('taskTypeConfig')}</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
 
                             <div className="space-y-2">
-                                <Label>Intervall</Label>
+                                <Label>{t('interval')}</Label>
                                 <Select onValueChange={(val) => {
                                     if (val === 'daily') setScheduleStr('0 3 * * *');
                                     if (val === 'weekly') setScheduleStr('0 3 * * 1'); // Monday 3AM
                                     if (val === 'hourly') setScheduleStr('0 * * * *');
                                 }}>
                                     <SelectTrigger>
-                                        <SelectValue placeholder="Wähle Intervall" />
+                                        <SelectValue placeholder={t('selectInterval')} />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="daily">Täglich (03:00)</SelectItem>
-                                        <SelectItem value="weekly">Wöchentlich (Mo 03:00)</SelectItem>
-                                        <SelectItem value="hourly">Stündlich</SelectItem>
+                                        <SelectItem value="daily">{tJobs('intervalDaily')}</SelectItem>
+                                        <SelectItem value="weekly">{tJobs('intervalWeekly')}</SelectItem>
+                                        <SelectItem value="hourly">{tJobs('intervalHourly')}</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
                         </div>
 
                         <div className="space-y-2">
-                            <Label>Cron Ausdruck (Manuell)</Label>
-                            <Input value={scheduleStr} onChange={e => setScheduleStr(e.target.value)} placeholder="* * * * *" className="font-mono" />
+                            <Label>{tJobs('cronExpression')}</Label>
+                            <Input value={scheduleStr} onChange={e => setScheduleStr(e.target.value)} placeholder={tJobs('cronPlaceholder')} className="font-mono" />
                         </div>
 
                         <div className="space-y-2">
-                            <Label>Name (Optional)</Label>
-                            <Input value={customName} onChange={e => setCustomName(e.target.value)} placeholder={`Auto-${newJobType === 'scan' ? 'Scan' : 'Backup'}`} />
+                            <Label>{tJobs('name')}</Label>
+                            <Input value={customName} onChange={e => setCustomName(e.target.value)} placeholder={tJobs('namePlaceholder').replace('{type}', newJobType === 'scan' ? tJobs('namePlaceholderScan') : tJobs('namePlaceholderBackup'))} />
                         </div>
 
                         <div className="flex justify-end gap-2 pt-2">
-                            <Button variant="ghost" onClick={() => setCreateMode(false)}>Abbrechen</Button>
-                            <Button onClick={handleCreate}>Erstellen</Button>
+                            <Button variant="ghost" onClick={() => setCreateMode(false)}>{tJobs('cancel')}</Button>
+                            <Button onClick={handleCreate}>{tJobs('create')}</Button>
                         </div>
                     </div>
                 ) : (
@@ -159,16 +162,16 @@ export function ServerJobsDialog({ serverId, serverName }: ServerJobsDialogProps
                         {loading ? (
                             <div className="text-center py-10"><RefreshCw className="animate-spin h-6 w-6 mx-auto" /></div>
                         ) : jobs.length === 0 ? (
-                            <div className="text-center py-10 text-muted-foreground">Keine Jobs geplant.</div>
+                            <div className="text-center py-10 text-muted-foreground">{tJobs('noScheduledTasks')}</div>
                         ) : (
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>Typ</TableHead>
-                                        <TableHead>Name</TableHead>
-                                        <TableHead>Zeitplan</TableHead>
-                                        <TableHead>Aktiv</TableHead>
-                                        <TableHead className="text-right">Aktionen</TableHead>
+                                        <TableHead>{tJobs('type')}</TableHead>
+                                        <TableHead>{tJobs('name')}</TableHead>
+                                        <TableHead>{tJobs('schedule')}</TableHead>
+                                        <TableHead>{tJobs('active')}</TableHead>
+                                        <TableHead className="text-right">{tJobs('actions')}</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -176,9 +179,9 @@ export function ServerJobsDialog({ serverId, serverName }: ServerJobsDialogProps
                                         <TableRow key={job.id}>
                                             <TableCell>
                                                 {job.job_type === 'scan' ? (
-                                                    <span className="flex items-center gap-2"><AlertCircle className="h-4 w-4 text-amber-500" /> Scan</span>
+                                                    <span className="flex items-center gap-2"><AlertCircle className="h-4 w-4 text-amber-500" /> {tJobs('scan')}</span>
                                                 ) : (
-                                                    <span className="flex items-center gap-2"><RefreshCw className="h-4 w-4 text-blue-500" /> Backup</span>
+                                                    <span className="flex items-center gap-2"><RefreshCw className="h-4 w-4 text-blue-500" /> {tJobs('backup')}</span>
                                                 )}
                                             </TableCell>
                                             <TableCell className="font-medium">{job.name}</TableCell>

@@ -1,123 +1,146 @@
 # Reanimator
-**Proxmox Configuration Backup & Disaster Recovery – Simplified.**
+**Proxmox Infrastructure Management – Monitoring, Backups, and an AI Agent that actually helps.**
 
 ---
 
-### Language / Sprache 
-[![Deutsch](https://img.shields.io/badge/Sprache-Deutsch-blue?style=for-the-badge)](#-reanimator-deutsch) 
+### Language / Sprache
+[![Deutsch](https://img.shields.io/badge/Sprache-Deutsch-blue?style=for-the-badge)](#-reanimator-deutsch)
 [![English](https://img.shields.io/badge/Language-English-red?style=for-the-badge)](#-reanimator-english)
 
 ---
 
 ## 🇩🇪 Reanimator (Deutsch)
 
-Reanimator ist ein spezialisiertes Tool für Proxmox-Umgebungen, das dort ansetzt, wo normale Backups oft aufhören: bei der Konfiguration. Während Proxmox Backup Server (PBS) VMs sichert, hilft Reanimator bei deinen Nodes, die Verwaltung deiner Storage-Pools und die Sicherung deiner `/etc`-Konfigurationen.
+Reanimator ist ein Self-hosted Dashboard für Proxmox-Umgebungen. Es fing als simples Backup-Tool für `/etc`-Konfigurationen an – mittlerweile ist ein vollständiges Infrastruktur-Management daraus geworden, inklusive einem KI-Agenten, der per Chat oder Telegram Befehle entgegennimmt.
 
-### 💡 Warum Reanimator?
-Jeder, der schon einmal einen Proxmox-Node nach einem Hardware-Defekt neu aufsetzen musste, weiß: Die VMs sind meist sicher, aber die Netzwerk-Bridges, ZFS-Pool-Konfigurationen und Corosync-Settings manuell wiederherzustellen, kostet Zeit und Nerven.
+Das Projekt läuft komplett agentlos über SSH, braucht keine Plugins oder Agents auf den Zielservern, und speichert alles lokal in einer SQLite-Datenbank.
 
-Reanimator automatisiert diesen Prozess und bietet dir ein zentrales Dashboard für deine gesamte Infrastruktur.
+### Was kann Reanimator?
 
-### ✨ Kernfunktionen
-* **📊 Monitoring & Dashboard:** Echtzeit-Status von CPU, RAM und Disk-Auslastung sowie Cluster-Erkennung.
-* **💾 Backup & Recovery:** Automatische Sicherung von `/etc` (Network, Corosync, Storage) inkl. generierter Markdown-Anleitungen für den Notfall.
-* **⚡ Power-Tools:** Bulk Commander für Befehle auf mehreren Nodes, ISO-Sync und visuelle Migrations-Logs.
-* **🔍 Hardware-Analyse:** Unterscheidung von NVMe, SSD und HDD direkt im UI.
+**Monitoring & Dashboard**
+Echtzeit-Übersicht über CPU, RAM und Disk-Auslastung deiner Proxmox-Nodes. Cluster-Erkennung läuft automatisch. Statistiken werden im Hintergrund gecacht und als Trend angezeigt.
 
-### 🛠️ Technology Stack
-* **Frontend:** Next.js 15 (App Router), Tailwind CSS
-* **UI:** Luzid UI / Shadcn & Lucide Icons
-* **Backend:** Server Actions & Node.js
-* **Database:** SQLite via `better-sqlite3`
-* **Communication:** SSH (agentenlos via `ssh2`)
+**Backups & Wiederherstellung**
+Automatische Sicherung wichtiger Konfigurationsdateien (`/etc/network`, `/etc/corosync`, Storage-Konfigurationen, crontabs, SSH-Keys). Zu jedem Backup wird eine Markdown-Wiederherstellungsanleitung generiert. Backups können direkt im Browser verglichen und heruntergeladen werden.
 
-### 🚀 Quick Start
-1. **Repository klonen**
-   ```bash
-   git clone https://github.com/jahartmann/TheReanimator.git
-   cd TheReanimator
-   ```
+**VM & Container Management**
+VMs und Container erstellen, starten, stoppen, migrieren – mit einem einfachen 3-Schritt-Wizard. Bulk-Operationen auf mehreren Nodes gleichzeitig.
 
-2. **Installation**
-   ```bash
-   npm install
-   npm run migrate
-   ```
+**ISO & Template Sync**
+ISOs und Templates zwischen Proxmox-Nodes synchronisieren, direkt aus dem Dashboard.
 
-3. **Starten**
-   ```bash
-   npm run build
-   npm start
-   ```
-   
-###  Anmeldung
-Initiale Anmeldedaten:
-***N: admin
-PW: admin***
-### ⚙️ Konfiguration
-***Initiale Anmeldedaten:
-N: admin
-PW: admin***
-Gehe im Dashboard auf Server -> New Server. Du benötigst:
-* Hostname/IP des Nodes.
-* Einen autorisierten SSH-Key (empfohlen).
+**KI-Agent**
+Ein eingebauter Chat-Agent, der auf deiner eigenen Ollama-Instanz läuft. Er kennt deine Infrastruktur und kann Befehle ausführen: Server-Status abfragen, VMs erstellen, SSH-Befehle ausführen, Logs analysieren, Dateien lesen/schreiben, Dienste verwalten, und mehr. Das Modell und die Ollama-URL sind in den Einstellungen konfigurierbar.
+
+Der Agent hat ein "Brain"-System: Er kann Informationen dauerhaft speichern und später wieder abrufen. Außerdem gibt es ein Reflex-System für automatische Reaktionen auf Ereignisse (z. B. Dienst neustart bei Ausfall).
+
+**Telegram-Integration**
+Den Agenten über Telegram steuern – gleiche Fähigkeiten wie im Web-Chat.
+
+**Benachrichtigungen**
+E-Mail (SMTP) und Telegram-Benachrichtigungen mit konfigurierbarem Routing. Welche Ereignisse an wen gemeldet werden, lässt sich granular einstellen.
+
+**Tags**
+VMs und Container mit Tags versehen und nach ihnen filtern. Tags werden direkt aus Proxmox synchronisiert.
+
+### Tech Stack
+- **Next.js 16** (App Router, React 19, TypeScript)
+- **Tailwind CSS 4** + Shadcn UI (new-york)
+- **better-sqlite3** – alles lokal, kein externer Datenbankserver
+- **ssh2** – agentlose Verbindung via SSH
+- **Vercel AI SDK** + **ollama-ai-provider** – KI-Agent
+- **next-intl** – i18n (de, en, es, fr, ru)
+
+### Quick Start
+
+```bash
+git clone https://github.com/jahartmann/TheReanimator.git
+cd TheReanimator
+npm install
+npm run build
+npm start
+```
+
+Standard-Login: `admin` / `admin` (bitte nach dem ersten Login ändern)
+
+Dann unter **Server → New Server** deinen ersten Proxmox-Node hinzufügen. Du brauchst:
+- IP oder Hostname des Nodes
+- SSH-Key (empfohlen) oder Passwort
+
+Den KI-Agenten aktivierst du unter **Einstellungen → KI-Agent**: Ollama-URL und Modell eintragen, fertig.
+
+---
 
 [⬆️ Nach oben](#reanimator)
 
 ---
 
 ## 🇺🇸 Reanimator (English)
-Reanimator is a specialized tool for Proxmox environments that picks up where traditional backups often leave off: system configuration. While Proxmox Backup Server (PBS) secures your VMs and containers, Reanimator focuses on the health of your nodes, the management of your storage pools, and the safety of your /etc configurations.
 
-### 💡 Why Reanimator?
-Anyone who has ever had to rebuild a Proxmox node after a hardware failure knows the pain: your VMs might be safe on a backup, but manually restoring network bridges, ZFS pool configurations, and Corosync settings costs significant time and nerves.
+Reanimator is a self-hosted dashboard for Proxmox environments. It started out as a simple config backup tool for `/etc` files – and gradually grew into a broader infrastructure management platform, including an AI agent you can talk to via chat or Telegram.
 
-Reanimator automates this process and provides a centralized dashboard for your entire infrastructure.
+Everything runs agentless over SSH. No plugins, no agents on the target servers. All data is stored locally in a SQLite database.
 
-### ✨ Core Features
-* **📊 Monitoring & Dashboard:** Real-time CPU, RAM, and Disk usage status plus automatic cluster detection.
-* **💾 Backup & Recovery:** Automatically backs up critical /etc files and generates step-by-step Markdown recovery guides.
-* **⚡ Admin Power-Tools:** Bulk Commander for multi-node commands, ISO/Template sync, and visual migration logs.
-* **🔍 Hardware Analysis:** Identify NVMe, SSD, and HDD types directly in the UI.
+### What does Reanimator do?
 
-### 🛠️ Technology Stack
-* **Frontend:** Next.js 15 (App Router), Tailwind CSS
-* **UI:** Lucid UI / Shadcn & Lucide Icons
-* **Backend:** Server Actions & Node.js
-* **Database:** SQLite via `better-sqlite3`
-* **Communication:** Secure, agentless access via SSH (`ssh2`)
+**Monitoring & Dashboard**
+Real-time overview of CPU, RAM, and disk usage across your Proxmox nodes. Cluster detection runs automatically. Stats are cached in the background and shown as trends.
 
-### 🚀 Quick Start
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/jahartmann/TheReanimator.git
-   cd TheReanimator
-   ```
+**Backups & Recovery**
+Automatically backs up critical config files (`/etc/network`, `/etc/corosync`, storage configs, crontabs, SSH keys). Each backup comes with a generated Markdown recovery guide. Backups can be compared and downloaded directly in the browser.
 
-2. **Installation**
-   ```bash
-   npm install
-   npm run migrate
-   ```
+**VM & Container Management**
+Create, start, stop, and migrate VMs and containers with a simple 3-step wizard. Bulk operations across multiple nodes at once.
 
-3. **Start the app**
-   ```bash
-   npm run build
-   npm start
-   ```
-   
-###  Registration
-Initial Login:
-***N: admin
-PW: admin***
-### ⚙️ Configuration
-Navigate to Server -> New Server in the dashboard. You will need:
-* Hostname or IP of the node.
-* An SSH key authorized on the target node (recommended).
+**ISO & Template Sync**
+Sync ISOs and templates between Proxmox nodes, directly from the dashboard.
 
-### 🤝 Contributing
-Feedback, bug reports, and pull requests are welcome!
+**AI Agent**
+A built-in chat agent running on your own Ollama instance. It knows your infrastructure and can take actions: query server status, create VMs, run SSH commands, analyze logs, read/write files, manage services, and more. Model and Ollama URL are configurable in settings.
+
+The agent has a persistent "Brain" for storing and recalling knowledge across sessions, and a Reflex system for automated responses to events (e.g., restart a service when it goes down).
+
+**Telegram Integration**
+Control the agent via Telegram – same capabilities as the web chat.
+
+**Notifications**
+Email (SMTP) and Telegram notifications with configurable routing rules. Fine-grained control over which events go to whom.
+
+**Tags**
+Tag your VMs and containers and filter by them. Tags sync directly from Proxmox.
+
+### Tech Stack
+- **Next.js 16** (App Router, React 19, TypeScript)
+- **Tailwind CSS 4** + Shadcn UI (new-york)
+- **better-sqlite3** – local SQLite, no external database
+- **ssh2** – agentless access via SSH
+- **Vercel AI SDK** + **ollama-ai-provider** – AI agent
+- **next-intl** – i18n (de, en, es, fr, ru)
+
+### Quick Start
+
+```bash
+git clone https://github.com/jahartmann/TheReanimator.git
+cd TheReanimator
+npm install
+npm run build
+npm start
+```
+
+Default login: `admin` / `admin` (please change after first login)
+
+Then go to **Server → New Server** to add your first Proxmox node. You need:
+- IP or hostname of the node
+- SSH key (recommended) or password
+
+To enable the AI agent, go to **Settings → AI Agent**: enter your Ollama URL and model name.
+
+### Contributing
+
+Feedback, bug reports, and pull requests are welcome.
 
 **License:** MIT
+
+---
 
 [⬆️ Back to top](#reanimator)

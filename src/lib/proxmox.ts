@@ -357,6 +357,259 @@ export class ProxmoxClient {
         const data = await res.json() as { data: { t: string }[] };
         return data.data.map(l => l.t);
     }
+
+    // --- LXC & Templates ---
+
+    async getTemplates(node: string, storage: string): Promise<VztmplContent[]> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/storage/${storage}/content?content=vztmpl`, { headers });
+        if (!res.ok) throw new Error('Failed to get templates');
+        const data = await res.json() as { data: VztmplContent[] };
+        return data.data;
+    }
+
+    async getISOs(node: string, storage: string): Promise<IsoContent[]> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/storage/${storage}/content?content=iso`, { headers });
+        if (!res.ok) throw new Error('Failed to get ISOs');
+        const data = await res.json() as { data: IsoContent[] };
+        return data.data;
+    }
+
+    async createLXC(node: string, params: LXCCreationParams): Promise<string> {
+        const headers = await this.getHeaders();
+        const url = `${this.config.url}/api2/json/nodes/${node}/lxc`;
+
+        const body = new URLSearchParams({
+            vmid: params.vmid.toString(),
+            ostemplate: params.ostemplate,
+            hostname: params.hostname,
+            cores: params.cores.toString(),
+            memory: params.memory.toString(),
+            swap: '512',
+            storage: params.storage,
+            password: params.password,
+            'net0': `name=eth0,bridge=vmbr0,ip=dhcp,type=veth` // Default basic net
+        });
+
+        // Add ssh key if provided
+        if (params.ssh_public_keys) {
+            // PVE API expects "ssh-public-keys" (plural) with content (encoded? standard form handled by body)
+            body.append('ssh-public-keys', params.ssh_public_keys);
+        }
+
+        const res = await this.secureFetch(url, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+        });
+
+        if (!res.ok) {
+            const err = await res.text();
+            throw new Error(`Failed to create LXC: ${res.status} - ${err}`);
+        }
+
+        const data = await res.json() as { data: string }; // UPID
+        return data.data;
+    }
+
+    async startLXC(node: string, vmid: number): Promise<string> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/lxc/${vmid}/status/start`, {
+            method: 'POST',
+            headers
+        });
+        if (!res.ok) throw new Error('Failed to start LXC');
+        const data = await res.json() as { data: string };
+        return data.data;
+    }
+
+    // --- QEMU (VM) Creation ---
+
+    async createVM(node: string, params: VMCreationParams): Promise<string> {
+        const headers = await this.getHeaders();
+        const url = `${this.config.url}/api2/json/nodes/${node}/qemu`;
+
+        const body = new URLSearchParams({
+            vmid: params.vmid.toString(),
+            name: params.name,
+            memory: params.memory.toString(),
+            sockets: '1',
+            cores: params.cores.toString(),
+            net0: `virtio,bridge=vmbr0`, // Default basic net
+            scsi0: `${params.storage}:32`, // Default 32GB disk
+            ostype: params.ostype || 'l26', // defaults to Linux 2.6+
+        });
+
+        // Add ISO if provided
+        if (params.iso) {
+            body.append('cdrom', params.iso);
+        } else {
+            body.append('cdrom', 'none');
+        }
+
+        const res = await this.secureFetch(url, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+        });
+
+        if (!res.ok) {
+            const err = await res.text();
+            throw new Error(`Failed to create VM: ${res.status} - ${err}`);
+        }
+
+        const data = await res.json() as { data: string }; // UPID
+        return data.data;
+    }
+
+    async startVM(node: string, vmid: number): Promise<string> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/qemu/${vmid}/status/start`, {
+            method: 'POST',
+            headers
+        });
+        if (!res.ok) throw new Error('Failed to start VM');
+        const data = await res.json() as { data: string };
+        return data.data;
+    }
+
+    async stopVM(node: string, vmid: number): Promise<string> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/qemu/${vmid}/status/stop`, {
+            method: 'POST',
+            headers
+        });
+        if (!res.ok) throw new Error('Failed to stop VM');
+        const data = await res.json() as { data: string };
+        return data.data;
+    }
+
+    // --- Cluster Helpers ---
+
+    async getNextId(): Promise<number> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/cluster/nextid`, { headers });
+        if (!res.ok) throw new Error('Failed to get next VMID');
+        const data = await res.json() as { data: string };
+        return parseInt(data.data);
+    }
+
+    // --- Guest Agent Exec ---
+
+    async agentExec(node: string, vmid: number, command: string[]): Promise<string> {
+        const headers = await this.getHeaders();
+        const url = `${this.config.url}/api2/json/nodes/${node}/qemu/${vmid}/agent/exec`;
+
+        // PVE takes command as array of strings, but encoded in params
+        // Check API docs: "command" is "command=foo&command=bar"
+        const body = new URLSearchParams();
+        command.forEach(c => body.append('command', c));
+
+        const res = await this.secureFetch(url, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+        });
+
+        if (!res.ok) {
+            // 500 often means agent not running
+            throw new Error(`Agent exec failed (is Qemu Guest Agent running?): ${res.status}`);
+        }
+
+        const data = await res.json() as { data: { pid: number } };
+        // We really should poll for the result using the pid, but for now we just return PID.
+        // Actually, for "install", we want to know it worked.
+        // But polling agent/exec-status is complex. Let's return the PID for now.
+        return `PID: ${data.data.pid}`;
+    }
+
+    // RRD historical data for a node
+    async getNodeRRDData(node: string, timeframe: string, cf: string = 'AVERAGE'): Promise<RRDPoint[]> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(
+            `${this.config.url}/api2/json/nodes/${node}/rrddata?timeframe=${timeframe}&cf=${cf}`,
+            { headers }
+        );
+        if (!res.ok) throw new Error(`Failed to get node RRD data: ${res.status}`);
+        const data = await res.json() as { data: RRDPoint[] };
+        return data.data || [];
+    }
+
+    // RRD historical data for a VM (qemu or lxc)
+    async getVMRRDData(node: string, vmid: number, type: 'qemu' | 'lxc', timeframe: string, cf: string = 'AVERAGE'): Promise<RRDPoint[]> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(
+            `${this.config.url}/api2/json/nodes/${node}/${type}/${vmid}/rrddata?timeframe=${timeframe}&cf=${cf}`,
+            { headers }
+        );
+        if (!res.ok) throw new Error(`Failed to get VM RRD data: ${res.status}`);
+        const data = await res.json() as { data: RRDPoint[] };
+        return data.data || [];
+    }
+
+    // Cluster resources overview
+    async getClusterResources(): Promise<ClusterResource[]> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/cluster/resources`, { headers });
+        if (!res.ok) throw new Error(`Failed to get cluster resources: ${res.status}`);
+        const data = await res.json() as { data: ClusterResource[] };
+        return data.data || [];
+    }
+
+    // Node task list
+    async getNodeTaskList(node: string, limit: number = 50): Promise<PVETask[]> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(
+            `${this.config.url}/api2/json/nodes/${node}/tasks?limit=${limit}`,
+            { headers }
+        );
+        if (!res.ok) throw new Error(`Failed to get node tasks: ${res.status}`);
+        const data = await res.json() as { data: PVETask[] };
+        return data.data || [];
+    }
+
+    // ZFS pools
+    async getZFSPools(node: string): Promise<ZFSPool[]> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(
+            `${this.config.url}/api2/json/nodes/${node}/disks/zfs`,
+            { headers }
+        );
+        if (!res.ok) throw new Error(`Failed to get ZFS pools: ${res.status}`);
+        const data = await res.json() as { data: ZFSPool[] };
+        return data.data || [];
+    }
+
+    // Storage content (backups per VM)
+    async getStorageContent(node: string, storage: string, vmid?: number): Promise<StorageContentItem[]> {
+        const headers = await this.getHeaders();
+        let url = `${this.config.url}/api2/json/nodes/${node}/storage/${storage}/content?content=backup`;
+        if (vmid !== undefined) url += `&vmid=${vmid}`;
+        const res = await this.secureFetch(url, { headers });
+        if (!res.ok) throw new Error(`Failed to get storage content: ${res.status}`);
+        const data = await res.json() as { data: StorageContentItem[] };
+        return data.data || [];
+    }
+
+    // Get LXC containers from PVE node
+    async getLXCs(node: string): Promise<VMInfo[]> {
+        if (this.config.type !== 'pve') throw new Error('getLXCs is only available for PVE servers');
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/lxc`, { headers });
+        if (!res.ok) throw new Error('Failed to get LXCs');
+        const data = await res.json() as { data: PVEVM[] };
+        return data.data.map(vm => ({
+            vmid: vm.vmid,
+            name: vm.name || `CT ${vm.vmid}`,
+            status: vm.status,
+            cpu: vm.cpu || 0,
+            memory: { used: vm.mem || 0, total: vm.maxmem || 0 },
+            disk: vm.disk || 0,
+            uptime: vm.uptime || 0,
+            tags: vm.tags ? vm.tags.split(',').map(t => t.trim()).filter(Boolean) : []
+        }));
+    }
 }
 
 // Type definitions
@@ -472,4 +725,108 @@ export interface TaskStatus {
     type: string;
     upid: string;
     user: string;
+}
+
+export interface VztmplContent {
+    volid: string;
+    size: number;
+    format: string;
+    content: string;
+}
+
+export interface IsoContent {
+    volid: string;
+    size: number;
+    format: string;
+    content: string;
+}
+
+export interface LXCCreationParams {
+    vmid: number;
+    ostemplate: string; // "local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst"
+    hostname: string;
+    cores: number;
+    memory: number; // MB
+    storage: string;
+    password: string;
+    ssh_public_keys?: string;
+}
+
+export interface VMCreationParams {
+    vmid: number;
+    name: string;
+    memory: number; // MB
+    cores: number;
+    storage: string;
+    iso?: string; // e.g. "local:iso/debian.iso"
+    ostype?: 'l26' | 'win11';
+}
+
+export interface RRDPoint {
+    time: number;
+    cpu?: number;
+    mem?: number;
+    maxmem?: number;
+    netin?: number;
+    netout?: number;
+    diskread?: number;
+    diskwrite?: number;
+    maxdisk?: number;
+    disk?: number;
+    [key: string]: number | undefined;
+}
+
+export interface ClusterResource {
+    id: string;
+    type: 'node' | 'qemu' | 'lxc' | 'storage' | 'pool';
+    node?: string;
+    name?: string;
+    status?: string;
+    cpu?: number;
+    maxcpu?: number;
+    mem?: number;
+    maxmem?: number;
+    disk?: number;
+    maxdisk?: number;
+    uptime?: number;
+    vmid?: number;
+    template?: number;
+}
+
+export interface PVETask {
+    upid: string;
+    node: string;
+    pid: number;
+    pstart: number;
+    starttime: number;
+    endtime?: number;
+    type: string;
+    id?: string;
+    user: string;
+    status?: string;
+    exitstatus?: string;
+}
+
+export interface ZFSPool {
+    name: string;
+    health: string;
+    size: number;
+    alloc: number;
+    free: number;
+    frag: number;
+    dedup: number;
+    scan?: {
+        state?: string;
+        end_time?: number;
+    };
+}
+
+export interface StorageContentItem {
+    volid: string;
+    content: string;
+    format: string;
+    size: number;
+    ctime?: number;
+    vmid?: number;
+    notes?: string;
 }

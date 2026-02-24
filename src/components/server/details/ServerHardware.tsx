@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Database, Folder, HardDrive, Box } from "lucide-react";
 
@@ -8,6 +9,7 @@ interface ServerHardwareProps {
 }
 
 export function ServerHardware({ info }: ServerHardwareProps) {
+    const t = useTranslations('serverHardware');
     if (!info) return null;
 
     return (
@@ -19,7 +21,7 @@ export function ServerHardware({ info }: ServerHardwareProps) {
                         <CardHeader className="bg-gradient-to-r from-cyan-500/5 to-transparent">
                             <CardTitle className="flex items-center gap-2">
                                 <Database className="h-5 w-5 text-cyan-500" />
-                                Storage Pools ({info.pools.length})
+                                {t('storagePools')} ({info.pools.length})
                             </CardTitle>
                         </CardHeader>
                         <CardContent className="p-0">
@@ -48,7 +50,7 @@ export function ServerHardware({ info }: ServerHardwareProps) {
                                                 )}
                                             </div>
                                             <p className="text-sm text-muted-foreground">
-                                                {pool.used} used · {pool.available} available · {pool.size} total
+                                                {pool.used} {t('used')} · {pool.available} {t('available')} · {pool.size} {t('total')}
                                             </p>
                                         </div>
                                     </div>
@@ -64,7 +66,7 @@ export function ServerHardware({ info }: ServerHardwareProps) {
                         <CardHeader className="bg-gradient-to-r from-blue-500/5 to-transparent">
                             <CardTitle className="flex items-center gap-2">
                                 <Folder className="h-5 w-5 text-blue-500" />
-                                Filesystems ({info.filesystems.length})
+                                {t('filesystems')} ({info.filesystems.length})
                             </CardTitle>
                         </CardHeader>
                         <CardContent className="p-0">
@@ -72,9 +74,9 @@ export function ServerHardware({ info }: ServerHardwareProps) {
                                 <table className="w-full text-sm">
                                     <thead>
                                         <tr className="border-b border-border/50 bg-muted/20 text-muted-foreground text-xs uppercase">
-                                            <th className="px-4 py-3 text-left font-medium">Mount</th>
-                                            <th className="px-4 py-3 text-right font-medium">Size</th>
-                                            <th className="px-4 py-3 text-right font-medium">Use</th>
+                                            <th className="px-4 py-3 text-left font-medium">{t('mountPoint')}</th>
+                                            <th className="px-4 py-3 text-right font-medium">{t('size')}</th>
+                                            <th className="px-4 py-3 text-right font-medium">{t('used')}</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-border/50">
@@ -105,7 +107,7 @@ export function ServerHardware({ info }: ServerHardwareProps) {
                 <CardHeader className="bg-gradient-to-r from-emerald-500/5 to-transparent">
                     <CardTitle className="flex items-center gap-2">
                         <HardDrive className="h-5 w-5 text-emerald-500" />
-                        Physical Disks
+                        {t('physicalDisks')}
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="p-4">
@@ -119,7 +121,7 @@ export function ServerHardware({ info }: ServerHardwareProps) {
                                     <HardDrive className={`h-5 w-5 shrink-0 ${disk.transport === 'nvme' ? 'text-purple-500' : 'text-emerald-500'}`} />
                                     <div className="min-w-0">
                                         <p className="font-medium font-mono text-sm">{disk.name}</p>
-                                        <p className="text-xs text-muted-foreground truncate">{disk.model || 'Generic Disk'}</p>
+                                        <p className="text-xs text-muted-foreground truncate">{disk.model || t('standardDisk')}</p>
                                     </div>
                                 </div>
                                 <div className="flex items-center justify-between text-xs mt-1">

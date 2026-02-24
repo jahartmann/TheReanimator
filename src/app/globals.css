@@ -4,45 +4,84 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* Premium Light Theme */
-  --background: oklch(0.99 0.01 260); /* Very light blue-gray */
-  --foreground: oklch(0.15 0.02 260);
-  
-  --card: oklch(1 0 0); /* Pure white for cards */
-  --card-foreground: oklch(0.15 0.02 260);
+  /* Midnight Aurora - Refined Organic & High Contrast */
 
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.15 0.02 260);
+  /* Base - Deep Midnight (Darker, subtler) */
+  --background: oklch(0.12 0.02 260);
+  /* Near black with faint blue hint */
+  --foreground: oklch(0.98 0 0);
 
-  --primary: oklch(0.45 0.15 260); /* Deep professional blue */
-  --primary-foreground: oklch(0.98 0 0);
+  /* Surface - Midnight Glass (slightly lighter than bg) */
+  --card: oklch(0.16 0.03 260);
+  --card-foreground: oklch(0.98 0 0);
 
-  --secondary: oklch(0.95 0.01 260);
-  --secondary-foreground: oklch(0.3 0.05 260);
+  --popover: oklch(0.16 0.03 260);
+  --popover-foreground: oklch(0.98 0 0);
 
-  --muted: oklch(0.95 0.01 260);
-  --muted-foreground: oklch(0.5 0.03 260);
+  /* Primary - Electric Indigo (Friendly & Vibrant) */
+  --primary: oklch(0.65 0.20 280);
+  /* Indigo/Purple */
+  --primary-foreground: oklch(1 0 0);
+  /* White Text */
 
-  --accent: oklch(0.95 0.01 260);
-  --accent-foreground: oklch(0.45 0.15 260);
+  /* Secondary - Soft Blue */
+  --secondary: oklch(0.30 0.10 250);
+  --secondary-foreground: oklch(0.98 0 0);
 
-  --destructive: oklch(0.57 0.2 25);
-  --destructive-foreground: oklch(0.98 0 0);
+  /* Muted - Cool Grey */
+  --muted: oklch(0.25 0.05 260);
+  --muted-foreground: oklch(0.70 0.05 260);
 
-  --border: oklch(0.9 0.02 260);
-  --input: oklch(0.9 0.02 260);
-  --ring: oklch(0.45 0.15 260);
+  /* Accent - Hover State */
+  --accent: oklch(0.30 0.10 280);
+  /* Indig-tinted grey */
+  --accent-foreground: oklch(1 0 0);
+
+  /* Destructive */
+  --destructive: oklch(0.60 0.18 25);
+  --destructive-foreground: oklch(1 0 0);
+
+  /* Borders - Subtle but Visible */
+  --border: oklch(0.30 0.05 260);
+  --input: oklch(0.25 0.05 260);
+  --ring: oklch(0.65 0.20 280);
 
   --radius: 0.75rem;
+  /* Rounded aesthetic */
 
-  --sidebar: oklch(0.98 0.01 260);
-  --sidebar-foreground: oklch(0.15 0.02 260);
-  --sidebar-primary: oklch(0.45 0.15 260);
-  --sidebar-primary-foreground: oklch(0.98 0 0);
-  --sidebar-accent: oklch(0.94 0.01 260);
-  --sidebar-accent-foreground: oklch(0.15 0.02 260);
-  --sidebar-border: oklch(0.9 0.02 260);
-  --sidebar-ring: oklch(0.45 0.15 260);
+  /* Charts - Aurora Borealis */
+  --chart-1: oklch(0.65 0.20 280);
+  /* Indigo */
+  --chart-2: oklch(0.70 0.15 180);
+  /* Teal */
+  --chart-3: oklch(0.75 0.15 320);
+  /* Pink */
+  --chart-4: oklch(0.80 0.15 80);
+  /* Amber */
+  --chart-5: oklch(0.60 0.20 300);
+  /* Purple */
+
+  /* Sidebar - Deep Glass */
+  --sidebar: oklch(0.12 0.05 260 / 0.9);
+  --sidebar-foreground: oklch(0.95 0 0);
+  --sidebar-primary: oklch(0.65 0.20 280);
+  /* Indigo Active Bg */
+  --sidebar-primary-foreground: oklch(1 0 0);
+  /* WHITE text on Active */
+  --sidebar-accent: oklch(0.25 0.05 260);
+  --sidebar-accent-foreground: oklch(0.98 0 0);
+  --sidebar-border: oklch(0.25 0.05 260);
+  --sidebar-ring: oklch(0.65 0.20 280);
+
+  /* Fonts - Reset to Sans/Mono default mapping, Font Family handled in layout.tsx */
+  /* We will remove the explicit variable override here and let Tailwind use the class names */
+}
+
+/* Force Dark Mode Palette even if system requests light, 
+   but provide mapped variables just in case user forces it.
+   Ideally, we just use the dark variables for everything to maintain aesthetic. */
+.dark {
+  /* Same as :root because this design is dark-first */
 }
 
 @theme inline {
@@ -66,9 +105,12 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  --radius-sm: calc(var(--radius) - 2px);
-  --radius-md: calc(var(--radius));
-  --radius-lg: calc(var(--radius) + 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -77,105 +119,52 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
-}
 
-body {
-  background-color: var(--background);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-.dark {
-  /* Premium Dark Theme */
-  --background: oklch(0.12 0.01 260); /* Deep slate */
-  --foreground: oklch(0.95 0.01 260);
-
-  --card: oklch(0.15 0.02 260); /* Slightly lighter than bg */
-  --card-foreground: oklch(0.95 0.01 260);
-
-  --popover: oklch(0.15 0.02 260);
-  --popover-foreground: oklch(0.95 0.01 260);
-
-  --primary: oklch(0.75 0.15 260); /* Bright elegant cyan/blue */
-  --primary-foreground: oklch(0.15 0.02 260);
-
-  --secondary: oklch(0.2 0.02 260);
-  --secondary-foreground: oklch(0.95 0.01 260);
-
-  --muted: oklch(0.2 0.02 260);
-  --muted-foreground: oklch(0.65 0.03 260);
-
-  --accent: oklch(0.2 0.02 260);
-  --accent-foreground: oklch(0.95 0.01 260);
-
-  --destructive: oklch(0.65 0.2 25);
-  --destructive-foreground: oklch(0.98 0 0);
-
-  --border: oklch(0.25 0.02 260);
-  --input: oklch(0.25 0.02 260);
-  --ring: oklch(0.75 0.15 260);
-
-  --sidebar: oklch(0.1 0.01 260);
-  --sidebar-foreground: oklch(0.95 0.01 260);
-  --sidebar-primary: oklch(0.75 0.15 260);
-  --sidebar-primary-foreground: oklch(0.15 0.02 260);
-  --sidebar-accent: oklch(0.18 0.02 260);
-  --sidebar-accent-foreground: oklch(0.95 0.01 260);
-  --sidebar-border: oklch(0.2 0.02 260);
-  --sidebar-ring: oklch(0.75 0.15 260);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
-    @apply bg-background text-foreground transition-colors duration-300;
-    /* Soft mesh gradient background for a modern feel */
-    background-image: 
-      radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
-      radial-gradient(at 50% 0%, hsla(225,39%,30%,0.1) 0, transparent 50%), 
-      radial-gradient(at 100% 0%, hsla(339,49%,30%,0.05) 0, transparent 50%);
+    @apply bg-background text-foreground tracking-normal font-sans;
+    /* Midnight Aurora - Subtle Atmosphere */
+    background-image:
+      radial-gradient(at 0% 0%, oklch(0.20 0.10 260 / 0.3) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, oklch(0.20 0.10 280 / 0.2) 0px, transparent 50%);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply tracking-tight font-bold text-foreground;
   }
 }
 
-.dark body {
-  background-image: 
-    radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
-    radial-gradient(at 50% 0%, hsla(225,39%,30%,0.2) 0, transparent 50%), 
-    radial-gradient(at 100% 0%, hsla(339,49%,30%,0.1) 0, transparent 50%);
+
+/* Custom Scrollbar for Server Visualization */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
 
-/* Custom UI Polish Classes */
-.glass {
-  @apply bg-background/60 backdrop-blur-xl border border-white/10 shadow-lg;
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 3px;
 }
 
-.dark .glass {
-  @apply bg-black/40 backdrop-blur-xl border border-white/5 shadow-2xl;
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
 }
 
-.glass-card {
-  @apply bg-card/80 backdrop-blur-lg border border-border/50 shadow-md transition-all duration-300 hover:shadow-xl hover:border-primary/50;
-}
-
-.dark .glass-card {
-  @apply bg-card/40 backdrop-blur-xl border border-white/5 shadow-xl hover:border-primary/40 hover:bg-card/60;
-}
-
-.glass-panel {
-  @apply bg-sidebar/80 backdrop-blur-2xl border-r border-border/50 shadow-2xl;
-}
-
-.text-gradient {
-  @apply bg-clip-text text-transparent bg-gradient-to-r from-primary to-blue-400;
-}
-
-.animate-fade-in {
-  animation: fadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+/* Remove hover effect - keep scrollbar consistent */

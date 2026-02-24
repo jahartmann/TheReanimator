@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import TagManagement from '@/components/ui/TagManagement';
 import { ServerSyncButton } from '@/components/server/ServerSyncButton';
 import EditServerDialog from '@/components/server/EditServerDialog';
+import { useTranslations } from 'next-intl';
 
 
 interface ServerHeaderProps {
@@ -21,6 +22,8 @@ interface ServerHeaderProps {
 }
 
 export function ServerHeader({ server }: ServerHeaderProps) {
+    const t = useTranslations('servers');
+
     return (
         <div className="flex items-center gap-4">
             <Link href="/servers">
@@ -50,7 +53,7 @@ export function ServerHeader({ server }: ServerHeaderProps) {
                         <Link href={`?edit=true`}>
                             <Button variant="outline" size="sm">
                                 <Settings className="mr-2 h-4 w-4" />
-                                Einstellungen
+                                {t('settings')}
                             </Button>
                         </Link>
                     </div>
@@ -58,7 +61,7 @@ export function ServerHeader({ server }: ServerHeaderProps) {
                         <DialogTrigger asChild>
                             <Button variant="outline" size="sm">
                                 <Tags className="h-4 w-4 mr-2" />
-                                Tags
+                                {t('tags')}
                             </Button>
                         </DialogTrigger>
                         <DialogContent className="max-w-2xl">

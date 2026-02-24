@@ -1,12 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Loader2, Copy } from "lucide-react";
-import { LibraryItem, syncLibraryItem, getEligibleStorages } from '@/app/actions/library';
+import { LibraryItem, syncLibraryItem, getEligibleStorages } from '@/lib/actions/library';
 import { toast } from "sonner";
 
 interface ServerOption {
@@ -21,6 +22,7 @@ interface SyncDialogProps {
 }
 
 export function SyncDialog({ item, servers, onSuccess }: SyncDialogProps) {
+    const t = useTranslations('library');
     const [open, setOpen] = useState(false);
     const [targetServerId, setTargetServerId] = useState<string>("");
     const [targetStorage, setTargetStorage] = useState<string>("");
@@ -42,7 +44,7 @@ export function SyncDialog({ item, servers, onSuccess }: SyncDialogProps) {
             setStorages(avail);
             if (avail.length > 0) setTargetStorage(avail[0]);
         } catch (error) {
-            toast.error("Fehler beim Laden der Storages");
+            toast.error(t('storageLoadError'));
         } finally {
             setLoadingStorages(false);
         }
@@ -59,11 +61,11 @@ export function SyncDialog({ item, servers, onSuccess }: SyncDialogProps) {
                 targetStorage,
                 item.type
             );
-            toast.success("Synchronisation erfolgreich", { description: `${item.name} wurde kopiert.` });
+            toast.success(t('syncSuccess'), { description: t('syncSuccessDesc', { name: item.name }) });
             setOpen(false);
             if (onSuccess) onSuccess();
         } catch (error: any) {
-            toast.error("Synchronisation fehlgeschlagen", { description: error.message });
+            toast.error(t('syncError'), { description: error.message });
         } finally {
             setSyncing(false);
         }
@@ -76,30 +78,30 @@ export function SyncDialog({ item, servers, onSuccess }: SyncDialogProps) {
             <DialogTrigger asChild>
                 <Button variant="ghost" size="sm" disabled={eligibleTargets.length === 0}>
                     <Copy className="h-4 w-4 mr-2" />
-                    Sync
+                    {t('syncButton')}
                 </Button>
             </DialogTrigger>
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>Image synchronisieren</DialogTitle>
+                    <DialogTitle>{t('syncImageTitle')}</DialogTitle>
                     <DialogDescription>
-                        Kopieren Sie <strong>{item.name}</strong> auf einen anderen Server.
+                        {t('syncImageDesc', { name: item.name })}
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="grid gap-4 py-4">
                     <div className="grid gap-2">
-                        <Label>Quelle</Label>
+                        <Label>{t('source')}</Label>
                         <div className="text-sm font-mono bg-muted p-2 rounded">
                             {sourceLocation.serverName} ({sourceLocation.storage})
                         </div>
                     </div>
 
                     <div className="grid gap-2">
-                        <Label>Ziel-Server</Label>
+                        <Label>{t('targetServer')}</Label>
                         <Select value={targetServerId} onValueChange={handleServerChange}>
                             <SelectTrigger>
-                                <SelectValue placeholder="Server wählen" />
+                                <SelectValue placeholder={t('selectServer')} />
                             </SelectTrigger>
                             <SelectContent>
                                 {eligibleTargets.map(s => (
@@ -111,10 +113,10 @@ export function SyncDialog({ item, servers, onSuccess }: SyncDialogProps) {
 
                     {targetServerId && (
                         <div className="grid gap-2">
-                            <Label>Ziel-Storage</Label>
+                            <Label>{t('targetStorage')}</Label>
                             <Select value={targetStorage} onValueChange={setTargetStorage} disabled={loadingStorages || storages.length === 0}>
                                 <SelectTrigger>
-                                    <SelectValue placeholder={loadingStorages ? "Lade Storages..." : "Storage wählen"} />
+                                    <SelectValue placeholder={loadingStorages ? t('loadingStorages') : t('selectStorage')} />
                                 </SelectTrigger>
                                 <SelectContent>
                                     {storages.map(s => (
@@ -123,17 +125,17 @@ export function SyncDialog({ item, servers, onSuccess }: SyncDialogProps) {
                                 </SelectContent>
                             </Select>
                             {storages.length === 0 && !loadingStorages && targetServerId && (
-                                <p className="text-xs text-red-500">Kein kompatibler Storage gefunden.</p>
+                                <p className="text-xs text-red-500">{t('noCompatibleStorage')}</p>
                             )}
                         </div>
                     )}
                 </div>
 
                 <DialogFooter>
-                    <Button variant="outline" onClick={() => setOpen(false)} disabled={syncing}>Abbrechen</Button>
+                    <Button variant="outline" onClick={() => setOpen(false)} disabled={syncing}>{t('cancel')}</Button>
                     <Button onClick={handleSync} disabled={!targetServerId || !targetStorage || syncing}>
                         {syncing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        Synchronisieren
+                        {t('syncButton')}
                     </Button>
                 </DialogFooter>
             </DialogContent>

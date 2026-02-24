@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { File, Folder, FolderOpen, ChevronRight, ChevronDown, Check, Minus, Download } from 'lucide-react';
 import { Button } from './button';
+import { useTranslations } from 'next-intl';
 
 interface FileEntry {
     path: string;
@@ -256,6 +257,7 @@ export function FileBrowser({
     selectedFolder?: string | null;
 }) {
     const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+    const t = useTranslations('uiFileBrowser');
     const tree = useMemo(() => buildTree(files), [files]);
 
     // Notify parent when selection changes
@@ -349,12 +351,12 @@ export function FileBrowser({
                     onClick={handleSelectAll}
                     className="text-xs"
                 >
-                    {selectedPaths.size === files.length ? 'Alle abwählen' : 'Alle auswählen'}
+                    {selectedPaths.size === files.length ? t('deselectAll') : t('selectAll')}
                 </Button>
                 {selectedPaths.size > 0 && (
                     <>
                         <span className="text-xs text-muted-foreground">
-                            {selectedPaths.size} ausgewählt ({formatBytes(selectedSize)})
+                            {t('selected', { count: selectedPaths.size, size: formatBytes(selectedSize) })}
                         </span>
                         <Button
                             variant="default"

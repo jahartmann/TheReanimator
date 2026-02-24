@@ -1,6 +1,6 @@
 
-// This file is the single source of truth for the application version.
-// Update this version before every release.
+import packageJson from '../../package.json';
 
-export const APP_VERSION = "0.1.0";
-export const IS_BETA = true;
+// Version is read directly from package.json so it always reflects the installed release.
+export const APP_VERSION: string = packageJson.version;
+export const IS_BETA: boolean = packageJson.version.includes('beta') || packageJson.version.includes('alpha');

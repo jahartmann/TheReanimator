@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Cpu, Clock, Gauge, Network, Settings } from "lucide-react";
 import Link from 'next/link';
@@ -12,6 +13,7 @@ interface ServerOverviewProps {
 }
 
 export function ServerOverview({ server, info }: ServerOverviewProps) {
+    const t = useTranslations('serverOverview');
     if (!info) return null;
 
     return (
@@ -29,7 +31,7 @@ export function ServerOverview({ server, info }: ServerOverviewProps) {
                 <CardHeader className="bg-gradient-to-r from-primary/5 to-transparent">
                     <CardTitle className="flex items-center gap-2">
                         <Cpu className="h-5 w-5 text-primary" />
-                        System Status
+                        {t('systemStatus')}
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
@@ -39,9 +41,9 @@ export function ServerOverview({ server, info }: ServerOverviewProps) {
                             <div className="flex justify-between mb-2">
                                 <span className="text-sm text-muted-foreground flex items-center gap-2">
                                     <Cpu className="h-4 w-4" />
-                                    CPU Load
+                                    {t('cpuLoad')}
                                 </span>
-                                <span className="text-sm font-medium">{info.system.cpuCores} Cores · {info.system.cpuUsage.toFixed(1)}%</span>
+                                <span className="text-sm font-medium">{info.system.cpuCores} {t('cores')} · {info.system.cpuUsage.toFixed(1)}%</span>
                             </div>
                             <div className="w-full bg-muted rounded-full h-1.5 mb-2">
                                 <div className="bg-primary h-1.5 rounded-full transition-all duration-500" style={{ width: `${info.system.cpuUsage}%` }}></div>
@@ -54,7 +56,7 @@ export function ServerOverview({ server, info }: ServerOverviewProps) {
                             <div className="flex justify-between mb-2">
                                 <span className="text-sm text-muted-foreground flex items-center gap-2">
                                     <Gauge className="h-4 w-4" />
-                                    Memory
+                                    {t('memory')}
                                 </span>
                                 <span className="text-sm font-medium">{info.system.memoryUsage.toFixed(1)}%</span>
                             </div>
@@ -69,12 +71,12 @@ export function ServerOverview({ server, info }: ServerOverviewProps) {
                             <div className="flex justify-between items-center">
                                 <span className="text-sm text-muted-foreground flex items-center gap-2">
                                     <Clock className="h-4 w-4" />
-                                    Uptime
+                                    {t('uptime')}
                                 </span>
                                 <span className="text-sm font-medium text-green-500">{info.system.uptime}</span>
                             </div>
                             <div className="flex justify-between items-center">
-                                <span className="text-sm text-muted-foreground">Kernel</span>
+                                <span className="text-sm text-muted-foreground">{t('kernel')}</span>
                                 <span className="font-mono text-xs">{info.system.kernel}</span>
                             </div>
                         </div>

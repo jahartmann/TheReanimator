@@ -432,3 +432,53 @@ export function createSSHClient(server: {
     });
 }
 
+// standalone helpers used by linux.ts
+export async function executeCommand(config: {
+    host: string;
+    port: number;
+    username: string;
+    privateKeyPath?: string; // path to key file
+}, command: string): Promise<string> {
+
+    // Read key if path provided
+    let privateKey: string | undefined;
+    if (config.privateKeyPath && fs.existsSync(config.privateKeyPath)) {
+        privateKey = fs.readFileSync(config.privateKeyPath, 'utf-8');
+    }
+
+    const client = new SSHClient({
+        host: config.host,
+        port: config.port,
+        username: config.username,
+        privateKey: privateKey
+        // Note: Password support via direct input not implemented here yet for generic hosts, assuming key or key-agent
+        // If needed, we can add password to the config interface
+    });
+
+    try {
+        await client.connect();
+        const result = await client.exec(command);
+        await client.disconnect();
+        return result;
+    } catch (e) {
+        await client.disconnect();
+        throw e;
+    }
+}
+
+export async function testConnection(config: {
+    host: string;
+    port: number;
+    username: string;
+    privateKeyPath?: string;
+}): Promise<boolean> {
+    try {
+        await executeCommand(config, 'echo "ok"');
+        return true;
+    } catch (e) {
+        console.error('SSH Connection Test Failed:', e);
+        return false;
+    }
+}
+
+

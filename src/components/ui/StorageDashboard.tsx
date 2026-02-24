@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { HardDrive, RefreshCw, AlertTriangle, Database, Server } from "lucide-react";
 import { motion } from 'framer-motion';
+import { getServerStorages } from "@/lib/actions/storage";
 
 interface StorageInfo {
     serverId: number;
@@ -46,6 +48,7 @@ function StorageBar({ usage, size = 'md' }: { usage: number; size?: 'sm' | 'md' 
 }
 
 export function StorageDashboard() {
+    const t = useTranslations('storageDashboard');
     const [data, setData] = useState<StorageInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -54,12 +57,10 @@ export function StorageDashboard() {
         setLoading(true);
         setError(null);
         try {
-            const res = await fetch('/api/storage');
-            if (!res.ok) throw new Error('Failed to fetch storage data');
-            const json = await res.json();
-            setData(json);
+            const result = await getServerStorages();
+            setData(result);
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Unbekannter Fehler');
+            setError(err instanceof Error ? err.message : t('unknownError'));
         }
         setLoading(false);
     }
@@ -92,7 +93,7 @@ export function StorageDashboard() {
                 <CardContent className="p-6 text-center text-red-400">
                     <p>{error}</p>
                     <Button variant="outline" size="sm" className="mt-2" onClick={fetchStorage}>
-                        Erneut versuchen
+                        {t('tryAgain')}
                     </Button>
                 </CardContent>
             </Card>
@@ -108,7 +109,7 @@ export function StorageDashboard() {
                     <CardContent className="p-4">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-sm text-muted-foreground">Gesamtspeicher</p>
+                                <p className="text-sm text-muted-foreground">{t('totalSpace')}</p>
                                 <p className="text-2xl font-bold">{formatBytes(totalStorage)}</p>
                             </div>
                             <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center">
@@ -123,9 +124,9 @@ export function StorageDashboard() {
                     <CardContent className="p-4">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-sm text-muted-foreground">Belegt</p>
+                                <p className="text-sm text-muted-foreground">{t('used')}</p>
                                 <p className="text-2xl font-bold">{formatBytes(usedStorage)}</p>
-                                <p className="text-xs text-muted-foreground">{overallUsage.toFixed(1)}% genutzt</p>
+                                <p className="text-xs text-muted-foreground">{t('usedPercent', { percent: overallUsage.toFixed(1) })}</p>
                             </div>
                             <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center">
                                 <HardDrive className="h-6 w-6 text-blue-500" />
@@ -139,9 +140,9 @@ export function StorageDashboard() {
                     <CardContent className="p-4">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-sm text-muted-foreground">Kritisch (&gt;90%)</p>
+                                <p className="text-sm text-muted-foreground">{t('critical')}</p>
                                 <p className="text-2xl font-bold">{criticalStorages.length}</p>
-                                <p className="text-xs text-muted-foreground">{data.flatMap(s => s.storages).length} Storages total</p>
+                                <p className="text-xs text-muted-foreground">{t('totalStorages', { count: data.flatMap(s => s.storages).length })}</p>
                             </div>
                             <div className={`w-12 h-12 rounded-full flex items-center justify-center ${criticalStorages.length > 0 ? 'bg-red-500/10' : 'bg-green-500/10'}`}>
                                 <AlertTriangle className={`h-6 w-6 ${criticalStorages.length > 0 ? 'text-red-500' : 'text-green-500'}`} />
@@ -156,7 +157,7 @@ export function StorageDashboard() {
                 <CardHeader className="py-3 px-4 bg-muted/10 flex flex-row items-center justify-between">
                     <CardTitle className="text-base flex items-center gap-2">
                         <Database className="h-4 w-4" />
-                        Storage nach Server
+                        {t('storagesByServer')}
                     </CardTitle>
                     <Button variant="ghost" size="sm" onClick={fetchStorage} disabled={loading}>
                         <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -164,14 +165,14 @@ export function StorageDashboard() {
                 </CardHeader>
                 <CardContent className="p-4">
                     {data.length === 0 ? (
-                        <p className="text-center text-muted-foreground py-8">Keine Storage-Daten verfügbar</p>
+                        <p className="text-center text-muted-foreground py-8">{t('noStorageData')}</p>
                     ) : (
                         <div className="space-y-6">
                             {data.map((server) => (
                                 <div key={server.serverId} className={`space-y-3 ${server.serverId === -1 ? 'bg-primary/5 p-4 rounded-xl border border-primary/10' : ''}`}>
                                     <div className="flex items-center gap-2">
                                         <div className={`w-6 h-6 rounded flex items-center justify-center ${server.serverId === -1 ? 'bg-purple-500/10' :
-                                                server.serverType === 'pve' ? 'bg-orange-500/10' : 'bg-blue-500/10'
+                                            server.serverType === 'pve' ? 'bg-orange-500/10' : 'bg-blue-500/10'
                                             }`}>
                                             {server.serverId === -1 ? (
                                                 <Database className="h-3 w-3 text-purple-500" />

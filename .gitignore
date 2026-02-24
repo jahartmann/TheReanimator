@@ -52,3 +52,31 @@ data/*.db-shm
 
 data/config-backups/
 !data/.keep
+
+# IDE & AI
+.claude/
+.gemini/
+.idea/
+CLAUDE.md
+TRANSLATION_PLAN.md
+
+# Planning & Concept Files
+task.md
+implementation_plan.md
+walkthrough.md
+CONCEPT.md
+skills/reanimator-expert/SKILL.md
+
+# Debug & Diagnostic Scripts (dev only)
+check_db.js
+check_tags_db.js
+debug_db.js
+diagnose.ts
+scripts/debug_servers.js
+scripts/diagnose.js
+scripts/debug-brain.ts
+
+# Runtime Artifacts
+build_log.txt
+guardian.log
+temp_openclaw/

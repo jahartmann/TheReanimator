@@ -14,23 +14,25 @@ import {
     toggleJob,
     deleteScheduledJob,
     ScheduledJob
-} from '@/app/actions/schedule';
-
-// Define locally to avoid 'use server' export issues
-const schedulePresets = [
-    { label: 'Täglich um 02:00', value: '0 2 * * *' },
-    { label: 'Täglich um 04:00', value: '0 4 * * *' },
-    { label: 'Wöchentlich (Sonntag 03:00)', value: '0 3 * * 0' },
-    { label: 'Monatlich (1. um 03:00)', value: '0 3 1 * *' },
-    { label: 'Alle 6 Stunden', value: '0 */6 * * *' },
-    { label: 'Alle 12 Stunden', value: '0 */12 * * *' },
-];
+} from '@/lib/actions/schedule';
+import { useTranslations } from 'next-intl';
 
 interface ScheduleManagerProps {
     servers: { id: number; name: string }[];
 }
 
 export function ScheduleManager({ servers }: ScheduleManagerProps) {
+    const t = useTranslations('scheduleManager');
+
+    const schedulePresets = [
+        { label: t('daily2am'), value: '0 2 * * *' },
+        { label: t('daily4am'), value: '0 4 * * *' },
+        { label: t('weekly'), value: '0 3 * * 0' },
+        { label: t('monthly'), value: '0 3 1 * *' },
+        { label: t('every6hours'), value: '0 */6 * * *' },
+        { label: t('every12hours'), value: '0 */12 * * *' },
+    ];
+
     const [jobs, setJobs] = useState<ScheduledJob[]>([]);
     const [loading, setLoading] = useState(true);
     const [showDialog, setShowDialog] = useState(false);
@@ -79,7 +81,7 @@ export function ScheduleManager({ servers }: ScheduleManagerProps) {
     }
 
     async function handleDelete(jobId: number) {
-        if (!confirm('Job wirklich löschen?')) return;
+        if (!confirm(t('confirmDelete'))) return;
         await deleteScheduledJob(jobId);
         fetchJobs();
     }
@@ -97,11 +99,11 @@ export function ScheduleManager({ servers }: ScheduleManagerProps) {
             <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="flex items-center gap-2">
                     <Calendar className="h-5 w-5" />
-                    Automatische Backups
+                    {t('title')}
                 </CardTitle>
                 <Button size="sm" onClick={() => setShowDialog(true)} disabled={availableServers.length === 0}>
                     <Plus className="h-4 w-4 mr-2" />
-                    Zeitplan hinzufügen
+                    {t('addSchedule')}
                 </Button>
             </CardHeader>
             <CardContent>
@@ -112,8 +114,8 @@ export function ScheduleManager({ servers }: ScheduleManagerProps) {
                 ) : jobs.length === 0 ? (
                     <div className="text-center py-8 text-muted-foreground">
                         <Clock className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                        <p>Keine automatischen Backups konfiguriert</p>
-                        <p className="text-sm mt-1">Erstellen Sie einen Zeitplan für regelmäßige Backups</p>
+                        <p>{t('noSchedules')}</p>
+                        <p className="text-sm mt-1">{t('createSchedule')}</p>
                     </div>
                 ) : (
                     <div className="space-y-3">
@@ -133,7 +135,7 @@ export function ScheduleManager({ servers }: ScheduleManagerProps) {
                                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                             <span>{getScheduleLabel(job.schedule)}</span>
                                             <Badge variant={job.enabled ? 'default' : 'secondary'} className="text-xs">
-                                                {job.enabled ? 'Aktiv' : 'Pausiert'}
+                                                {job.enabled ? t('active') : t('paused')}
                                             </Badge>
                                         </div>
                                     </div>
@@ -143,7 +145,7 @@ export function ScheduleManager({ servers }: ScheduleManagerProps) {
                                         variant="ghost"
                                         size="icon"
                                         onClick={() => handleToggle(job.id)}
-                                        title={job.enabled ? 'Deaktivieren' : 'Aktivieren'}
+                                        title={job.enabled ? t('deactivate') : t('activate')}
                                     >
                                         {job.enabled ? (
                                             <ToggleRight className="h-5 w-5 text-green-500" />
@@ -170,14 +172,14 @@ export function ScheduleManager({ servers }: ScheduleManagerProps) {
             <Dialog open={showDialog} onOpenChange={setShowDialog}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Automatisches Backup einrichten</DialogTitle>
+                        <DialogTitle>{t('dialogTitle')}</DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
                         <div>
-                            <Label>Server</Label>
+                            <Label>{t('server')}</Label>
                             <Select value={selectedServer} onValueChange={setSelectedServer}>
                                 <SelectTrigger className="mt-2">
-                                    <SelectValue placeholder="Server auswählen..." />
+                                    <SelectValue placeholder={t('selectServer')} />
                                 </SelectTrigger>
                                 <SelectContent>
                                     {availableServers.map(s => (
@@ -189,7 +191,7 @@ export function ScheduleManager({ servers }: ScheduleManagerProps) {
                             </Select>
                         </div>
                         <div>
-                            <Label>Zeitplan</Label>
+                            <Label>{t('schedule')}</Label>
                             <Select value={selectedSchedule} onValueChange={setSelectedSchedule}>
                                 <SelectTrigger className="mt-2">
                                     <SelectValue />
@@ -205,10 +207,10 @@ export function ScheduleManager({ servers }: ScheduleManagerProps) {
                         </div>
                     </div>
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setShowDialog(false)}>Abbrechen</Button>
+                        <Button variant="outline" onClick={() => setShowDialog(false)}>{t('cancel')}</Button>
                         <Button onClick={handleCreate} disabled={!selectedServer || creating}>
                             {creating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-                            Erstellen
+                            {t('create')}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

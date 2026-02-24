@@ -8,13 +8,14 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Monitor, Smartphone, ArrowRightLeft, PlayCircle, StopCircle, Loader2, Stethoscope, MoreHorizontal, Power, RefreshCw, Trash2, HardDrive, FileText, Activity, Sparkles, CheckCircle, AlertTriangle, Info, AlertCircle } from "lucide-react"
-import { VirtualMachine } from '@/app/actions/vm';
+import { VirtualMachine } from '@/lib/actions/vm';
 import { MigrationDialog } from './MigrationDialog';
-import { Tag, assignTagsToResource } from '@/app/actions/tags';
+import { Tag, assignTagsToResource } from '@/lib/actions/tags';
 import { TagSelector } from '@/components/ui/TagSelector';
 import { toast } from 'sonner';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useTranslations } from 'next-intl';
 
 
 interface VirtualMachineListProps {
@@ -25,6 +26,7 @@ interface VirtualMachineListProps {
 }
 
 export function VirtualMachineList({ vms, currentServerId, otherServers, availableTags }: VirtualMachineListProps) {
+    const t = useTranslations('virtualMachineList');
     const [selectedVm, setSelectedVm] = useState<VirtualMachine | null>(null);
     const [loadingTags, setLoadingTags] = useState<Record<string, boolean>>({});
 
@@ -39,7 +41,7 @@ export function VirtualMachineList({ vms, currentServerId, otherServers, availab
             const analysis = await analyzeConfigWithAI(config, vm.type);
             setHealthResult(analysis);
         } catch (e) {
-            toast.error('AI Check Failed');
+            toast.error(t('aiCheckFailed'));
         } finally {
             setHealthCheckLoading(prev => ({ ...prev, [vm.vmid]: false }));
         }
@@ -50,13 +52,13 @@ export function VirtualMachineList({ vms, currentServerId, otherServers, availab
         try {
             const res = await assignTagsToResource(currentServerId, vm.vmid, newTags);
             if (res.success) {
-                toast.success(`Tags updated for ${vm.name}`);
+                toast.success(t('tagsUpdated', { name: vm.name }));
                 vm.tags = newTags;
             } else {
-                toast.error(res.message || 'Failed to update tags');
+                toast.error(res.message || t('failedUpdateTags'));
             }
         } catch (e) {
-            toast.error('Failed to update tags');
+            toast.error(t('updateTagsError'));
         } finally {
             setLoadingTags(prev => ({ ...prev, [vm.vmid]: false }));
         }
@@ -67,7 +69,7 @@ export function VirtualMachineList({ vms, currentServerId, otherServers, availab
             <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="flex items-center gap-2">
                     <Monitor className="h-5 w-5" />
-                    Virtual Machines & Containers
+                    {t('title')}
                     <Badge variant="secondary" className="ml-2">
                         {vms.length}
                     </Badge>
@@ -77,7 +79,7 @@ export function VirtualMachineList({ vms, currentServerId, otherServers, availab
                 {vms.length === 0 ? (
                     <div className="text-center py-6 text-muted-foreground">
                         <Monitor className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                        <p>Keine VMs gefunden</p>
+                        <p>{t('noVms')}</p>
                     </div>
                 ) : (
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -107,8 +109,8 @@ export function VirtualMachineList({ vms, currentServerId, otherServers, availab
                                                 <span className={vm.status === 'running' ? 'text-green-500' : ''}>
                                                     {vm.status}
                                                 </span>
-                                                {vm.cpus && <span>• {vm.cpus} CPU</span>}
-                                                {vm.memory && <span>• {Math.round(vm.memory / 1024 / 1024 / 1024)} GB</span>}
+                                                {vm.cpus && <span>• {t('cores', { count: vm.cpus })}</span>}
+                                                {vm.memory && <span>• {t('gb', { count: Math.round(vm.memory / 1024 / 1024 / 1024) })}</span>}
                                             </div>
                                             {/* Network and Storage Info */}
                                             {((vm.networks?.length || 0) > 0 || (vm.storages?.length || 0) > 0) && (
@@ -138,7 +140,7 @@ export function VirtualMachineList({ vms, currentServerId, otherServers, availab
                                             size="icon"
                                             onClick={() => handleHealthCheck(vm)}
                                             disabled={healthCheckLoading[vm.vmid]}
-                                            title="AI Health Check"
+                                            title={t('aiCheck')}
                                             className="text-purple-500 hover:text-purple-600 hover:bg-purple-500/10"
                                         >
                                             {healthCheckLoading[vm.vmid] ? <Loader2 className="h-4 w-4 animate-spin" /> : <Stethoscope className="h-4 w-4" />}
@@ -147,7 +149,7 @@ export function VirtualMachineList({ vms, currentServerId, otherServers, availab
                                             variant="ghost"
                                             size="icon"
                                             onClick={() => setSelectedVm(vm)}
-                                            title="Migrieren"
+                                            title={t('migrate')}
                                         >
                                             <ArrowRightLeft className="h-4 w-4" />
                                         </Button>
@@ -159,8 +161,6 @@ export function VirtualMachineList({ vms, currentServerId, otherServers, availab
                                         selectedTags={vm.tags || []}
                                         onTagsChange={(tags) => handleTagsChange(vm, tags)}
                                         isLoading={loadingTags[vm.vmid]}
-                                        compact={true}
-                                        maxVisibleTags={2}
                                     />
                                 </div>
                             </div>
@@ -191,10 +191,11 @@ export function VirtualMachineList({ vms, currentServerId, otherServers, availab
 // --- Health Check Components ---
 
 // Imports moved to top
-import { getVMConfig } from '@/app/actions/vm';
-import { analyzeConfigWithAI, HealthResult } from '@/app/actions/ai';
+import { getVMConfig } from '@/lib/actions/vm';
+import { analyzeConfigWithAI, HealthResult } from '@/lib/actions/ai';
 
 function HealthCheckDialog({ open, onOpenChange, result }: { open: boolean, onOpenChange: (o: boolean) => void, result: HealthResult | null }) {
+    const t = useTranslations('virtualMachineList');
     if (!result) return null;
 
     const getScoreColor = (score: number) => {
@@ -209,7 +210,7 @@ function HealthCheckDialog({ open, onOpenChange, result }: { open: boolean, onOp
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <Stethoscope className="h-5 w-5 text-purple-500" />
-                        AI Config Doctor
+                        {t('aiConfigDoctor')}
                     </DialogTitle>
                     <DialogDescription>
                         {result.summary}
@@ -217,7 +218,7 @@ function HealthCheckDialog({ open, onOpenChange, result }: { open: boolean, onOp
                 </DialogHeader>
 
                 <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg border mb-2">
-                    <span className="font-medium">Optimization Score</span>
+                    <span className="font-medium">{t('optimizationScore')}</span>
                     <span className={`text-2xl font-bold ${getScoreColor(result.score)}`}>{result.score}/100</span>
                 </div>
 
@@ -225,7 +226,7 @@ function HealthCheckDialog({ open, onOpenChange, result }: { open: boolean, onOp
                     {result.issues.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
                             <CheckCircle className="h-12 w-12 text-green-500 mb-4 opacity-50" />
-                            <p>Keine Probleme gefunden. Gute Arbeit!</p>
+                            <p>{t('noProblems')}</p>
                         </div>
                     ) : (
                         result.issues.map((issue, i) => (
@@ -240,7 +241,7 @@ function HealthCheckDialog({ open, onOpenChange, result }: { open: boolean, onOp
                                     <p className="text-muted-foreground text-xs leading-relaxed">{issue.description}</p>
                                     {issue.fix && (
                                         <div className="mt-2 text-xs bg-muted p-2 rounded font-mono">
-                                            {issue.fix}
+                                            <span className="font-bold">{t('fix')}</span> {issue.fix}
                                         </div>
                                     )}
                                 </div>
@@ -250,7 +251,7 @@ function HealthCheckDialog({ open, onOpenChange, result }: { open: boolean, onOp
                 </div>
 
                 <DialogFooter>
-                    <Button onClick={() => onOpenChange(false)}>Schließen</Button>
+                    <Button onClick={() => onOpenChange(false)}>{t('close')}</Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>

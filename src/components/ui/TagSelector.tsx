@@ -1,156 +1,126 @@
 'use client';
 
 import * as React from 'react';
-import { Check, ChevronsUpDown, Loader2, X, Search } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import {
-    Command,
-    CommandEmpty,
-    CommandGroup,
-    CommandInput,
-    CommandItem,
-    CommandList,
-} from '@/components/ui/command';
-import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
-} from '@/components/ui/popover';
-import { Tag } from '@/app/actions/tags';
+import { Plus, X } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tag } from '@/lib/actions/tags';
 
 interface TagSelectorProps {
     availableTags: Tag[];
-    selectedTags: string[]; // array of tag names
+    selectedTags: string[];
     onTagsChange: (tags: string[]) => void;
     isLoading?: boolean;
-    maxVisibleTags?: number; // Maximum tags to show before "+X more"
-    compact?: boolean; // Compact mode for tight spaces
 }
 
-export function TagSelector({
-    availableTags,
-    selectedTags,
-    onTagsChange,
-    isLoading,
-    maxVisibleTags = 3,
-    compact = false
-}: TagSelectorProps) {
+function resolveColor(tag: Tag): string {
+    const c = tag.color ?? '';
+    // Normalize to full 6-digit hex so CSS interpolation is always valid
+    if (c.startsWith('#') && (c.length === 7 || c.length === 4)) return c;
+    if (c.startsWith('#')) return c; // trust longer values (#rrggbbaa etc.)
+    if (/^[0-9a-fA-F]{3}$/.test(c)) return `#${c}${c}`; // expand 3-char → 6
+    if (/^[0-9a-fA-F]{6}$/.test(c)) return `#${c}`;
+    return '#6366f1'; // fallback
+}
+
+function fallbackColor(): string {
+    return '#94a3b8'; // slate-400, always 6-digit
+}
+
+export function TagSelector({ availableTags, selectedTags, onTagsChange, isLoading }: TagSelectorProps) {
     const [open, setOpen] = React.useState(false);
 
-    const toggleTag = (tagName: string) => {
-        const newTags = selectedTags.includes(tagName)
-            ? selectedTags.filter(t => t !== tagName)
-            : [...selectedTags, tagName];
-        onTagsChange(newTags);
-    };
-
-    const clearAll = () => {
-        onTagsChange([]);
-    };
-
-    const getTagColor = (tagName: string) => {
+    const getColor = (tagName: string): string => {
         const tag = availableTags.find(t => t.name === tagName);
-        return tag ? (tag.color.startsWith('#') ? tag.color : `#${tag.color}`) : '#888';
+        return tag ? resolveColor(tag) : fallbackColor();
     };
 
-    const visibleTags = selectedTags.slice(0, maxVisibleTags);
-    const hiddenCount = selectedTags.length - maxVisibleTags;
+    const remove = (tagName: string) => {
+        onTagsChange(selectedTags.filter(t => t !== tagName));
+    };
+
+    const add = (tagName: string) => {
+        if (!selectedTags.includes(tagName)) {
+            onTagsChange([...selectedTags, tagName]);
+        }
+        setOpen(false);
+    };
+
+    const unselected = availableTags.filter(t => !selectedTags.includes(t.name));
 
     return (
-        <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
-                <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={open}
-                    className={cn(
-                        "justify-between min-w-0",
-                        compact ? "h-8 text-xs px-2" : "w-full"
-                    )}
-                    disabled={isLoading}
-                >
-                    {isLoading ? (
-                        <span className="flex items-center">
-                            <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                            Laden...
-                        </span>
-                    ) : selectedTags.length > 0 ? (
-                        <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden">
-                            {visibleTags.map(tagName => (
-                                <Badge
-                                    key={tagName}
-                                    variant="secondary"
-                                    className="text-[10px] px-1.5 py-0 shrink-0"
-                                    style={{ borderLeft: `3px solid ${getTagColor(tagName)}` }}
-                                >
-                                    {tagName}
-                                </Badge>
-                            ))}
-                            {hiddenCount > 0 && (
-                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
-                                    +{hiddenCount}
-                                </Badge>
-                            )}
-                        </div>
-                    ) : (
-                        <span className="text-muted-foreground">
-                            {compact ? "Tags..." : "Tags auswählen..."}
-                        </span>
-                    )}
-                    <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
-                </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[280px] p-0" align="start">
-                <Command>
-                    <div className="flex items-center border-b px-3">
-                        <Search className="h-4 w-4 shrink-0 opacity-50" />
-                        <CommandInput placeholder="Tags suchen..." className="border-0" />
-                    </div>
-                    <CommandList className="max-h-[200px]">
-                        <CommandEmpty>Keine Tags gefunden.</CommandEmpty>
-                        <CommandGroup>
-                            {availableTags.map((tag) => (
-                                <CommandItem
-                                    key={tag.id}
-                                    value={tag.name}
-                                    onSelect={() => toggleTag(tag.name)}
-                                    className="cursor-pointer"
-                                >
-                                    <Check
-                                        className={cn(
-                                            "mr-2 h-4 w-4",
-                                            selectedTags.includes(tag.name) ? "opacity-100" : "opacity-0"
-                                        )}
-                                    />
-                                    <div
-                                        className="w-3 h-3 rounded-full mr-2 shrink-0"
-                                        style={{ backgroundColor: tag.color.startsWith('#') ? tag.color : `#${tag.color}` }}
-                                    />
-                                    <span className="truncate">{tag.name}</span>
-                                </CommandItem>
-                            ))}
-                        </CommandGroup>
-                    </CommandList>
-                    {selectedTags.length > 0 && (
-                        <div className="border-t p-2">
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="w-full text-xs h-7"
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    clearAll();
-                                }}
+        <div className="flex flex-wrap gap-1 items-center min-h-[20px]">
+            {selectedTags.map(tagName => {
+                const color = getColor(tagName);
+                return (
+                    <span
+                        key={tagName}
+                        className="group inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium select-none"
+                        style={{
+                            backgroundColor: `${color}1a`,
+                            color: color,
+                            border: `1px solid ${color}55`,
+                        }}
+                    >
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                        {tagName}
+                        {!isLoading && (
+                            <button
+                                onClick={() => remove(tagName)}
+                                className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity ml-0.5"
+                                title={`${tagName} entfernen`}
                             >
-                                <X className="h-3 w-3 mr-1" />
-                                Alle entfernen ({selectedTags.length})
-                            </Button>
-                        </div>
-                    )}
-                </Command>
-            </PopoverContent>
-        </Popover>
+                                <X className="h-2.5 w-2.5" />
+                            </button>
+                        )}
+                    </span>
+                );
+            })}
+
+            {isLoading && (
+                <span className="text-[10px] text-muted-foreground animate-pulse">…</span>
+            )}
+
+            {!isLoading && (
+                <Popover open={open} onOpenChange={setOpen}>
+                    <PopoverTrigger asChild>
+                        <button
+                            className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-dashed border-muted-foreground/30 text-muted-foreground hover:border-primary/60 hover:text-primary transition-colors shrink-0"
+                            title="Tag hinzufügen"
+                        >
+                            <Plus className="h-2.5 w-2.5" />
+                        </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto max-w-[240px] p-2.5" align="start">
+                        {unselected.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">Alle Tags vergeben</p>
+                        ) : (
+                            <>
+                                <p className="text-[10px] text-muted-foreground mb-2 font-medium uppercase tracking-wide">Tag hinzufügen</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {unselected.map(tag => {
+                                        const color = resolveColor(tag);
+                                        return (
+                                            <button
+                                                key={tag.id}
+                                                className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium transition-opacity hover:opacity-80 cursor-pointer"
+                                                style={{
+                                                    backgroundColor: `${color}1a`,
+                                                    color: color,
+                                                    border: `1px solid ${color}55`,
+                                                }}
+                                                onClick={() => add(tag.name)}
+                                            >
+                                                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                                                {tag.name}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </>
+                        )}
+                    </PopoverContent>
+                </Popover>
+            )}
+        </div>
     );
 }
