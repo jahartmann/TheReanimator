@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { getNodeTasks } from '@/app/actions/monitoring_advanced';
+import { getNodeTasks } from '@/lib/actions/monitoring_advanced';
 import type { PVETask } from '@/lib/proxmox';
 import { ListTodo, RefreshCw } from 'lucide-react';
 

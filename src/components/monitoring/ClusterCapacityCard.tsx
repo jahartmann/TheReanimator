@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { getClusterResources } from '@/app/actions/monitoring_advanced';
+import { getClusterResources } from '@/lib/actions/monitoring_advanced';
 import type { ClusterResource } from '@/lib/proxmox';
 import { Server, Cpu, MemoryStick, HardDrive, Activity } from 'lucide-react';
 

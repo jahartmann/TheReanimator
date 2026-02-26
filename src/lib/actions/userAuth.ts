@@ -134,7 +134,6 @@ export async function login(username: string, password: string): Promise<{ succe
         });
 
         // Add expiration timestamp cookie (readable by middleware for client-side validation)
-        const expiresAt = new Date(Date.now() + SESSION_DURATION_HOURS * 60 * 60 * 1000).toISOString();
         cookieStore.set('session_expires', expiresAt, {
             httpOnly: false,
             secure: false,

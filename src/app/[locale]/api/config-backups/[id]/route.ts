@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteConfigBackup, getBackupFiles, readBackupFile } from '@/lib/actions/configBackup';
 
-export async function GET(request: NextRequest) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+    const { id } = await params;
     const { searchParams } = new URL(request.url);
-    const backupIdStr = searchParams.get('id');
     const filePath = searchParams.get('file');
 
-    if (!backupIdStr) {
-        return NextResponse.json({ error: 'Missing backup parameter' }, { status: 400 });
+    const backupId = parseInt(id);
+    if (isNaN(backupId)) {
+        return NextResponse.json({ error: 'Invalid backup ID' }, { status: 400 });
     }
-
-    const backupId = parseInt(backupIdStr);
 
     if (filePath) {
         // Return file content
@@ -29,15 +28,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(files);
 }
 
-export async function DELETE(request: NextRequest) {
-    const { searchParams } = new URL(request.url);
-    const backupIdStr = searchParams.get('id');
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+    const { id } = await params;
+    const backupId = parseInt(id);
 
-    if (!backupIdStr) {
-        return NextResponse.json({ error: 'Missing backup parameter' }, { status: 400 });
+    if (isNaN(backupId)) {
+        return NextResponse.json({ error: 'Invalid backup ID' }, { status: 400 });
     }
 
-    const backupId = parseInt(backupIdStr);
     const result = await deleteConfigBackup(backupId);
     return NextResponse.json(result);
 }

@@ -9,11 +9,13 @@ interface ConfigBackup {
     backup_path: string;
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+    const { id } = await params;
+    const backupId = parseInt(id);
     const body = await request.json();
-    const { backupId, files } = body as { backupId: number, files: string[] };
+    const { files } = body as { files: string[] };
 
-    if (!backupId || !files || !Array.isArray(files) || files.length === 0) {
+    if (isNaN(backupId) || !files || !Array.isArray(files) || files.length === 0) {
         return NextResponse.json({ error: 'No files or backupId specified' }, { status: 400 });
     }
 

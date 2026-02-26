@@ -79,10 +79,15 @@ function processData(data: RRDPoint[], metrics: MetricConfig[]): Record<string, 
         .map(point => {
             const processed: Record<string, number | string> = { time: point.time };
             for (const m of metrics) {
-                let val = point[m.key] ?? 0;
+                // Proxmox RRD returns null (not undefined) for missing values
+                // null ?? 0 returns null, so use explicit fallback
+                let val = point[m.key];
+                if (val == null || typeof val !== 'number') val = 0;
+
                 if (m.format === 'percent' && m.maxKey) {
-                    const max = point[m.maxKey];
-                    if (max && max > 0) {
+                    let max = point[m.maxKey];
+                    if (max == null || typeof max !== 'number') max = 0;
+                    if (max > 0) {
                         val = (val / max) * 100;
                     } else {
                         // already fraction 0..1

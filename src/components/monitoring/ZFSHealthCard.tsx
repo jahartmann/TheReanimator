@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { getZFSPools } from '@/app/actions/monitoring_advanced';
+import { getZFSPools } from '@/lib/actions/monitoring_advanced';
 import type { ZFSPool } from '@/lib/proxmox';
 import { Database, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';

@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic';
 
-import { getServers } from '@/app/actions/server';
+import { getServers } from '@/lib/actions/server';
 import { MonitoringClient } from './MonitoringClient';
 
 export default async function MonitoringPage() {

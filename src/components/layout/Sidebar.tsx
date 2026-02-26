@@ -3,7 +3,7 @@
 import { getAISettings } from '@/lib/actions/ai';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { LayoutDashboard, Server, FolderCog, ArrowRightLeft, Tag as TagIcon, HardDrive, Users, Terminal, Activity, ListTodo, Calendar, TrendingUp, Disc, Sparkles, Wrench, HeartPulse } from 'lucide-react';
+import { LayoutDashboard, Server, FolderCog, ArrowRightLeft, Tag as TagIcon, HardDrive, Users, Terminal, Activity, ListTodo, Calendar, TrendingUp, Disc, Sparkles, Wrench, HeartPulse, ShieldCheck } from 'lucide-react';
 import { getCurrentUser, logout, User as UserType } from '@/lib/actions/userAuth';
 import { APP_VERSION, IS_BETA } from '@/lib/constants';
 import { UserNav } from './UserNav';
@@ -29,6 +29,7 @@ const toolsNav = [
 const systemNav = [
     { key: 'storage', href: '/storage', icon: HardDrive },
     { key: 'configs', href: '/configs', icon: FolderCog },
+    { key: 'disasterRecovery', href: '/disaster-recovery', icon: ShieldCheck },
     { key: 'jobs', href: '/jobs', icon: Calendar },
     { key: 'tasks', href: '/tasks', icon: ListTodo },
 ];

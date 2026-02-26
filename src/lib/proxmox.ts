@@ -532,8 +532,9 @@ export class ProxmoxClient {
             { headers }
         );
         if (!res.ok) throw new Error(`Failed to get node RRD data: ${res.status}`);
-        const data = await res.json() as { data: RRDPoint[] };
-        return data.data || [];
+        const data = await res.json() as { data: any[] };
+        // Proxmox node-level uses memused/memtotal instead of mem/maxmem — normalize
+        return (data.data || []).map(normalizeNodeRRDPoint);
     }
 
     // RRD historical data for a VM (qemu or lxc)
@@ -544,8 +545,8 @@ export class ProxmoxClient {
             { headers }
         );
         if (!res.ok) throw new Error(`Failed to get VM RRD data: ${res.status}`);
-        const data = await res.json() as { data: RRDPoint[] };
-        return data.data || [];
+        const data = await res.json() as { data: any[] };
+        return (data.data || []).map(sanitizeRRDPoint);
     }
 
     // Cluster resources overview
@@ -773,7 +774,58 @@ export interface RRDPoint {
     diskwrite?: number;
     maxdisk?: number;
     disk?: number;
+    /** IO wait fraction (node-level, mapped from iowait) */
+    diskwait?: number;
+    /** Node-level raw fields (before normalization) */
+    memused?: number;
+    memtotal?: number;
+    rootused?: number;
+    roottotal?: number;
+    iowait?: number;
     [key: string]: number | undefined;
+}
+
+/**
+ * Proxmox RRD returns null for missing data points.
+ * Sanitize to ensure all numeric fields are actual numbers.
+ */
+function sanitizeRRDPoint(raw: any): RRDPoint {
+    const point: RRDPoint = { time: raw.time || 0 };
+    for (const key of Object.keys(raw)) {
+        if (key === 'time') continue;
+        const v = raw[key];
+        point[key] = (typeof v === 'number' && isFinite(v)) ? v : undefined;
+    }
+    return point;
+}
+
+/**
+ * Proxmox node-level RRD uses different field names than VM-level:
+ *   memused/memtotal (not mem/maxmem)
+ *   rootused/roottotal (disk space, not diskread/diskwrite)
+ *   iowait (fraction, no diskread/diskwrite at node level)
+ * Normalize to the standard field names used by our charts.
+ */
+function normalizeNodeRRDPoint(raw: any): RRDPoint {
+    const point = sanitizeRRDPoint(raw);
+    // Map node-level names → standard names
+    if (point.memused !== undefined && point.mem === undefined) {
+        point.mem = point.memused;
+    }
+    if (point.memtotal !== undefined && point.maxmem === undefined) {
+        point.maxmem = point.memtotal;
+    }
+    if (point.rootused !== undefined && point.disk === undefined) {
+        point.disk = point.rootused;
+    }
+    if (point.roottotal !== undefined && point.maxdisk === undefined) {
+        point.maxdisk = point.roottotal;
+    }
+    // iowait is a fraction (0..1), no separate diskread/diskwrite at node level
+    if (point.iowait !== undefined) {
+        point.diskwait = point.iowait;
+    }
+    return point;
 }
 
 export interface ClusterResource {

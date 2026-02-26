@@ -175,6 +175,73 @@ export async function getMonitoringSummary(serverId: number): Promise<{
     }
 }
 
+/**
+ * Fetch aggregated RRD data across ALL nodes of a cluster.
+ * Averages CPU, sums RAM/Net/DiskIO across nodes for a unified cluster view.
+ */
+export async function getClusterRRDData(
+    serverId: number,
+    timeframe: 'hour' | 'day' | 'week' | 'month' | 'year'
+): Promise<RRDPoint[]> {
+    try {
+        const server = getServer(serverId);
+        const client = getProxmoxClient(server);
+        const nodes = await client.getNodes();
+
+        if (nodes.length === 0) return [];
+
+        // Fetch RRD data for all nodes in parallel
+        const allNodeData = await Promise.all(
+            nodes.map(n => client.getNodeRRDData(n.id, timeframe).catch(() => []))
+        );
+
+        // Find the node with the most data points to use as time base
+        const longestData = allNodeData.reduce((a, b) => a.length > b.length ? a : b, []);
+        if (longestData.length === 0) return [];
+
+        // Build a time-indexed map for each node
+        const nodeMaps = allNodeData.map(data => {
+            const map = new Map<number, RRDPoint>();
+            for (const p of data) {
+                if (p.time) map.set(p.time, p);
+            }
+            return map;
+        });
+
+        // Aggregate: average CPU, sum everything else
+        const aggregated: RRDPoint[] = longestData.map(basePoint => {
+            const time = basePoint.time;
+            const points = nodeMaps
+                .map(m => m.get(time))
+                .filter((p): p is RRDPoint => p != null);
+
+            if (points.length === 0) return { time };
+
+            const n = points.length;
+            const sum = (key: string) => points.reduce((s, p) => s + (typeof p[key] === 'number' ? p[key]! : 0), 0);
+
+            return {
+                time,
+                cpu: sum('cpu') / n,          // Average CPU fraction
+                mem: sum('mem'),                // Sum RAM used (bytes)
+                maxmem: sum('maxmem'),          // Sum RAM total (bytes)
+                netin: sum('netin'),            // Sum network in
+                netout: sum('netout'),          // Sum network out
+                diskread: sum('diskread'),      // Sum disk read
+                diskwrite: sum('diskwrite'),    // Sum disk write
+                disk: sum('disk'),              // Sum disk used
+                maxdisk: sum('maxdisk'),        // Sum disk total
+                diskwait: sum('diskwait') / n,  // Average IO wait fraction
+            };
+        });
+
+        return aggregated;
+    } catch (e) {
+        console.error('[monitoring_advanced] getClusterRRDData failed:', e);
+        return [];
+    }
+}
+
 export async function getServerVMs(
     serverId: number,
     nodeId: string
