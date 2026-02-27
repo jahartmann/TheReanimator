@@ -26,5 +26,13 @@ export async function register() {
         } catch (e) {
             // Custom tools are optional
         }
+
+        // Initialize Console WebSocket Proxy
+        try {
+            const { startConsoleProxy } = await import('@/lib/console-proxy');
+            startConsoleProxy(3001);
+        } catch (e) {
+            console.error('[Startup] Failed to start console proxy:', e);
+        }
     }
 }

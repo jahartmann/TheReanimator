@@ -188,6 +188,8 @@ export async function startVMMigration(
 
         // 2. Trigger Background Processing
         // We reuse the executeMigrationTask but need to ensure it handles the single-step nicely
+        // Note: single-VM migrations do not support deleteSource.
+        // Use startServerMigration for bulk migration with delete-source capability.
         const migrationExecOptions = {
             storage: options.targetStorage,
             bridge: options.targetBridge,
@@ -270,7 +272,7 @@ async function executeMigrationTask(taskId: number, vms: any[], options: { stora
 
         steps[0].status = 'completed';
         log('Preparation done. All pre-checks passed.');
-        db.prepare('UPDATE migration_tasks SET steps_json = ? WHERE id = ?').run(JSON.stringify(steps), taskId);
+        db.prepare('UPDATE migration_tasks SET steps_json = ?, progress = 1 WHERE id = ?').run(JSON.stringify(steps), taskId);
 
 
         // --- 2. VM Migrations ---
@@ -292,7 +294,14 @@ async function executeMigrationTask(taskId: number, vms: any[], options: { stora
             // Use per-VM Override if available, otherwise global option
             const targetStorage = vm.targetStorage && vm.targetStorage !== 'auto' ? vm.targetStorage : (options.storage || '');
             const targetBridge = vm.targetBridge && vm.targetBridge !== 'auto' ? vm.targetBridge : (options.bridge || '');
-            const networkMapping = vm.networkMapping;
+            // Filter out 'auto' entries from network mapping (auto = keep original config)
+            const rawNetworkMapping = vm.networkMapping || {};
+            const networkMapping: Record<string, string> = {};
+            for (const [netId, bridge] of Object.entries(rawNetworkMapping)) {
+                if (bridge && bridge !== 'auto') {
+                    networkMapping[netId] = bridge;
+                }
+            }
             const targetVmid = vm.targetVmid; // Get explicit target VMID
 
             const res = await migrateVM(taskRow.source_server_id, vm.vmid.toString(), vm.type, {
@@ -300,37 +309,80 @@ async function executeMigrationTask(taskId: number, vms: any[], options: { stora
                 targetStorage: targetStorage,
                 targetBridge: targetBridge,
                 targetVmid: targetVmid ? targetVmid : undefined,
-                networkMapping: networkMapping, // Pass mappings
+                networkMapping: Object.keys(networkMapping).length > 0 ? networkMapping : undefined, // Pass only non-auto mappings
                 online: false, // Default to OFFLINE as it is more stable for cross-cluster (Future: pass from vm.online)
                 autoVmid: options.autoVmid ?? true
             }, log);
 
             if (res.success) {
                 steps[currentStepIndex].status = 'completed';
-                log(`Success: ${res.message ? res.message.substring(0, 100) + '...' : 'OK'}`);
+                const summary = res.message
+                    ? (res.message.length > 100 ? res.message.substring(0, 100) + '...' : res.message)
+                    : 'OK';
+                log(`Success: ${summary}`);
 
-                // Delete source VM if option enabled
+                // Delete source VM if option enabled - with verification
                 if (options.deleteSource && options.sourceServerId) {
+                    const typeLabel = vm.type === 'qemu' ? 'VM' : 'LXC';
+                    const cmd = vm.type === 'qemu' ? 'qm' : 'pct';
+
+                    // First, verify the VM actually exists on the target
+                    log(`Verifying ${typeLabel} ${vm.vmid} was migrated to target before deletion...`);
+                    let migrationVerified = false;
+
                     try {
-                        log(`Deleting source ${vm.type === 'qemu' ? 'VM' : 'LXC'} ${vm.vmid} from source server...`);
-                        const source = db.prepare('SELECT * FROM servers WHERE id = ?').get(options.sourceServerId) as any;
-                        if (source) {
-                            const ssh = createSSHClient({
-                                ssh_host: source.ssh_host,
-                                ssh_port: source.ssh_port,
-                                ssh_user: source.ssh_user,
-                                ssh_key: source.ssh_key
+                        const targetServer = db.prepare('SELECT * FROM servers WHERE id = ?').get(taskRow.target_server_id) as any;
+                        if (targetServer) {
+                            const targetSsh = createSSHClient({
+                                ssh_host: targetServer.ssh_host,
+                                ssh_port: targetServer.ssh_port,
+                                ssh_user: targetServer.ssh_user,
+                                ssh_key: targetServer.ssh_key
                             });
-                            await ssh.connect();
-                            const stopCmd = vm.type === 'qemu' ? `qm stop ${vm.vmid} --skiplock 2>/dev/null; sleep 2` : `pct stop ${vm.vmid} 2>/dev/null; sleep 2`;
-                            await ssh.exec(stopCmd).catch(() => {});
-                            const destroyCmd = vm.type === 'qemu' ? `qm destroy ${vm.vmid} --purge` : `pct destroy ${vm.vmid} --purge`;
-                            const destroyResult = await ssh.exec(destroyCmd);
-                            await ssh.disconnect();
-                            log(`Source ${vm.vmid} deleted successfully.`);
+                            await targetSsh.connect();
+
+                            // Determine target VMID (may differ from source)
+                            const targetVmid = vm.targetVmid || vm.vmid;
+                            const verifyCmd = `/usr/sbin/${cmd} config ${targetVmid}`;
+                            const verifyResult = await targetSsh.exec(verifyCmd);
+                            await targetSsh.disconnect();
+
+                            if (verifyResult && verifyResult.trim().length > 0) {
+                                migrationVerified = true;
+                                log(`✓ ${typeLabel} ${targetVmid} confirmed on target server`);
+                            } else {
+                                log(`✗ ${typeLabel} ${targetVmid} NOT found on target - SKIPPING source deletion for safety!`);
+                            }
                         }
-                    } catch (delErr: any) {
-                        log(`Warning: Failed to delete source ${vm.vmid}: ${delErr.message}`);
+                    } catch (verifyErr: any) {
+                        log(`✗ Could not verify migration on target: ${verifyErr.message} - SKIPPING source deletion for safety!`);
+                    }
+
+                    // Only delete if migration is verified
+                    if (migrationVerified) {
+                        try {
+                            log(`Deleting source ${typeLabel} ${vm.vmid} from source server...`);
+                            const source = db.prepare('SELECT * FROM servers WHERE id = ?').get(options.sourceServerId) as any;
+                            if (source) {
+                                const ssh = createSSHClient({
+                                    ssh_host: source.ssh_host,
+                                    ssh_port: source.ssh_port,
+                                    ssh_user: source.ssh_user,
+                                    ssh_key: source.ssh_key
+                                });
+                                await ssh.connect();
+                                const stopCmd = `${cmd} stop ${vm.vmid} --skiplock 2>/dev/null; sleep 2`;
+                                await ssh.exec(stopCmd).catch(() => {});
+                                const destroyCmd = vm.type === 'qemu' ? `qm destroy ${vm.vmid} --purge` : `pct destroy ${vm.vmid} --purge`;
+                                await ssh.exec(destroyCmd);
+                                await ssh.disconnect();
+                                log(`Source ${vm.vmid} deleted successfully.`);
+                            }
+                        } catch (delErr: any) {
+                            log(`Warning: Failed to delete source ${vm.vmid}: ${delErr.message}`);
+                        }
+                    } else {
+                        log(`⚠ Source ${typeLabel} ${vm.vmid} NOT deleted - migration could not be verified on target.`);
                     }
                 }
             } else {
@@ -342,16 +394,20 @@ async function executeMigrationTask(taskId: number, vms: any[], options: { stora
                 // For now, let's keep going.
             }
 
+            // Update progress: count completed/failed steps (not pending/running)
+            const completedCount = steps.filter(s => s.status === 'completed' || s.status === 'failed').length;
+            db.prepare('UPDATE migration_tasks SET steps_json = ?, progress = ?, current_step = ? WHERE id = ?')
+                .run(JSON.stringify(steps), completedCount, currentStepIndex + 1, taskId);
             currentStepIndex++;
-            db.prepare('UPDATE migration_tasks SET steps_json = ? WHERE id = ?').run(JSON.stringify(steps), taskId);
         }
 
         // --- 3. Finalize ---
         if (steps[currentStepIndex]) {
             steps[currentStepIndex].status = 'running';
-            db.prepare('UPDATE migration_tasks SET steps_json = ? WHERE id = ?').run(JSON.stringify(steps), taskId);
+            db.prepare('UPDATE migration_tasks SET steps_json = ?, current_step = ? WHERE id = ?').run(JSON.stringify(steps), currentStepIndex + 1, taskId);
             // Cleanup logic if needed
             steps[currentStepIndex].status = 'completed';
+            db.prepare('UPDATE migration_tasks SET steps_json = ?, progress = ? WHERE id = ?').run(JSON.stringify(steps), steps.length, taskId);
         }
 
         // Determine final status based on step results

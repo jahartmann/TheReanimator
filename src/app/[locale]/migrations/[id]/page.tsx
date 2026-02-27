@@ -87,7 +87,9 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
 
     const config = statusConfig[task.status] || statusConfig.pending;
     const Icon = config.icon;
-    const progressPercent = task.total_steps > 0 ? Math.round((task.progress / task.total_steps) * 100) : 0;
+    // Calculate progress from actual step statuses (more reliable than DB progress field)
+    const doneSteps = task.steps.filter(s => s.status === 'completed' || s.status === 'failed').length;
+    const progressPercent = task.steps.length > 0 ? Math.round((doneSteps / task.steps.length) * 100) : 0;
 
     // Calculate result summary
     const vmSteps = task.steps.filter(s => s.type === 'vm' || s.type === 'lxc');
@@ -153,7 +155,12 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
                                 </div>
                                 <div>
                                     <div className="text-2xl font-bold">{progressPercent}%</div>
-                                    <div className="text-sm text-muted-foreground">{task.current_step || 'Initialisiere...'}</div>
+                                    <div className="text-sm text-muted-foreground">
+                                        {task.status === 'completed' ? 'Abgeschlossen' :
+                                         task.status === 'failed' ? 'Fehlgeschlagen' :
+                                         task.status === 'cancelled' ? 'Abgebrochen' :
+                                         task.steps.find(s => s.status === 'running')?.name || 'Initialisiere...'}
+                                    </div>
                                 </div>
                             </div>
                             <div className="h-2 bg-muted rounded-full overflow-hidden">

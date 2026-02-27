@@ -15,7 +15,8 @@ import { TagSelector } from '@/components/ui/TagSelector';
 import { toast } from 'sonner';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
+import Link from 'next/link';
 
 
 interface VirtualMachineListProps {
@@ -27,6 +28,7 @@ interface VirtualMachineListProps {
 
 export function VirtualMachineList({ vms, currentServerId, otherServers, availableTags }: VirtualMachineListProps) {
     const t = useTranslations('virtualMachineList');
+    const locale = useLocale();
     const [selectedVm, setSelectedVm] = useState<VirtualMachine | null>(null);
     const [loadingTags, setLoadingTags] = useState<Record<string, boolean>>({});
 
@@ -135,6 +137,17 @@ export function VirtualMachineList({ vms, currentServerId, otherServers, availab
                                         </div>
                                     </div>
                                     <div className="flex gap-1">
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            asChild
+                                            title={t('console')}
+                                            className="text-blue-500 hover:text-blue-600 hover:bg-blue-500/10"
+                                        >
+                                            <Link href={`/${locale}/servers/${currentServerId}/console/${vm.vmid}`}>
+                                                <Monitor className="h-4 w-4" />
+                                            </Link>
+                                        </Button>
                                         <Button
                                             variant="ghost"
                                             size="icon"

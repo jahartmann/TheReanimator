@@ -80,7 +80,9 @@ export default function MigrationsPage() {
                             {activeTasks.map(task => {
                                 const config = statusConfig[task.status] || statusConfig.pending;
                                 const Icon = config.icon;
-                                const progressPercent = task.total_steps > 0 ? Math.round((task.progress / task.total_steps) * 100) : 0;
+                                // Calculate progress from actual step statuses for accuracy
+                                const doneSteps = task.steps.filter((s: any) => s.status === 'completed' || s.status === 'failed').length;
+                                const progressPercent = task.steps.length > 0 ? Math.round((doneSteps / task.steps.length) * 100) : 0;
                                 return (
                                     <Link key={task.id} href={`/migrations/${task.id}`}>
                                         <Card className="hover:border-primary/50 transition-colors cursor-pointer border-blue-500/30 bg-blue-500/5">
@@ -97,7 +99,7 @@ export default function MigrationsPage() {
                                                                 <span className="font-semibold">{task.target_name}</span>
                                                             </div>
                                                             <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                                                                <span>{task.progress}/{task.total_steps} {t('steps')}</span>
+                                                                <span>{doneSteps}/{task.steps.length} {t('steps')}</span>
                                                                 {task.current_step && (
                                                                     <span className="truncate">• {task.steps.find(s => s.status === 'running')?.name?.replace('Migrate ', '') || task.current_step}</span>
                                                                 )}

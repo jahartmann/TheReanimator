@@ -611,6 +611,139 @@ export class ProxmoxClient {
             tags: vm.tags ? vm.tags.split(',').map(t => t.trim()).filter(Boolean) : []
         }));
     }
+
+    // --- Console / Remote Access ---
+
+    // VNC Proxy for QEMU VMs
+    async getVNCProxy(node: string, vmid: number): Promise<{ ticket: string; port: number; upid: string }> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/qemu/${vmid}/vncproxy`, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ websocket: '1' }).toString()
+        });
+        if (!res.ok) throw new Error(`Failed to get VNC proxy: ${res.status}`);
+        const data = await res.json() as { data: { ticket: string; port: number; upid: string } };
+        return data.data;
+    }
+
+    // VNC Proxy for LXC containers
+    async getLXCVNCProxy(node: string, vmid: number): Promise<{ ticket: string; port: number; upid: string }> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/lxc/${vmid}/vncproxy`, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ websocket: '1' }).toString()
+        });
+        if (!res.ok) throw new Error(`Failed to get LXC VNC proxy: ${res.status}`);
+        const data = await res.json() as { data: { ticket: string; port: number; upid: string } };
+        return data.data;
+    }
+
+    // Terminal Proxy (shell for LXC, serial for QEMU)
+    async getTermProxy(node: string, vmid: number, type: 'qemu' | 'lxc'): Promise<{ ticket: string; port: number; upid: string; user: string }> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/${type}/${vmid}/termproxy`, {
+            method: 'POST',
+            headers
+        });
+        if (!res.ok) throw new Error(`Failed to get term proxy: ${res.status}`);
+        const data = await res.json() as { data: { ticket: string; port: number; upid: string; user: string } };
+        return data.data;
+    }
+
+    // Node shell proxy
+    async getNodeTermProxy(node: string): Promise<{ ticket: string; port: number; upid: string; user: string }> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/termproxy`, {
+            method: 'POST',
+            headers
+        });
+        if (!res.ok) throw new Error(`Failed to get node term proxy: ${res.status}`);
+        const data = await res.json() as { data: { ticket: string; port: number; upid: string; user: string } };
+        return data.data;
+    }
+
+    // SPICE proxy config for QEMU VMs
+    async getSpiceProxy(node: string, vmid: number): Promise<Record<string, string>> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/qemu/${vmid}/spiceproxy`, {
+            method: 'POST',
+            headers
+        });
+        if (!res.ok) throw new Error(`Failed to get SPICE proxy: ${res.status}`);
+        const data = await res.json() as { data: Record<string, string> };
+        return data.data;
+    }
+
+    // Guest Agent: read file from VM
+    async agentFileRead(node: string, vmid: number, filePath: string): Promise<string> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(
+            `${this.config.url}/api2/json/nodes/${node}/qemu/${vmid}/agent/file-read?file=${encodeURIComponent(filePath)}`,
+            { headers }
+        );
+        if (!res.ok) throw new Error(`Agent file-read failed: ${res.status}`);
+        const data = await res.json() as { data: { content: string; truncated?: boolean } };
+        return data.data.content;
+    }
+
+    // Guest Agent: write file to VM (content must be base64 or text)
+    async agentFileWrite(node: string, vmid: number, filePath: string, content: string, encode: boolean = true): Promise<void> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/qemu/${vmid}/agent/file-write`, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                file: filePath,
+                content: content,
+                ...(encode ? { encode: '1' } : {})
+            }).toString()
+        });
+        if (!res.ok) throw new Error(`Agent file-write failed: ${res.status}`);
+    }
+
+    // Guest Agent: exec command and poll for result
+    async agentExecWait(node: string, vmid: number, command: string[], timeoutMs: number = 30000): Promise<{ exitcode: number; stdout: string; stderr: string }> {
+        const headers = await this.getHeaders();
+
+        // Start exec
+        const body = new URLSearchParams();
+        command.forEach(c => body.append('command', c));
+        const execRes = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/qemu/${vmid}/agent/exec`, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+        });
+        if (!execRes.ok) throw new Error(`Agent exec failed (is qemu-guest-agent running?): ${execRes.status}`);
+        const execData = await execRes.json() as { data: { pid: number } };
+        const pid = execData.data.pid;
+
+        // Poll for result
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+            await new Promise(r => setTimeout(r, 1000));
+            const statusRes = await this.secureFetch(
+                `${this.config.url}/api2/json/nodes/${node}/qemu/${vmid}/agent/exec-status?pid=${pid}`,
+                { headers }
+            );
+            if (!statusRes.ok) continue;
+            const statusData = await statusRes.json() as { data: { exited?: boolean; exitcode?: number; 'out-data'?: string; 'err-data'?: string } };
+            if (statusData.data.exited) {
+                return {
+                    exitcode: statusData.data.exitcode ?? -1,
+                    stdout: statusData.data['out-data'] ?? '',
+                    stderr: statusData.data['err-data'] ?? ''
+                };
+            }
+        }
+        throw new Error(`Agent exec timed out after ${timeoutMs}ms`);
+    }
+
+    // Get connection info for WebSocket proxy
+    getConnectionInfo(): { url: string; ticket: string | null; token: string | undefined; type: 'pve' | 'pbs' } {
+        return { url: this.config.url, ticket: this.ticket, token: this.config.token, type: this.config.type };
+    }
 }
 
 // Type definitions
@@ -881,4 +1014,11 @@ export interface StorageContentItem {
     ctime?: number;
     vmid?: number;
     notes?: string;
+}
+
+export interface ConsoleProxyTicket {
+    ticket: string;
+    port: number;
+    upid: string;
+    user?: string;
 }

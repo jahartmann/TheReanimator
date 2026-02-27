@@ -450,7 +450,7 @@ async function runPreFlightChecks(
     log('[Check 4/6] Storage check will be performed dynamically during migration initialization.');
 
 
-    // 5. Target storage exists
+    // 5. Target storage exists (with auto-fallback)
     log('[Check 5/6] Verifying target storage...');
     const targetStorage = options.targetStorage || 'local-lvm';
     try {
@@ -470,17 +470,35 @@ async function runPreFlightChecks(
                 })
                 .filter(s => s !== null);
         }
-        const found = storages.find((s: any) => s.storage === targetStorage);
+        const activeStorages = storages.filter((s: any) => s.status === 'active');
+        const found = activeStorages.find((s: any) => s.storage === targetStorage);
         if (!found) {
-            const available = storages.map((s: any) => s.storage).join(', ');
-            const locale = await getServerLocale();
-            const t = await getTranslations({ locale, namespace: 'actionsVM' });
-            throw new Error(t('storageNotFoundOnTarget', { storage: targetStorage, available }));
+            const available = activeStorages.map((s: any) => `${s.storage} (${s.type})`).join(', ');
+            log(`[Check 5/6] ⚠ Target storage "${targetStorage}" not found. Available: ${available}`);
+
+            // Auto-fallback: Try to find a matching storage by type or common names
+            const commonFallbacks = ['local-lvm', 'local-zfs', 'local', 'ceph-pool', 'nfs'];
+            const fallback = activeStorages.find((s: any) =>
+                commonFallbacks.includes(s.storage) &&
+                (s.type === 'lvmthin' || s.type === 'lvm' || s.type === 'zfspool' || s.type === 'dir')
+            );
+
+            if (fallback) {
+                log(`[Check 5/6] → Auto-fallback: Using "${fallback.storage}" (${fallback.type}) instead`);
+                options.targetStorage = fallback.storage;
+            } else if (activeStorages.length > 0) {
+                // Last resort: use first available active storage
+                const firstActive = activeStorages[0];
+                log(`[Check 5/6] → Auto-fallback: Using first available storage "${firstActive.storage}" (${firstActive.type})`);
+                options.targetStorage = firstActive.storage;
+            } else {
+                log(`[Check 5/6] ⚠ No active storages found on target - migration may use Proxmox default`);
+            }
+        } else {
+            log(`[Check 5/6] ✓ Target storage "${targetStorage}" exists`);
         }
-        log(`[Check 5/6] ✓ Target storage "${targetStorage}" exists`);
     } catch (e: any) {
-        if (e.message.includes('nicht gefunden')) throw e;
-        log(`[Check 5/6] ⚠ Could not verify target storage: ${e.message}`);
+        log(`[Check 5/6] ⚠ Could not verify target storage: ${e.message} - proceeding with configured value`);
     }
 
     // 6. Server-to-Server SSH (for SCP)
@@ -523,6 +541,7 @@ async function migrateRemote(ctx: MigrationContext): Promise<string> {
     }
 
     // ========== PRE-FLIGHT CHECKS ==========
+    // Note: runPreFlightChecks may update options.targetStorage via auto-fallback if mapped storage doesn't exist
     await runPreFlightChecks(ctx, targetHost, log);
 
     // Determine Target VMID (after pre-flight so we know target is reachable)
@@ -806,16 +825,20 @@ async function migrateRemote(ctx: MigrationContext): Promise<string> {
             log('[Cleanup] Deleted target backup file');
         } catch { }
 
-        // Delete source VM/CT (like PDM's --delete behavior)
-        log(`[Cleanup] Deleting source ${typeLabel}...`);
+        // Source VM deletion is handled by the migration task orchestrator (migration.ts)
+        // based on the deleteSource flag. Do NOT delete here unconditionally.
+        log(`[Cleanup] Source ${typeLabel} preserved (deletion handled by orchestrator if requested)`);
+
+        // Verify target VM exists after migration
         try {
-            await sourceSsh.exec(`/usr/sbin/${cmd} stop ${vmid} --timeout 30`);
-        } catch { }
-        try {
-            await sourceSsh.exec(`/usr/sbin/${cmd} destroy ${vmid}${type !== 'lxc' ? ' --purge' : ''}`);
-            log(`[Cleanup] ✓ Source ${typeLabel} deleted`);
+            const verifyResult = await targetSsh.exec(`/usr/sbin/${cmd} config ${targetVmid}`);
+            if (verifyResult && verifyResult.trim().length > 0) {
+                log(`[Cleanup] ✓ Target ${typeLabel} ${targetVmid} verified on target server`);
+            } else {
+                log(`[Cleanup] ⚠ Warning: Could not verify target ${typeLabel} ${targetVmid}`);
+            }
         } catch (e) {
-            log(`[Cleanup] Warning: Could not delete source ${typeLabel}: ${e}`);
+            log(`[Cleanup] ⚠ Warning: Target ${typeLabel} verification failed: ${e}`);
         }
 
         log('[Step 4/4] ✓ Cleanup complete');
@@ -832,29 +855,47 @@ async function migrateRemote(ctx: MigrationContext): Promise<string> {
         // Sync both source and target to update VM lists
         await Promise.all([safeSync(sourceId), safeSync(options.targetServerId)]);
 
-        // Apply Network Mapping if provided
+        // Apply Network Mapping if provided (skip 'auto' entries = keep original)
         if (options.networkMapping) {
-            log('[Network] Applying network mapping...');
-            for (const [netId, bridge] of Object.entries(options.networkMapping)) {
-                try {
-                    // For qemu: netX, for lxc: netX
-                    // PVE syntax: qm set <vmid> --net0 bridge=<bridge>
-                    // LXC syntax: pct set <vmid> --net0 name=eth0,bridge=<bridge> ... (Complex for LXC)
-                    // For now, assume QEMU mainly or simple bridge switch
-                    if (type === 'qemu') {
-                        await targetSsh.exec(`/usr/sbin/qm set ${targetVmid} --${netId} bridge=${bridge}`);
-                        log(`[Network] Set ${netId} to ${bridge}`);
-                    } else {
-                        // LXC is harder because we need to know other params like name, ip etc to set the line?
-                        // Actually 'pct set vmid --net0 bridge=X' might work if net0 exists.
-                        // But usually checks for name.
-                        // Let's try basic set.
-                        await targetSsh.exec(`/usr/sbin/pct set ${targetVmid} --${netId} bridge=${bridge}`);
-                        log(`[Network] Set ${netId} to ${bridge}`);
+            const mappingsToApply = Object.entries(options.networkMapping).filter(([, bridge]) => bridge && bridge !== 'auto');
+
+            if (mappingsToApply.length > 0) {
+                log('[Network] Applying network mapping...');
+                for (const [netId, bridge] of mappingsToApply) {
+                    try {
+                        if (type === 'qemu') {
+                            // Read current net config to preserve all settings, only change bridge
+                            const currentConfig = await targetSsh.exec(`/usr/sbin/qm config ${targetVmid} --current`);
+                            const netLine = currentConfig.split('\n').find(l => l.startsWith(`${netId}:`));
+                            if (netLine) {
+                                // Replace bridge=XXX in the existing config line
+                                const currentValue = netLine.split(':').slice(1).join(':').trim();
+                                const updatedValue = currentValue.replace(/bridge=\S+/, `bridge=${bridge}`);
+                                await targetSsh.exec(`/usr/sbin/qm set ${targetVmid} --${netId} ${updatedValue}`);
+                            } else {
+                                // Net interface doesn't exist yet, create minimal config
+                                await targetSsh.exec(`/usr/sbin/qm set ${targetVmid} --${netId} virtio,bridge=${bridge}`);
+                            }
+                            log(`[Network] Set ${netId} bridge to ${bridge}`);
+                        } else {
+                            // LXC: Read current config and replace bridge
+                            const currentConfig = await targetSsh.exec(`/usr/sbin/pct config ${targetVmid}`);
+                            const netLine = currentConfig.split('\n').find(l => l.startsWith(`${netId}:`));
+                            if (netLine) {
+                                const currentValue = netLine.split(':').slice(1).join(':').trim();
+                                const updatedValue = currentValue.replace(/bridge=\S+/, `bridge=${bridge}`);
+                                await targetSsh.exec(`/usr/sbin/pct set ${targetVmid} --${netId} ${updatedValue}`);
+                            } else {
+                                await targetSsh.exec(`/usr/sbin/pct set ${targetVmid} --${netId} name=eth0,bridge=${bridge},ip=dhcp`);
+                            }
+                            log(`[Network] Set ${netId} bridge to ${bridge}`);
+                        }
+                    } catch (e) {
+                        log(`[Network] Warning: Failed to set ${netId} to ${bridge}: ${e}`);
                     }
-                } catch (e) {
-                    log(`[Network] Warning: Failed to set ${netId} to ${bridge}: ${e}`);
                 }
+            } else {
+                log('[Network] All interfaces set to auto - keeping original config');
             }
         }
 

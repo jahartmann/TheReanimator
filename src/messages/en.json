@@ -1424,7 +1424,8 @@
     "optimizationScore": "Optimization Score",
     "noProblems": "No problems found. Great job!",
     "fix": "Fix:",
-    "close": "Close"
+    "close": "Close",
+    "console": "Console"
   },
   "scheduleManager": {
     "daily2am": "Daily at 02:00",
@@ -1539,5 +1540,24 @@
     "manageProfiles": "Manage profiles in Settings.",
     "provisioningProfile": "Provisioning Profile (Optional)",
     "noProfileJustKey": "No profile - just install SSH key"
+  },
+  "console": {
+    "terminal": "Terminal",
+    "files": "Files",
+    "fullscreen": "Fullscreen",
+    "reconnect": "Reconnect",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "emptyDirectory": "Empty directory",
+    "uploadFile": "Upload",
+    "downloadFile": "Download",
+    "newFolder": "New Folder",
+    "deleteItem": "Delete",
+    "createDirectory": "Create Directory",
+    "directoryName": "Directory name",
+    "confirmDelete": "Confirm Deletion",
+    "confirmDeleteMessage": "Are you sure you want to delete \"{name}\"? This action cannot be undone.",
+    "cancel": "Cancel",
+    "create": "Create"
   }
 }
