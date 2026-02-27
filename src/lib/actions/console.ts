@@ -12,8 +12,8 @@ import { determineNodeName } from './vm';
  * Auto-provision a Proxmox API token via SSH if none is stored.
  * This allows the console proxy to authenticate against the Proxmox WebSocket.
  */
-async function ensureApiToken(server: any): Promise<string> {
-    if (server.token) return server.token;
+export async function ensureApiToken(server: any): Promise<string> {
+    if (server.auth_token) return server.auth_token;
 
     console.log(`[Console] No API token for server ${server.id} (${server.name}), provisioning via SSH...`);
     const ssh = createSSHClient(server);
@@ -25,15 +25,20 @@ async function ensureApiToken(server: any): Promise<string> {
 
         // Create new token with full privileges
         const result = await ssh.exec('pveum user token add root@pam reanimator --privsep=0 --output-format json 2>/dev/null');
-        const tokenData = JSON.parse(result);
+        let tokenData: any;
+        try {
+            tokenData = JSON.parse(result);
+        } catch {
+            throw new Error(`Failed to parse pveum output: ${result.slice(0, 200)}`);
+        }
 
         // Format: user@realm!tokenid=secret
         const fullToken = `${tokenData['full-tokenid']}=${tokenData.value}`;
         console.log(`[Console] API token created for server ${server.id}`);
 
         // Persist in database
-        db.prepare('UPDATE servers SET token = ? WHERE id = ?').run(fullToken, server.id);
-        server.token = fullToken;
+        db.prepare('UPDATE servers SET auth_token = ? WHERE id = ?').run(fullToken, server.id);
+        server.auth_token = fullToken;
 
         return fullToken;
     } catch (e) {

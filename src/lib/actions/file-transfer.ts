@@ -4,6 +4,7 @@ import db from '@/lib/db';
 import { ProxmoxClient } from '@/lib/proxmox';
 import { createSSHClient } from '@/lib/ssh';
 import { determineNodeName } from './vm';
+import { ensureApiToken } from './console';
 
 export interface FileEntry {
     name: string;
@@ -33,24 +34,10 @@ async function getServerContext(serverId: number, needsApi: boolean = false) {
 
     let client: ProxmoxClient | null = null;
     if (needsApi) {
-        // Auto-provision API token if needed (same as console.ts)
-        if (!server.token) {
-            const provSsh = createSSHClient(server);
-            try {
-                await provSsh.connect();
-                await provSsh.exec('pveum user token remove root@pam reanimator 2>/dev/null || true');
-                const result = await provSsh.exec('pveum user token add root@pam reanimator --privsep=0 --output-format json 2>/dev/null');
-                const tokenData = JSON.parse(result);
-                server.token = `${tokenData['full-tokenid']}=${tokenData.value}`;
-                db.prepare('UPDATE servers SET token = ? WHERE id = ?').run(server.token, server.id);
-            } finally {
-                try { await provSsh.disconnect(); } catch { /* ignore */ }
-            }
-        }
-
+        const token = await ensureApiToken(server);
         client = new ProxmoxClient({
             url: server.url,
-            token: server.token,
+            token,
             type: server.type || 'pve'
         });
     }
