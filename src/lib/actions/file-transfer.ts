@@ -3,6 +3,7 @@
 import db from '@/lib/db';
 import { ProxmoxClient } from '@/lib/proxmox';
 import { createSSHClient } from '@/lib/ssh';
+import { determineNodeName } from './vm';
 
 export interface FileEntry {
     name: string;
@@ -12,21 +13,47 @@ export interface FileEntry {
     permissions: string;
 }
 
-async function getServerAndClient(serverId: number) {
+/**
+ * Get server record and SSH-determined node name.
+ * For QEMU Guest Agent, also returns a Proxmox client (auto-provisions API token if needed).
+ */
+async function getServerContext(serverId: number, needsApi: boolean = false) {
     const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId) as any;
     if (!server) throw new Error('Server not found');
 
-    const client = new ProxmoxClient({
-        url: server.url,
-        token: server.token || undefined,
-        username: server.token ? undefined : (server.ssh_user || 'root@pam'),
-        password: server.token ? undefined : server.ssh_key,
-        type: server.type || 'pve'
-    });
+    // Get node name via SSH
+    const ssh = createSSHClient(server);
+    let node: string;
+    try {
+        await ssh.connect();
+        node = await determineNodeName(ssh);
+    } finally {
+        try { await ssh.disconnect(); } catch { /* ignore */ }
+    }
 
-    if (!server.token) await client.authenticate();
-    const nodes = await client.getNodes();
-    const node = nodes[0]?.name || 'pve';
+    let client: ProxmoxClient | null = null;
+    if (needsApi) {
+        // Auto-provision API token if needed (same as console.ts)
+        if (!server.token) {
+            const provSsh = createSSHClient(server);
+            try {
+                await provSsh.connect();
+                await provSsh.exec('pveum user token remove root@pam reanimator 2>/dev/null || true');
+                const result = await provSsh.exec('pveum user token add root@pam reanimator --privsep=0 --output-format json 2>/dev/null');
+                const tokenData = JSON.parse(result);
+                server.token = `${tokenData['full-tokenid']}=${tokenData.value}`;
+                db.prepare('UPDATE servers SET token = ? WHERE id = ?').run(server.token, server.id);
+            } finally {
+                try { await provSsh.disconnect(); } catch { /* ignore */ }
+            }
+        }
+
+        client = new ProxmoxClient({
+            url: server.url,
+            token: server.token,
+            type: server.type || 'pve'
+        });
+    }
 
     return { server, client, node };
 }
@@ -40,38 +67,32 @@ export async function listRemoteFiles(
     vmType: 'qemu' | 'lxc',
     remotePath: string
 ): Promise<FileEntry[]> {
-    // Sanitize path to prevent directory traversal
     const safePath = remotePath.replace(/\.\./g, '').replace(/\/+/g, '/') || '/';
 
-    const { server, client, node } = await getServerAndClient(serverId);
-
     if (vmType === 'qemu') {
-        // Use QEMU Guest Agent
-        const result = await client.agentExecWait(node, vmid, [
+        const { client, node } = await getServerContext(serverId, true);
+        const result = await client!.agentExecWait(node, vmid, [
             '/bin/ls', '-la', '--time-style=long-iso', safePath
         ]);
-
         if (result.exitcode !== 0) {
             throw new Error(`Failed to list directory: ${result.stderr || 'Unknown error'}`);
         }
-
         return parseLsOutput(result.stdout);
     } else {
-        // LXC: Use SSH to Proxmox host + pct exec
+        const { server } = await getServerContext(serverId);
         const ssh = createSSHClient(server);
         try {
             await ssh.connect();
             const output = await ssh.exec(`pct exec ${vmid} -- ls -la --time-style=long-iso "${safePath}"`);
             return parseLsOutput(output);
         } finally {
-            await ssh.disconnect();
+            try { await ssh.disconnect(); } catch { /* ignore */ }
         }
     }
 }
 
 /**
- * Download a file from a VM
- * Returns base64-encoded content
+ * Download a file from a VM (returns base64-encoded content)
  */
 export async function downloadFileFromVM(
     serverId: number,
@@ -82,41 +103,37 @@ export async function downloadFileFromVM(
     const safePath = remotePath.replace(/\.\./g, '');
     const filename = safePath.split('/').pop() || 'download';
 
-    const { server, client, node } = await getServerAndClient(serverId);
-
     if (vmType === 'qemu') {
-        // Guest Agent file-read returns content directly
-        const content = await client.agentFileRead(node, vmid, safePath);
+        const { client, node } = await getServerContext(serverId, true);
+        const content = await client!.agentFileRead(node, vmid, safePath);
         return {
             content: Buffer.from(content).toString('base64'),
             filename,
             size: Buffer.byteLength(content)
         };
     } else {
-        // LXC: Use pct pull via SSH
+        const { server } = await getServerContext(serverId);
         const ssh = createSSHClient(server);
         try {
             await ssh.connect();
-            // Read file via pct exec and base64 encode it
             const output = await ssh.exec(
                 `pct exec ${vmid} -- base64 -w0 "${safePath}"`,
-                60000 // 60s timeout for large files
+                60000
             );
             const content = output.trim();
             return {
                 content,
                 filename,
-                size: Math.ceil(content.length * 3 / 4) // Approximate decoded size
+                size: Math.ceil(content.length * 3 / 4)
             };
         } finally {
-            await ssh.disconnect();
+            try { await ssh.disconnect(); } catch { /* ignore */ }
         }
     }
 }
 
 /**
- * Upload a file to a VM
- * content should be base64-encoded
+ * Upload a file to a VM (content should be base64-encoded)
  */
 export async function uploadFileToVM(
     serverId: number,
@@ -129,27 +146,23 @@ export async function uploadFileToVM(
     const safePath = remotePath.replace(/\.\./g, '');
     const fullPath = safePath.endsWith('/') ? `${safePath}${filename}` : safePath;
 
-    const { server, client, node } = await getServerAndClient(serverId);
-
     try {
         if (vmType === 'qemu') {
-            // Decode base64 and write via Guest Agent
-            const decoded = Buffer.from(content, 'base64').toString();
-            await client.agentFileWrite(node, vmid, fullPath, content, true);
+            const { client, node } = await getServerContext(serverId, true);
+            await client!.agentFileWrite(node, vmid, fullPath, content, true);
             return { success: true, message: `File uploaded to ${fullPath}` };
         } else {
-            // LXC: Write via SSH + pct push
+            const { server } = await getServerContext(serverId);
             const ssh = createSSHClient(server);
             try {
                 await ssh.connect();
-                // Write base64 content and decode inside container
                 await ssh.exec(
                     `echo '${content}' | base64 -d | pct push ${vmid} - "${fullPath}"`,
                     60000
                 );
                 return { success: true, message: `File uploaded to ${fullPath}` };
             } finally {
-                await ssh.disconnect();
+                try { await ssh.disconnect(); } catch { /* ignore */ }
             }
         }
     } catch (err) {
@@ -167,19 +180,20 @@ export async function createRemoteDir(
     path: string
 ): Promise<{ success: boolean; message: string }> {
     const safePath = path.replace(/\.\./g, '');
-    const { server, client, node } = await getServerAndClient(serverId);
 
     try {
         if (vmType === 'qemu') {
-            const result = await client.agentExecWait(node, vmid, ['/bin/mkdir', '-p', safePath]);
+            const { client, node } = await getServerContext(serverId, true);
+            const result = await client!.agentExecWait(node, vmid, ['/bin/mkdir', '-p', safePath]);
             if (result.exitcode !== 0) throw new Error(result.stderr);
         } else {
+            const { server } = await getServerContext(serverId);
             const ssh = createSSHClient(server);
             try {
                 await ssh.connect();
                 await ssh.exec(`pct exec ${vmid} -- mkdir -p "${safePath}"`);
             } finally {
-                await ssh.disconnect();
+                try { await ssh.disconnect(); } catch { /* ignore */ }
             }
         }
         return { success: true, message: `Directory created: ${safePath}` };
@@ -199,25 +213,24 @@ export async function deleteRemoteFile(
 ): Promise<{ success: boolean; message: string }> {
     const safePath = path.replace(/\.\./g, '');
 
-    // Safety: prevent deleting critical paths
     const blockedPaths = ['/', '/bin', '/sbin', '/usr', '/etc', '/var', '/boot', '/lib', '/root'];
     if (blockedPaths.includes(safePath.replace(/\/+$/, ''))) {
         return { success: false, message: 'Cannot delete system-critical directories' };
     }
 
-    const { server, client, node } = await getServerAndClient(serverId);
-
     try {
         if (vmType === 'qemu') {
-            const result = await client.agentExecWait(node, vmid, ['/bin/rm', '-rf', safePath]);
+            const { client, node } = await getServerContext(serverId, true);
+            const result = await client!.agentExecWait(node, vmid, ['/bin/rm', '-rf', safePath]);
             if (result.exitcode !== 0) throw new Error(result.stderr);
         } else {
+            const { server } = await getServerContext(serverId);
             const ssh = createSSHClient(server);
             try {
                 await ssh.connect();
                 await ssh.exec(`pct exec ${vmid} -- rm -rf "${safePath}"`);
             } finally {
-                await ssh.disconnect();
+                try { await ssh.disconnect(); } catch { /* ignore */ }
             }
         }
         return { success: true, message: `Deleted: ${safePath}` };
@@ -232,10 +245,8 @@ function parseLsOutput(output: string): FileEntry[] {
     const entries: FileEntry[] = [];
 
     for (const line of lines) {
-        // Skip total line and empty lines
         if (line.startsWith('total') || !line.trim()) continue;
 
-        // Format: drwxr-xr-x 2 root root 4096 2024-01-15 10:30 dirname
         const match = line.match(
             /^([drwxlsStT\-]+)\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s+(.+)$/
         );
@@ -244,10 +255,8 @@ function parseLsOutput(output: string): FileEntry[] {
 
         const [, permissions, sizeStr, modified, name] = match;
 
-        // Skip . and .. entries
         if (name === '.' || name === '..') continue;
 
-        // Handle symlinks (name -> target)
         const displayName = name.includes(' -> ') ? name.split(' -> ')[0] : name;
 
         entries.push({
@@ -259,7 +268,6 @@ function parseLsOutput(output: string): FileEntry[] {
         });
     }
 
-    // Sort: directories first, then alphabetical
     entries.sort((a, b) => {
         if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
         return a.name.localeCompare(b.name);

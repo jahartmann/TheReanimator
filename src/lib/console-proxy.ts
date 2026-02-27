@@ -70,11 +70,18 @@ export function startConsoleProxy(port: number = 3001): void {
             console.log(`[ConsoleProxy] Connecting to Proxmox: ${session.node}/${session.vmType}/${session.vmid} (${session.consoleType})`);
 
             // Connect to Proxmox WebSocket
+            // Use API token if available, otherwise fall back to auth cookie
+            const wsHeaders: Record<string, string> = {};
+            if (session.token) {
+                wsHeaders['Authorization'] = `PVEAPIToken=${session.token}`;
+            }
+            if (session.ticket) {
+                wsHeaders['Cookie'] = `PVEAuthCookie=${encodeURIComponent(session.ticket)}`;
+            }
+
             const proxmoxWs = new WsWebSocket(proxmoxWsUrl, {
                 rejectUnauthorized: false, // Self-signed certs
-                headers: {
-                    Cookie: `PVEAuthCookie=${encodeURIComponent(session.ticket)}`
-                }
+                headers: wsHeaders
             });
 
             let proxmoxReady = false;
