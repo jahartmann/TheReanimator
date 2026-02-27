@@ -617,12 +617,16 @@ export class ProxmoxClient {
     // VNC Proxy for QEMU VMs
     async getVNCProxy(node: string, vmid: number): Promise<{ ticket: string; port: number; upid: string }> {
         const headers = await this.getHeaders();
-        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/qemu/${vmid}/vncproxy`, {
+        const url = `${this.config.url}/api2/json/nodes/${node}/qemu/${vmid}/vncproxy`;
+        const res = await this.secureFetch(url, {
             method: 'POST',
             headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({ websocket: '1' }).toString()
         });
-        if (!res.ok) throw new Error(`Failed to get VNC proxy: ${res.status}`);
+        if (!res.ok) {
+            const errText = await res.text().catch(() => '');
+            throw new Error(`VNC proxy failed (${res.status}): ${errText.slice(0, 200)}`);
+        }
         const data = await res.json() as { data: { ticket: string; port: number; upid: string } };
         return data.data;
     }
@@ -630,12 +634,16 @@ export class ProxmoxClient {
     // VNC Proxy for LXC containers
     async getLXCVNCProxy(node: string, vmid: number): Promise<{ ticket: string; port: number; upid: string }> {
         const headers = await this.getHeaders();
-        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/lxc/${vmid}/vncproxy`, {
+        const url = `${this.config.url}/api2/json/nodes/${node}/lxc/${vmid}/vncproxy`;
+        const res = await this.secureFetch(url, {
             method: 'POST',
             headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({ websocket: '1' }).toString()
         });
-        if (!res.ok) throw new Error(`Failed to get LXC VNC proxy: ${res.status}`);
+        if (!res.ok) {
+            const errText = await res.text().catch(() => '');
+            throw new Error(`LXC VNC proxy failed (${res.status}): ${errText.slice(0, 200)}`);
+        }
         const data = await res.json() as { data: { ticket: string; port: number; upid: string } };
         return data.data;
     }

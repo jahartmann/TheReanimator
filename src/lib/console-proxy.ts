@@ -180,14 +180,19 @@ function handleVNC(clientWs: WsWebSocket, session: VNCSession) {
 
     const wsUrl = `${wsProtocol}//${base.host}${path}?port=${session.port}&vncticket=${encodeURIComponent(session.vncTicket)}`;
 
-    console.log(`[ConsoleProxy/VNC] Connecting: ${session.node}/${session.vmType}/${session.vmid}`);
+    console.log(`[ConsoleProxy/VNC] Connecting: ${session.node}/${session.vmType}/${session.vmid}, url=${wsUrl.replace(/vncticket=[^&]+/, 'vncticket=...')}`);
 
     const headers: Record<string, string> = {};
     if (session.authToken) {
         headers['Authorization'] = `PVEAPIToken=${session.authToken}`;
+        console.log('[ConsoleProxy/VNC] Using API token auth');
     }
     if (session.authTicket) {
         headers['Cookie'] = `PVEAuthCookie=${encodeURIComponent(session.authTicket)}`;
+        console.log('[ConsoleProxy/VNC] Using ticket/cookie auth');
+    }
+    if (!session.authToken && !session.authTicket) {
+        console.warn('[ConsoleProxy/VNC] WARNING: No auth credentials for WebSocket connection!');
     }
 
     const proxmoxWs = new WsWebSocket(wsUrl, {

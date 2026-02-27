@@ -43,12 +43,25 @@ async function getServerContext(serverId: number, needsApi: boolean = false) {
 
     let client: ProxmoxClient | null = null;
     if (needsApi) {
-        const token = await ensureApiToken(server);
-        client = new ProxmoxClient({
-            url: server.url,
-            token,
-            type: server.type || 'pve',
-        });
+        const sshKey = server.ssh_key;
+        const isPrivateKey = sshKey?.trim().startsWith('-----BEGIN');
+
+        if (server.auth_token) {
+            // Use existing API token
+            client = new ProxmoxClient({ url: server.url, token: server.auth_token, type: server.type || 'pve' });
+        } else if (!isPrivateKey && sshKey) {
+            // Use SSH password for Proxmox API auth
+            client = new ProxmoxClient({
+                url: server.url,
+                username: `${server.ssh_user || 'root'}@pam`,
+                password: sshKey,
+                type: server.type || 'pve',
+            });
+        } else {
+            // Fallback: provision API token via SSH
+            const token = await ensureApiToken(server);
+            client = new ProxmoxClient({ url: server.url, token, type: server.type || 'pve' });
+        }
     }
 
     return { server, client, node };

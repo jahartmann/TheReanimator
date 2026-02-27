@@ -112,6 +112,49 @@ async function createTerminalSession(
     return { sessionToken, wsPort: 3001 };
 }
 
+// ── Proxmox Client with Auth Fallback ────────────────────────────────
+
+/**
+ * Create a ProxmoxClient for the given server, trying multiple auth methods:
+ * 1. Existing API token (stored in DB)
+ * 2. SSH password used as Proxmox API password (root@pam)
+ * 3. Provision new API token via SSH (pveum)
+ */
+async function getProxmoxClientWithAuth(server: any): Promise<ProxmoxClient> {
+    const sshKey = server.ssh_key;
+    const isPrivateKey = sshKey?.trim().startsWith('-----BEGIN');
+
+    // Method 1: Existing API token
+    if (server.auth_token) {
+        console.log(`[Console] Using existing API token for server ${server.id}`);
+        return new ProxmoxClient({
+            url: server.url,
+            token: server.auth_token,
+            type: server.type || 'pve',
+        });
+    }
+
+    // Method 2: SSH password = Proxmox API password (most common setup)
+    if (!isPrivateKey && sshKey) {
+        console.log(`[Console] Using password auth for Proxmox API on server ${server.id}`);
+        return new ProxmoxClient({
+            url: server.url,
+            username: `${server.ssh_user || 'root'}@pam`,
+            password: sshKey,
+            type: server.type || 'pve',
+        });
+    }
+
+    // Method 3: Provision API token via SSH (key-based auth, no password available)
+    console.log(`[Console] Provisioning API token for server ${server.id} (key-based SSH)`);
+    const token = await ensureApiToken(server);
+    return new ProxmoxClient({
+        url: server.url,
+        token,
+        type: server.type || 'pve',
+    });
+}
+
 // ── VNC: Proxmox API ─────────────────────────────────────────────────
 
 async function createVncSession(
@@ -119,29 +162,44 @@ async function createVncSession(
     vmid: number,
     vmType: 'qemu' | 'lxc'
 ): Promise<{ sessionToken: string; wsPort: number }> {
-    const token = await ensureApiToken(server);
-    const client = new ProxmoxClient({
-        url: server.url,
-        token,
-        type: server.type || 'pve',
-    });
+    // Step 1: Authenticate with Proxmox API
+    let client: ProxmoxClient;
+    try {
+        client = await getProxmoxClientWithAuth(server);
+    } catch (e) {
+        console.error(`[Console/VNC] Auth failed for server ${server.id}:`, e);
+        throw new Error(`Proxmox authentication failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
 
-    // Find VM node via SSH
+    // Step 2: Find VM node via SSH
     const ssh = createSSHClient(server);
     let node: string;
     try {
         await ssh.connect();
         node = await determineNodeName(ssh);
+    } catch (e) {
+        console.error(`[Console/VNC] SSH/node detection failed for server ${server.id}:`, e);
+        throw new Error(`SSH connection failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
         try { await ssh.disconnect(); } catch { /* ignore */ }
     }
 
-    // Request VNC proxy from Proxmox (returns ticket + port)
-    const proxyResult = vmType === 'lxc'
-        ? await client.getLXCVNCProxy(node, vmid)
-        : await client.getVNCProxy(node, vmid);
+    // Step 3: Request VNC proxy from Proxmox (returns ticket + port)
+    let proxyResult: { ticket: string; port: number; upid: string };
+    try {
+        console.log(`[Console/VNC] Requesting VNC proxy for ${vmType}/${vmid} on node ${node}`);
+        proxyResult = vmType === 'lxc'
+            ? await client.getLXCVNCProxy(node, vmid)
+            : await client.getVNCProxy(node, vmid);
+        console.log(`[Console/VNC] Proxy obtained: port=${proxyResult.port}, ticket=${proxyResult.ticket?.slice(0, 20)}...`);
+    } catch (e) {
+        console.error(`[Console/VNC] VNC proxy request failed for ${vmType}/${vmid} on ${node}:`, e);
+        throw new Error(`VNC proxy failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
 
+    // Step 4: Register session for WebSocket proxy
     const connInfo = client.getConnectionInfo();
+    console.log(`[Console/VNC] Auth info: hasToken=${!!connInfo.token}, hasTicket=${!!connInfo.ticket}`);
 
     const sessionToken = registerConsoleSession({
         mode: 'vnc' as const,
@@ -151,7 +209,7 @@ async function createVncSession(
         vmType,
         vncTicket: proxyResult.ticket,
         port: proxyResult.port,
-        authToken: connInfo.token,
+        authToken: connInfo.token || undefined,
         authTicket: connInfo.ticket || undefined,
     });
 
@@ -164,8 +222,7 @@ export async function getSpiceFile(serverId: number, vmid: number): Promise<stri
     const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId) as any;
     if (!server) throw new Error('Server not found');
 
-    const token = await ensureApiToken(server);
-    const client = new ProxmoxClient({ url: server.url, token, type: server.type || 'pve' });
+    const client = await getProxmoxClientWithAuth(server);
 
     const ssh = createSSHClient(server);
     let node: string;

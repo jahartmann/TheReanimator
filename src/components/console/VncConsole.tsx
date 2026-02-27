@@ -13,26 +13,57 @@ interface VncConsoleProps {
     onCtrlAltDelRef?: React.MutableRefObject<(() => void) | null>;
 }
 
+/** Cached RFB class so we only load once */
+let rfbClassCache: any = null;
+
 /**
- * Load RFB class from @novnc/novnc.
- * The package uses CJS exports which can break in ESM bundlers.
- * We shim `exports` on window to prevent the "exports is not defined" error.
+ * Load RFB class from @novnc/novnc with multiple fallback strategies.
+ * noVNC uses CJS which can break in ESM/Next.js bundlers.
  */
 async function loadRFB(): Promise<any> {
-    // Shim CJS globals if missing (noVNC expects them)
-    if (typeof window !== 'undefined') {
-        const w = window as any;
-        if (typeof w.exports === 'undefined') w.exports = {};
-        if (typeof w.module === 'undefined') w.module = { exports: w.exports };
+    if (rfbClassCache) return rfbClassCache;
+
+    // Strategy 1: Dynamic import (works with transpilePackages + javascript/auto webpack rule)
+    try {
+        const mod = await import(/* webpackChunkName: "novnc" */ '@novnc/novnc/lib/rfb.js');
+        rfbClassCache = mod.default || mod;
+        if (typeof rfbClassCache === 'function') return rfbClassCache;
+    } catch (e) {
+        console.warn('[VNC] Dynamic import failed, trying CJS shim:', e);
     }
 
-    try {
-        const mod = await import('@novnc/novnc/lib/rfb.js');
-        return mod.default || mod;
-    } catch (e) {
-        console.error('[VNC] Failed to load noVNC:', e);
-        throw new Error('Failed to load VNC library. Check browser console for details.');
+    // Strategy 2: Shim CJS globals and retry
+    if (typeof window !== 'undefined') {
+        const w = window as any;
+        const origExports = w.exports;
+        const origModule = w.module;
+        try {
+            w.exports = {};
+            w.module = { exports: w.exports };
+            const mod = await import('@novnc/novnc/lib/rfb.js');
+            rfbClassCache = mod.default || mod || w.module.exports;
+            if (typeof rfbClassCache === 'function') return rfbClassCache;
+        } catch (e) {
+            console.warn('[VNC] CJS shim import failed:', e);
+        } finally {
+            // Restore originals to avoid polluting global scope
+            if (origExports === undefined) delete w.exports;
+            else w.exports = origExports;
+            if (origModule === undefined) delete w.module;
+            else w.module = origModule;
+        }
     }
+
+    // Strategy 3: Try core/rfb path (source, not lib)
+    try {
+        const mod = await import('@novnc/novnc/core/rfb.js');
+        rfbClassCache = mod.default || mod;
+        if (typeof rfbClassCache === 'function') return rfbClassCache;
+    } catch (e) {
+        console.warn('[VNC] Core rfb import failed:', e);
+    }
+
+    throw new Error('Failed to load VNC library (noVNC). Check browser console for details.');
 }
 
 export function VncConsole({ serverId, vmid, vmType, onConnect, onDisconnect, onCtrlAltDelRef }: VncConsoleProps) {
@@ -47,15 +78,15 @@ export function VncConsole({ serverId, vmid, vmType, onConnect, onDisconnect, on
         setError(null);
 
         try {
-            // Get VNC session token from server
+            // Step 1: Get VNC session token from server action
             const { sessionToken, wsPort } = await getConsoleAccess(serverId, vmid, vmType, 'vnc');
 
-            // Build WebSocket URL to our proxy
+            // Step 2: Build WebSocket URL to our proxy
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsHost = window.location.hostname;
             const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/console?token=${sessionToken}`;
 
-            // Load noVNC RFB class
+            // Step 3: Load noVNC RFB class
             const RFB = await loadRFB();
 
             // Clean up previous connection
@@ -67,7 +98,7 @@ export function VncConsole({ serverId, vmid, vmType, onConnect, onDisconnect, on
             // Clear container
             containerRef.current.innerHTML = '';
 
-            // Create noVNC connection
+            // Step 4: Create noVNC connection
             const rfb = new RFB(containerRef.current, wsUrl, {
                 wsProtocols: ['binary'],
             });
@@ -102,6 +133,7 @@ export function VncConsole({ serverId, vmid, vmType, onConnect, onDisconnect, on
             }
 
         } catch (err) {
+            console.error('[VNC] Connection error:', err);
             setStatus('error');
             setError(err instanceof Error ? err.message : 'Failed to connect');
             onDisconnect?.();
