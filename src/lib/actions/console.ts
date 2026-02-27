@@ -152,7 +152,7 @@ async function createVncSession(
         vncTicket: proxyResult.ticket,
         port: proxyResult.port,
         authToken: connInfo.token,
-        authTicket: connInfo.ticket,
+        authTicket: connInfo.ticket || undefined,
     });
 
     return { sessionToken, wsPort: 3001 };
