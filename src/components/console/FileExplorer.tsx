@@ -22,9 +22,10 @@ interface FileExplorerProps {
     serverId: number;
     vmid: number;
     vmType: 'qemu' | 'lxc';
+    compact?: boolean;
 }
 
-export function FileExplorer({ serverId, vmid, vmType }: FileExplorerProps) {
+export function FileExplorer({ serverId, vmid, vmType, compact = false }: FileExplorerProps) {
     const t = useTranslations('console');
     const [currentPath, setCurrentPath] = useState('/');
     const [files, setFiles] = useState<FileEntry[]>([]);
@@ -35,6 +36,7 @@ export function FileExplorer({ serverId, vmid, vmType }: FileExplorerProps) {
     const [newDirDialog, setNewDirDialog] = useState(false);
     const [newDirName, setNewDirName] = useState('');
     const [deleteDialog, setDeleteDialog] = useState<FileEntry | null>(null);
+    const [dragOver, setDragOver] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const loadFiles = useCallback(async (path: string) => {
@@ -82,7 +84,6 @@ export function FileExplorer({ serverId, vmid, vmType }: FileExplorerProps) {
             toast.info(`Downloading ${entry.name}...`);
             const result = await downloadFileFromVM(serverId, vmid, vmType, fullPath);
 
-            // Convert base64 to blob and download
             const byteChars = atob(result.content);
             const byteArray = new Uint8Array(byteChars.length);
             for (let i = 0; i < byteChars.length; i++) {
@@ -102,17 +103,16 @@ export function FileExplorer({ serverId, vmid, vmType }: FileExplorerProps) {
         }
     };
 
-    const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const fileList = e.target.files;
-        if (!fileList || fileList.length === 0) return;
+    const uploadFiles = async (fileList: FileList | File[]) => {
+        const files = Array.from(fileList);
+        if (files.length === 0) return;
 
         setUploading(true);
 
-        for (const file of Array.from(fileList)) {
+        for (const file of files) {
             try {
                 setUploadProgress(`Uploading ${file.name}...`);
 
-                // Read file as base64
                 const content = await new Promise<string>((resolve, reject) => {
                     const reader = new FileReader();
                     reader.onload = () => {
@@ -144,9 +144,38 @@ export function FileExplorer({ serverId, vmid, vmType }: FileExplorerProps) {
         setUploadProgress(null);
         loadFiles(currentPath);
 
-        // Reset input
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
+
+    const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files) uploadFiles(e.target.files);
+    };
+
+    // ── Drag & Drop ──────────────────────────────────────────────────
+
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDragOver(true);
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDragOver(false);
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDragOver(false);
+
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            uploadFiles(e.dataTransfer.files);
+        }
+    };
+
+    // ── Helpers ──────────────────────────────────────────────────────
 
     const handleCreateDir = async () => {
         if (!newDirName.trim()) return;
@@ -183,17 +212,34 @@ export function FileExplorer({ serverId, vmid, vmType }: FileExplorerProps) {
     };
 
     return (
-        <div className="flex flex-col h-full">
+        <div
+            className={`flex flex-col h-full relative ${dragOver ? 'ring-2 ring-primary ring-inset' : ''}`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+        >
+            {/* Drag overlay */}
+            {dragOver && (
+                <div className="absolute inset-0 bg-primary/10 z-20 flex items-center justify-center pointer-events-none">
+                    <div className="bg-background border-2 border-dashed border-primary rounded-lg p-6 flex flex-col items-center gap-2">
+                        <Upload className="h-8 w-8 text-primary" />
+                        <span className="text-sm font-medium text-primary">
+                            Drop files to upload to {currentPath}
+                        </span>
+                    </div>
+                </div>
+            )}
+
             {/* Path bar */}
-            <div className="flex items-center gap-2 p-3 border-b bg-muted/30">
-                <Button variant="ghost" size="icon" onClick={goUp} disabled={currentPath === '/'}>
-                    <ArrowUp className="h-4 w-4" />
+            <div className="flex items-center gap-2 p-2 border-b bg-muted/30">
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={goUp} disabled={currentPath === '/'}>
+                    <ArrowUp className="h-3.5 w-3.5" />
                 </Button>
-                <div className="flex-1 px-3 py-1.5 bg-background rounded border text-sm font-mono truncate">
+                <div className="flex-1 px-2 py-1 bg-background rounded border text-xs font-mono truncate">
                     {currentPath}
                 </div>
-                <Button variant="ghost" size="icon" onClick={() => loadFiles(currentPath)} disabled={loading}>
-                    <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => loadFiles(currentPath)} disabled={loading}>
+                    <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
                 </Button>
             </div>
 
@@ -213,7 +259,7 @@ export function FileExplorer({ serverId, vmid, vmType }: FileExplorerProps) {
                         {files.map((entry) => (
                             <div
                                 key={entry.name}
-                                className={`flex items-center gap-3 px-4 py-2 hover:bg-muted/50 cursor-pointer transition-colors ${
+                                className={`flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 cursor-pointer transition-colors ${
                                     selectedFile?.name === entry.name ? 'bg-muted' : ''
                                 }`}
                                 onClick={() => setSelectedFile(entry)}
@@ -225,15 +271,24 @@ export function FileExplorer({ serverId, vmid, vmType }: FileExplorerProps) {
                                     <File className="h-4 w-4 text-muted-foreground shrink-0" />
                                 )}
                                 <span className="flex-1 text-sm truncate">{entry.name}</span>
-                                <span className="text-xs text-muted-foreground w-16 text-right">
-                                    {entry.isDir ? '' : formatSize(entry.size)}
-                                </span>
-                                <span className="text-xs text-muted-foreground w-36 text-right hidden sm:block">
-                                    {entry.modified}
-                                </span>
-                                <span className="text-xs font-mono text-muted-foreground w-24 hidden md:block">
-                                    {entry.permissions}
-                                </span>
+                                {!compact && (
+                                    <>
+                                        <span className="text-xs text-muted-foreground w-16 text-right">
+                                            {entry.isDir ? '' : formatSize(entry.size)}
+                                        </span>
+                                        <span className="text-xs text-muted-foreground w-36 text-right hidden lg:block">
+                                            {entry.modified}
+                                        </span>
+                                        <span className="text-xs font-mono text-muted-foreground w-24 hidden xl:block">
+                                            {entry.permissions}
+                                        </span>
+                                    </>
+                                )}
+                                {compact && !entry.isDir && (
+                                    <span className="text-xs text-muted-foreground">
+                                        {formatSize(entry.size)}
+                                    </span>
+                                )}
                             </div>
                         ))}
                     </div>
@@ -242,57 +297,51 @@ export function FileExplorer({ serverId, vmid, vmType }: FileExplorerProps) {
 
             {/* Upload progress */}
             {uploadProgress && (
-                <div className="px-4 py-2 border-t bg-blue-500/10 text-blue-600 text-sm flex items-center gap-2">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <div className="px-3 py-1.5 border-t bg-blue-500/10 text-blue-600 text-xs flex items-center gap-2">
+                    <Loader2 className="h-3 w-3 animate-spin" />
                     {uploadProgress}
                 </div>
             )}
 
             {/* Action bar */}
-            <div className="flex items-center gap-2 p-3 border-t bg-muted/30">
+            <div className="flex items-center gap-1.5 p-2 border-t bg-muted/30">
                 <input
                     ref={fileInputRef}
                     type="file"
                     multiple
                     className="hidden"
-                    onChange={handleUpload}
+                    onChange={handleFileInput}
                 />
                 <Button
-                    variant="outline" size="sm"
+                    variant="outline" size="sm" className="h-7 text-xs gap-1"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploading}
-                    className="gap-1.5"
                 >
-                    <Upload className="h-3.5 w-3.5" />
-                    {t('uploadFile')}
+                    <Upload className="h-3 w-3" />
+                    {compact ? '' : t('uploadFile')}
                 </Button>
                 <Button
-                    variant="outline" size="sm"
+                    variant="outline" size="sm" className="h-7 text-xs gap-1"
                     onClick={() => selectedFile && handleDownload(selectedFile)}
                     disabled={!selectedFile || selectedFile.isDir}
-                    className="gap-1.5"
                 >
-                    <Download className="h-3.5 w-3.5" />
-                    {t('downloadFile')}
+                    <Download className="h-3 w-3" />
+                    {compact ? '' : t('downloadFile')}
                 </Button>
                 <Button
-                    variant="outline" size="sm"
+                    variant="outline" size="sm" className="h-7 text-xs gap-1"
                     onClick={() => setNewDirDialog(true)}
-                    className="gap-1.5"
                 >
-                    <FolderPlus className="h-3.5 w-3.5" />
-                    {t('newFolder')}
+                    <FolderPlus className="h-3 w-3" />
                 </Button>
                 <Button
-                    variant="outline" size="sm"
+                    variant="outline" size="sm" className="h-7 text-xs gap-1 text-destructive hover:text-destructive"
                     onClick={() => selectedFile && setDeleteDialog(selectedFile)}
                     disabled={!selectedFile}
-                    className="gap-1.5 text-destructive hover:text-destructive"
                 >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    {t('deleteItem')}
+                    <Trash2 className="h-3 w-3" />
                 </Button>
-                {selectedFile && (
+                {selectedFile && !compact && (
                     <Badge variant="secondary" className="ml-auto text-xs">
                         {selectedFile.name}
                     </Badge>

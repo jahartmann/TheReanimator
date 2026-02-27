@@ -17,6 +17,7 @@ export function TerminalConsole({ serverId, vmid, vmType, onConnect, onDisconnec
     const termRef = useRef<any>(null);
     const wsRef = useRef<WebSocket | null>(null);
     const fitAddonRef = useRef<any>(null);
+    const cleanupRef = useRef<(() => void) | null>(null);
     const [status, setStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting');
     const [error, setError] = useState<string | null>(null);
 
@@ -26,26 +27,27 @@ export function TerminalConsole({ serverId, vmid, vmType, onConnect, onDisconnec
         setError(null);
 
         try {
+            // Get SSH session token from server
             const { sessionToken, wsPort } = await getConsoleAccess(serverId, vmid, vmType, 'terminal');
 
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsHost = window.location.hostname;
             const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/console?token=${sessionToken}`;
 
-            // Dynamic imports
-            const { Terminal } = await import('@xterm/xterm');
-            const { FitAddon } = await import('@xterm/addon-fit');
-            const { WebLinksAddon } = await import('@xterm/addon-web-links');
+            // Dynamic imports (avoid SSR issues)
+            const [
+                { Terminal },
+                { FitAddon },
+                { WebLinksAddon }
+            ] = await Promise.all([
+                import('@xterm/xterm'),
+                import('@xterm/addon-fit'),
+                import('@xterm/addon-web-links'),
+            ]);
 
-            // Load xterm CSS
-            if (!document.querySelector('link[href*="xterm.css"]')) {
-                const link = document.createElement('link');
-                link.rel = 'stylesheet';
-                link.href = '/node_modules/@xterm/xterm/css/xterm.css';
-                document.head.appendChild(link);
-            }
+            // xterm CSS is loaded globally via globals.css (@import "@xterm/xterm/css/xterm.css")
 
-            // Clean up previous
+            // Clean up previous instances
             if (termRef.current) {
                 termRef.current.dispose();
                 termRef.current = null;
@@ -53,6 +55,10 @@ export function TerminalConsole({ serverId, vmid, vmType, onConnect, onDisconnec
             if (wsRef.current) {
                 wsRef.current.close();
                 wsRef.current = null;
+            }
+            if (cleanupRef.current) {
+                cleanupRef.current();
+                cleanupRef.current = null;
             }
             containerRef.current.innerHTML = '';
 
@@ -75,7 +81,7 @@ export function TerminalConsole({ serverId, vmid, vmType, onConnect, onDisconnec
                     cyan: '#06b6d4',
                     white: '#e4e4e7',
                 },
-                allowProposedApi: true
+                allowProposedApi: true,
             });
 
             const fitAddon = new FitAddon();
@@ -87,25 +93,27 @@ export function TerminalConsole({ serverId, vmid, vmType, onConnect, onDisconnec
             fitAddon.fit();
             fitAddonRef.current = fitAddon;
 
-            // WebSocket connection
-            const ws = new WebSocket(wsUrl, ['binary']);
+            // WebSocket connection (no subprotocol — raw SSH data)
+            const ws = new WebSocket(wsUrl);
             ws.binaryType = 'arraybuffer';
 
             ws.onopen = () => {
                 setStatus('connected');
                 onConnect?.();
+
                 // Send initial resize
                 const dims = fitAddon.proposeDimensions();
                 if (dims) {
-                    ws.send(`1:${dims.cols}:${dims.rows}:`);
+                    ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
                 }
             };
 
             ws.onmessage = (event) => {
-                if (typeof event.data === 'string') {
-                    term.write(event.data);
-                } else {
+                // SSH output arrives as binary (ArrayBuffer)
+                if (event.data instanceof ArrayBuffer) {
                     term.write(new Uint8Array(event.data));
+                } else {
+                    term.write(event.data);
                 }
             };
 
@@ -121,30 +129,31 @@ export function TerminalConsole({ serverId, vmid, vmType, onConnect, onDisconnec
                 onDisconnect?.();
             };
 
-            // Terminal input -> WebSocket
-            // Proxmox termproxy expects "0:LENGTH:DATA" format
+            // Terminal input → SSH (send as binary ArrayBuffer)
+            const encoder = new TextEncoder();
             term.onData((data: string) => {
                 if (ws.readyState === WebSocket.OPEN) {
-                    ws.send(`0:${data.length}:${data}`);
+                    ws.send(encoder.encode(data));
                 }
             });
 
-            // Handle resize
+            // Terminal resize → SSH (send as JSON text)
             term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
                 if (ws.readyState === WebSocket.OPEN) {
-                    ws.send(`1:${cols}:${rows}:`);
+                    ws.send(JSON.stringify({ type: 'resize', cols, rows }));
                 }
             });
 
-            // Window resize -> fit terminal
-            const handleResize = () => fitAddon.fit();
+            // Window resize → fit terminal
+            const handleResize = () => {
+                try { fitAddon.fit(); } catch { /* ignore */ }
+            };
             window.addEventListener('resize', handleResize);
 
+            // Store refs
             termRef.current = term;
             wsRef.current = ws;
-
-            // Store cleanup for resize listener
-            (containerRef.current as any).__resizeCleanup = () => {
+            cleanupRef.current = () => {
                 window.removeEventListener('resize', handleResize);
             };
 
@@ -158,11 +167,9 @@ export function TerminalConsole({ serverId, vmid, vmType, onConnect, onDisconnec
     useEffect(() => {
         connect();
         return () => {
-            if (termRef.current) termRef.current.dispose();
-            if (wsRef.current) wsRef.current.close();
-            if (containerRef.current && (containerRef.current as any).__resizeCleanup) {
-                (containerRef.current as any).__resizeCleanup();
-            }
+            if (termRef.current) { termRef.current.dispose(); termRef.current = null; }
+            if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
+            if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
         };
     }, [connect]);
 

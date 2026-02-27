@@ -6,25 +6,28 @@ import { registerConsoleSession } from '@/lib/console-proxy';
 import { createSSHClient } from '@/lib/ssh';
 import { determineNodeName } from './vm';
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// ── API Token Provisioning ──────────────────────────────────────────
 
 /**
  * Auto-provision a Proxmox API token via SSH if none is stored.
- * This allows the console proxy to authenticate against the Proxmox WebSocket.
+ * Used by VNC (needs Proxmox API) and file-transfer (QEMU Guest Agent).
  */
 export async function ensureApiToken(server: any): Promise<string> {
     if (server.auth_token) return server.auth_token;
 
-    console.log(`[Console] No API token for server ${server.id} (${server.name}), provisioning via SSH...`);
+    console.log(`[Console] Provisioning API token for server ${server.id} (${server.name})...`);
     const ssh = createSSHClient(server);
     try {
         await ssh.connect();
 
-        // Remove existing reanimator token (secret only shown on creation)
+        // Remove existing token (secret only shown on creation)
         await ssh.exec('pveum user token remove root@pam reanimator 2>/dev/null || true');
 
         // Create new token with full privileges
-        const result = await ssh.exec('pveum user token add root@pam reanimator --privsep=0 --output-format json 2>/dev/null');
+        const result = await ssh.exec(
+            'pveum user token add root@pam reanimator --privsep=0 --output-format json 2>/dev/null'
+        );
+
         let tokenData: any;
         try {
             tokenData = JSON.parse(result);
@@ -32,7 +35,6 @@ export async function ensureApiToken(server: any): Promise<string> {
             throw new Error(`Failed to parse pveum output: ${result.slice(0, 200)}`);
         }
 
-        // Format: user@realm!tokenid=secret
         const fullToken = `${tokenData['full-tokenid']}=${tokenData.value}`;
         console.log(`[Console] API token created for server ${server.id}`);
 
@@ -43,33 +45,147 @@ export async function ensureApiToken(server: any): Promise<string> {
         return fullToken;
     } catch (e) {
         console.error(`[Console] Failed to provision API token for server ${server.id}:`, e);
-        throw new Error(`Could not provision Proxmox API token. Console requires API access. Error: ${e instanceof Error ? e.message : String(e)}`);
+        throw new Error(
+            `Could not provision Proxmox API token: ${e instanceof Error ? e.message : String(e)}`
+        );
     } finally {
         try { await ssh.disconnect(); } catch { /* ignore */ }
     }
 }
 
-async function getServerAndClient(serverId: number) {
+// ── Console Access (unified entry point) ─────────────────────────────
+
+/**
+ * Get console access for VNC or Terminal.
+ * - Terminal: direct SSH to PVE host (pct enter / qm terminal)
+ * - VNC: Proxmox VNC proxy via API
+ */
+export async function getConsoleAccess(
+    serverId: number,
+    vmid: number,
+    vmType: 'qemu' | 'lxc',
+    mode: 'vnc' | 'terminal'
+): Promise<{ sessionToken: string; wsPort: number }> {
     const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId) as any;
     if (!server) throw new Error('Server not found');
 
-    // Ensure we have an API token for console access
-    const token = await ensureApiToken(server);
+    if (mode === 'terminal') {
+        return createTerminalSession(server, vmid, vmType);
+    } else {
+        return createVncSession(server, vmid, vmType);
+    }
+}
 
+// ── Terminal: Direct SSH ─────────────────────────────────────────────
+
+async function createTerminalSession(
+    server: any,
+    vmid: number,
+    vmType: 'qemu' | 'lxc'
+): Promise<{ sessionToken: string; wsPort: number }> {
+    // LXC: enter container shell directly
+    // QEMU: serial console (requires serial device configured in VM)
+    const shellCommand = vmType === 'lxc'
+        ? `pct enter ${vmid}`
+        : `qm terminal ${vmid} -iface serial0`;
+
+    // Parse SSH credentials
+    const sshKey = server.ssh_key;
+    const isPrivateKey = sshKey?.trim().startsWith('-----BEGIN');
+
+    let sshHost = server.ssh_host;
+    if (!sshHost && server.url) {
+        try { sshHost = new URL(server.url).hostname; } catch { /* ignore */ }
+    }
+    if (!sshHost) throw new Error('No SSH host configured for this server');
+
+    const sessionToken = registerConsoleSession({
+        mode: 'ssh' as const,
+        sshHost,
+        sshPort: server.ssh_port || 22,
+        sshUser: server.ssh_user || 'root',
+        sshPassword: !isPrivateKey ? sshKey : undefined,
+        sshPrivateKey: isPrivateKey ? sshKey : undefined,
+        shellCommand,
+    });
+
+    return { sessionToken, wsPort: 3001 };
+}
+
+// ── VNC: Proxmox API ─────────────────────────────────────────────────
+
+async function createVncSession(
+    server: any,
+    vmid: number,
+    vmType: 'qemu' | 'lxc'
+): Promise<{ sessionToken: string; wsPort: number }> {
+    const token = await ensureApiToken(server);
     const client = new ProxmoxClient({
         url: server.url,
         token,
-        type: server.type || 'pve'
+        type: server.type || 'pve',
     });
 
-    return { server, client };
+    // Find VM node via SSH
+    const ssh = createSSHClient(server);
+    let node: string;
+    try {
+        await ssh.connect();
+        node = await determineNodeName(ssh);
+    } finally {
+        try { await ssh.disconnect(); } catch { /* ignore */ }
+    }
+
+    // Request VNC proxy from Proxmox (returns ticket + port)
+    const proxyResult = vmType === 'lxc'
+        ? await client.getLXCVNCProxy(node, vmid)
+        : await client.getVNCProxy(node, vmid);
+
+    const connInfo = client.getConnectionInfo();
+
+    const sessionToken = registerConsoleSession({
+        mode: 'vnc' as const,
+        proxmoxUrl: server.url,
+        node,
+        vmid,
+        vmType,
+        vncTicket: proxyResult.ticket,
+        port: proxyResult.port,
+        authToken: connInfo.token,
+        authTicket: connInfo.ticket,
+    });
+
+    return { sessionToken, wsPort: 3001 };
 }
 
-// ── SSH-based VM fetching (reliable, no Proxmox API auth needed) ─────
+// ── SPICE File ───────────────────────────────────────────────────────
 
-/**
- * Fetch all VMs/CTs from a single PVE server via SSH.
- */
+export async function getSpiceFile(serverId: number, vmid: number): Promise<string> {
+    const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId) as any;
+    if (!server) throw new Error('Server not found');
+
+    const token = await ensureApiToken(server);
+    const client = new ProxmoxClient({ url: server.url, token, type: server.type || 'pve' });
+
+    const ssh = createSSHClient(server);
+    let node: string;
+    try {
+        await ssh.connect();
+        node = await determineNodeName(ssh);
+    } finally {
+        try { await ssh.disconnect(); } catch { /* ignore */ }
+    }
+
+    const spiceConfig = await client.getSpiceProxy(node, vmid);
+    const lines = ['[virt-viewer]'];
+    for (const [key, value] of Object.entries(spiceConfig)) {
+        lines.push(`${key}=${value}`);
+    }
+    return lines.join('\n');
+}
+
+// ── SSH-based VM Listing ─────────────────────────────────────────────
+
 async function fetchVMsViaSSH(server: any): Promise<{
     vmid: number;
     name: string;
@@ -104,7 +220,7 @@ async function fetchVMsViaSSH(server: any): Promise<{
             // Ignore, try fallback
         }
 
-        // 2. Fallback: cluster resources (filter by THIS node to avoid duplicates)
+        // 2. Fallback: cluster resources (filter by THIS node)
         if (vms.length === 0) {
             try {
                 const json = await ssh.exec('pvesh get /cluster/resources --output-format json 2>/dev/null');
@@ -135,83 +251,6 @@ async function fetchVMsViaSSH(server: any): Promise<{
 }
 
 /**
- * Find the node and type for a given VM/CT via SSH.
- */
-async function findVMOnServer(
-    server: any,
-    vmid: number
-): Promise<{ node: string; vmType: 'qemu' | 'lxc' }> {
-    const vms = await fetchVMsViaSSH(server);
-    const found = vms.find(v => v.vmid === vmid);
-    if (found) {
-        return { node: found.node, vmType: found.type };
-    }
-    throw new Error(`VM/CT ${vmid} not found on server ${server.name}`);
-}
-
-// ── Console Access ───────────────────────────────────────────────────
-
-/**
- * Get console access token for VNC or Terminal.
- * Returns a one-time session token for the WebSocket proxy.
- */
-export async function getConsoleAccess(
-    serverId: number,
-    vmid: number,
-    vmType: 'qemu' | 'lxc',
-    mode: 'vnc' | 'terminal'
-): Promise<{ sessionToken: string; wsPort: number }> {
-    const { server, client } = await getServerAndClient(serverId);
-
-    // Find VM node via SSH (reliable)
-    const { node } = await findVMOnServer(server, vmid);
-
-    let proxyResult: { ticket: string; port: number };
-
-    if (mode === 'vnc') {
-        proxyResult = vmType === 'lxc'
-            ? await client.getLXCVNCProxy(node, vmid)
-            : await client.getVNCProxy(node, vmid);
-    } else {
-        proxyResult = await client.getTermProxy(node, vmid, vmType);
-    }
-
-    const connInfo = client.getConnectionInfo();
-
-    const sessionToken = registerConsoleSession({
-        proxmoxUrl: server.url,
-        node,
-        vmid,
-        vmType,
-        consoleType: mode,
-        ticket: connInfo.ticket || '',
-        vncTicket: proxyResult.ticket,
-        port: proxyResult.port,
-        token: connInfo.token
-    });
-
-    return { sessionToken, wsPort: 3001 };
-}
-
-/**
- * Generate SPICE .vv file content for native client.
- */
-export async function getSpiceFile(serverId: number, vmid: number): Promise<string> {
-    const { server, client } = await getServerAndClient(serverId);
-    const { node } = await findVMOnServer(server, vmid);
-    const spiceConfig = await client.getSpiceProxy(node, vmid);
-
-    const lines = ['[virt-viewer]'];
-    for (const [key, value] of Object.entries(spiceConfig)) {
-        lines.push(`${key}=${value}`);
-    }
-
-    return lines.join('\n');
-}
-
-// ── VM Listing ───────────────────────────────────────────────────────
-
-/**
  * Get all VMs and CTs across all PVE servers via SSH.
  * Deduplicates VMs that appear on multiple cluster nodes.
  */
@@ -234,7 +273,7 @@ export async function getAllVMsForConsole(): Promise<{
     const results = await Promise.allSettled(servers.map(s => fetchVMsViaSSH(s)));
     const allVMs = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
 
-    // Deduplicate: same vmid on same node = same VM (cluster overlap)
+    // Deduplicate: same vmid on same node = same VM
     const seen = new Map<string, typeof allVMs[0]>();
     for (const vm of allVMs) {
         const key = `${vm.node}:${vm.vmid}`;
