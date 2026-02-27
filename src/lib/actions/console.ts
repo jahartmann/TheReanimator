@@ -3,6 +3,10 @@
 import db from '@/lib/db';
 import { ProxmoxClient } from '@/lib/proxmox';
 import { registerConsoleSession } from '@/lib/console-proxy';
+import { createSSHClient } from '@/lib/ssh';
+import { determineNodeName } from './vm';
+
+// ── Helpers ──────────────────────────────────────────────────────────
 
 async function getServerAndClient(serverId: number) {
     const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId) as any;
@@ -22,19 +26,52 @@ async function getServerAndClient(serverId: number) {
 }
 
 /**
- * Find the node and type for a given VM/CT using cluster resources (single API call).
+ * Find the node and type for a given VM/CT.
+ * Tries Proxmox API first, falls back to SSH pvesh.
  */
 async function findVMInCluster(
+    serverId: number,
     client: ProxmoxClient,
     vmid: number
 ): Promise<{ node: string; vmType: 'qemu' | 'lxc' }> {
-    const resources = await client.getClusterResources();
-    const found = resources.find(r =>
-        (r.type === 'qemu' || r.type === 'lxc') && r.vmid === vmid && r.node
-    );
-    if (!found || !found.node) throw new Error(`VM/CT ${vmid} not found`);
-    return { node: found.node, vmType: found.type as 'qemu' | 'lxc' };
+    // 1. Try Proxmox REST API
+    try {
+        const resources = await client.getClusterResources();
+        const found = resources.find(r =>
+            (r.type === 'qemu' || r.type === 'lxc') && r.vmid === vmid && r.node
+        );
+        if (found?.node) {
+            return { node: found.node, vmType: found.type as 'qemu' | 'lxc' };
+        }
+    } catch (e) {
+        console.warn(`[Console] Proxmox API findVM failed for server ${serverId}:`, e);
+    }
+
+    // 2. Fallback: SSH pvesh
+    const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId) as any;
+    if (!server) throw new Error('Server not found');
+
+    const ssh = createSSHClient(server);
+    try {
+        await ssh.connect();
+        const json = await ssh.exec('pvesh get /cluster/resources --output-format json 2>/dev/null');
+        const resources = JSON.parse(json);
+        const found = resources.find((r: any) =>
+            (r.type === 'qemu' || r.type === 'lxc') && r.vmid === vmid && r.node
+        );
+        if (found?.node) {
+            return { node: found.node, vmType: found.type as 'qemu' | 'lxc' };
+        }
+    } catch (e) {
+        console.warn(`[Console] SSH findVM failed for server ${serverId}:`, e);
+    } finally {
+        await ssh.disconnect();
+    }
+
+    throw new Error(`VM/CT ${vmid} not found`);
 }
+
+// ── Console Access (needs Proxmox API for proxy tickets) ─────────────
 
 /**
  * Get console access token for VNC or Terminal.
@@ -48,8 +85,7 @@ export async function getConsoleAccess(
 ): Promise<{ sessionToken: string; wsPort: number }> {
     const { server, client } = await getServerAndClient(serverId);
 
-    // Find the correct node via cluster resources
-    const { node } = await findVMInCluster(client, vmid);
+    const { node } = await findVMInCluster(serverId, client, vmid);
 
     const connInfo = client.getConnectionInfo();
 
@@ -83,7 +119,7 @@ export async function getConsoleAccess(
  */
 export async function getSpiceFile(serverId: number, vmid: number): Promise<string> {
     const { client } = await getServerAndClient(serverId);
-    const { node } = await findVMInCluster(client, vmid);
+    const { node } = await findVMInCluster(serverId, client, vmid);
     const spiceConfig = await client.getSpiceProxy(node, vmid);
 
     const lines = ['[virt-viewer]'];
@@ -94,42 +130,79 @@ export async function getSpiceFile(serverId: number, vmid: number): Promise<stri
     return lines.join('\n');
 }
 
+// ── SSH-based VM fetching (reliable, no Proxmox API auth needed) ─────
+
 /**
- * Get VM info for the console page header.
- * Uses getClusterResources() to search all nodes in one API call.
+ * Fetch all VMs/CTs from a single PVE server via SSH.
+ * Uses pvesh commands with fallback chain.
  */
-export async function getVMInfoForConsole(serverId: number, vmid: number): Promise<{
+async function fetchVMsViaSSH(server: any): Promise<{
+    vmid: number;
     name: string;
     status: string;
     type: 'qemu' | 'lxc';
     node: string;
     serverId: number;
     serverName: string;
-}> {
-    const { server, client } = await getServerAndClient(serverId);
+}[]> {
+    const ssh = createSSHClient(server);
+    try {
+        await ssh.connect();
+        const nodeName = await determineNodeName(ssh);
 
-    const resources = await client.getClusterResources();
-    const found = resources.find(r =>
-        (r.type === 'qemu' || r.type === 'lxc') && r.vmid === vmid && r.node
-    );
+        let vms: any[] = [];
 
-    if (!found || !found.node) {
-        throw new Error(`VM/CT ${vmid} not found`);
+        // 1. Try node-specific API
+        try {
+            const [qemuJson, lxcJson] = await Promise.all([
+                ssh.exec(`pvesh get /nodes/${nodeName}/qemu --output-format json 2>/dev/null || echo "[]"`),
+                ssh.exec(`pvesh get /nodes/${nodeName}/lxc --output-format json 2>/dev/null || echo "[]"`)
+            ]);
+
+            const qemuList = JSON.parse(qemuJson);
+            const lxcList = JSON.parse(lxcJson);
+
+            vms = [
+                ...qemuList.map((v: any) => ({ ...v, type: 'qemu', node: nodeName })),
+                ...lxcList.map((v: any) => ({ ...v, type: 'lxc', node: nodeName }))
+            ];
+        } catch {
+            // Ignore, try fallback
+        }
+
+        // 2. Fallback: cluster resources
+        if (vms.length === 0) {
+            try {
+                const json = await ssh.exec('pvesh get /cluster/resources --output-format json 2>/dev/null');
+                const resources = JSON.parse(json);
+                vms = resources.filter((r: any) =>
+                    (r.type === 'qemu' || r.type === 'lxc') && r.vmid && r.node
+                );
+            } catch {
+                // Both methods failed
+            }
+        }
+
+        return vms.map((v: any) => ({
+            vmid: v.vmid,
+            name: v.name || `${v.type === 'lxc' ? 'CT' : 'VM'} ${v.vmid}`,
+            status: v.status || 'unknown',
+            type: v.type as 'qemu' | 'lxc',
+            node: v.node || nodeName,
+            serverId: server.id,
+            serverName: server.name
+        }));
+    } catch (e) {
+        console.error(`[Console] SSH fetch failed for server ${server.id} (${server.name}):`, e);
+        return [];
+    } finally {
+        await ssh.disconnect();
     }
-
-    return {
-        name: found.name || `${found.type === 'lxc' ? 'CT' : 'VM'} ${vmid}`,
-        status: found.status || 'unknown',
-        type: found.type as 'qemu' | 'lxc',
-        node: found.node,
-        serverId: server.id,
-        serverName: server.name
-    };
 }
 
 /**
- * Get all VMs and CTs across all PVE servers for the console page.
- * Runs all server queries in parallel to avoid slow sequential timeouts.
+ * Get all VMs and CTs across all PVE servers via SSH.
+ * Runs all server queries in parallel.
  */
 export async function getAllVMsForConsole(): Promise<{
     vmid: number;
@@ -142,35 +215,39 @@ export async function getAllVMsForConsole(): Promise<{
 }[]> {
     const servers = db.prepare("SELECT * FROM servers WHERE type = 'pve'").all() as any[];
 
-    const perServer = servers.map(async (server) => {
-        try {
-            const client = new ProxmoxClient({
-                url: server.url,
-                token: server.token || undefined,
-                username: server.token ? undefined : (server.ssh_user || 'root@pam'),
-                password: server.token ? undefined : server.ssh_key,
-                type: 'pve'
-            });
+    if (servers.length === 0) {
+        console.log('[Console] No PVE servers configured');
+        return [];
+    }
 
-            if (!server.token) await client.authenticate();
+    const results = await Promise.allSettled(servers.map(s => fetchVMsViaSSH(s)));
+    const allVMs = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
 
-            const resources = await client.getClusterResources();
-            return resources
-                .filter(r => (r.type === 'qemu' || r.type === 'lxc') && r.vmid && r.node)
-                .map(r => ({
-                    vmid: r.vmid!,
-                    name: r.name || `${r.type === 'lxc' ? 'CT' : 'VM'} ${r.vmid}`,
-                    status: r.status || 'unknown',
-                    type: r.type as 'qemu' | 'lxc',
-                    node: r.node!,
-                    serverId: server.id,
-                    serverName: server.name
-                }));
-        } catch {
-            return [];
-        }
-    });
+    console.log(`[Console] Fetched ${allVMs.length} VMs across ${servers.length} servers`);
+    return allVMs.sort((a, b) => a.vmid - b.vmid);
+}
 
-    const results = await Promise.allSettled(perServer);
-    return results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+/**
+ * Get VM info for the console page header via SSH.
+ */
+export async function getVMInfoForConsole(serverId: number, vmid: number): Promise<{
+    name: string;
+    status: string;
+    type: 'qemu' | 'lxc';
+    node: string;
+    serverId: number;
+    serverName: string;
+}> {
+    const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId) as any;
+    if (!server) throw new Error('Server not found');
+
+    // Fetch VMs via SSH for this server
+    const vms = await fetchVMsViaSSH(server);
+    const found = vms.find(v => v.vmid === vmid);
+
+    if (!found) {
+        throw new Error(`VM/CT ${vmid} not found on server ${server.name}`);
+    }
+
+    return found;
 }
