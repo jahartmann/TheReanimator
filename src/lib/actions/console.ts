@@ -2,7 +2,7 @@
 
 import db from '@/lib/db';
 import { ProxmoxClient } from '@/lib/proxmox';
-import { registerConsoleSession } from '@/lib/console-proxy';
+import { registerConsoleSession } from '@/lib/console-sessions';
 import { createSSHClient } from '@/lib/ssh';
 import { determineNodeName } from './vm';
 

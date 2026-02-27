@@ -13,6 +13,28 @@ interface VncConsoleProps {
     onCtrlAltDelRef?: React.MutableRefObject<(() => void) | null>;
 }
 
+/**
+ * Load RFB class from @novnc/novnc.
+ * The package uses CJS exports which can break in ESM bundlers.
+ * We shim `exports` on window to prevent the "exports is not defined" error.
+ */
+async function loadRFB(): Promise<any> {
+    // Shim CJS globals if missing (noVNC expects them)
+    if (typeof window !== 'undefined') {
+        const w = window as any;
+        if (typeof w.exports === 'undefined') w.exports = {};
+        if (typeof w.module === 'undefined') w.module = { exports: w.exports };
+    }
+
+    try {
+        const mod = await import('@novnc/novnc/lib/rfb.js');
+        return mod.default || mod;
+    } catch (e) {
+        console.error('[VNC] Failed to load noVNC:', e);
+        throw new Error('Failed to load VNC library. Check browser console for details.');
+    }
+}
+
 export function VncConsole({ serverId, vmid, vmType, onConnect, onDisconnect, onCtrlAltDelRef }: VncConsoleProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const rfbRef = useRef<any>(null);
@@ -25,20 +47,20 @@ export function VncConsole({ serverId, vmid, vmType, onConnect, onDisconnect, on
         setError(null);
 
         try {
-            // Get console access token
+            // Get VNC session token from server
             const { sessionToken, wsPort } = await getConsoleAccess(serverId, vmid, vmType, 'vnc');
 
-            // Build WebSocket URL
+            // Build WebSocket URL to our proxy
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsHost = window.location.hostname;
             const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/console?token=${sessionToken}`;
 
-            // Dynamically import noVNC
-            const { default: RFB } = await import('@novnc/novnc/lib/rfb.js');
+            // Load noVNC RFB class
+            const RFB = await loadRFB();
 
             // Clean up previous connection
             if (rfbRef.current) {
-                rfbRef.current.disconnect();
+                try { rfbRef.current.disconnect(); } catch { /* ignore */ }
                 rfbRef.current = null;
             }
 
@@ -90,16 +112,15 @@ export function VncConsole({ serverId, vmid, vmType, onConnect, onDisconnect, on
         connect();
         return () => {
             if (rfbRef.current) {
-                rfbRef.current.disconnect();
+                try { rfbRef.current.disconnect(); } catch { /* ignore */ }
                 rfbRef.current = null;
             }
         };
     }, [connect]);
 
-    // Expose reconnect
     const reconnect = useCallback(() => {
         if (rfbRef.current) {
-            rfbRef.current.disconnect();
+            try { rfbRef.current.disconnect(); } catch { /* ignore */ }
             rfbRef.current = null;
         }
         connect();

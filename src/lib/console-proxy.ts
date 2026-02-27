@@ -5,59 +5,17 @@
  * VNC mode:  Browser ↔ WebSocket ↔ Proxmox VNC WebSocket
  *
  * Started in instrumentation.ts on port 3001.
+ * Session registration happens in console-sessions.ts (imported by Server Actions).
  */
 
 import { WebSocketServer, WebSocket as WsWebSocket } from 'ws';
 import { Client as SSH2Client } from 'ssh2';
 import { URL } from 'url';
+import { consumeSession } from './console-sessions';
+import type { SSHSession, VNCSession } from './console-sessions';
 
-// ── Session Types ────────────────────────────────────────────────────
-
-export interface SSHSession {
-    mode: 'ssh';
-    sshHost: string;
-    sshPort: number;
-    sshUser: string;
-    sshPassword?: string;
-    sshPrivateKey?: string;
-    shellCommand: string;
-    createdAt: number;
-}
-
-export interface VNCSession {
-    mode: 'vnc';
-    proxmoxUrl: string;
-    node: string;
-    vmid: number;
-    vmType: 'qemu' | 'lxc';
-    vncTicket: string;
-    port: number;
-    authToken?: string;
-    authTicket?: string;
-    createdAt: number;
-}
-
-type ConsoleSession = SSHSession | VNCSession;
-
-// ── Session Store ────────────────────────────────────────────────────
-
-const sessions = new Map<string, ConsoleSession>();
-const SESSION_TTL = 60_000;
-
-setInterval(() => {
-    const now = Date.now();
-    for (const [key, session] of sessions) {
-        if (now - session.createdAt > SESSION_TTL) sessions.delete(key);
-    }
-}, 30_000);
-
-export function registerConsoleSession(
-    session: Omit<SSHSession, 'createdAt'> | Omit<VNCSession, 'createdAt'>
-): string {
-    const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
-    sessions.set(token, { ...session, createdAt: Date.now() } as ConsoleSession);
-    return token;
-}
+// Re-export for instrumentation.ts
+export { registerConsoleSession } from './console-sessions';
 
 // ── WebSocket Server ─────────────────────────────────────────────────
 
@@ -75,12 +33,11 @@ export function startConsoleProxy(port: number = 3001): void {
                 return;
             }
 
-            const session = sessions.get(sessionToken);
+            const session = consumeSession(sessionToken);
             if (!session) {
                 clientWs.close(4001, 'Invalid or expired session token');
                 return;
             }
-            sessions.delete(sessionToken);
 
             if (session.mode === 'ssh') {
                 handleSSH(clientWs, session);
@@ -99,17 +56,6 @@ export function startConsoleProxy(port: number = 3001): void {
 }
 
 // ── SSH Mode: Direct Shell ───────────────────────────────────────────
-//
-// Opens an SSH shell on the PVE host and runs a command like
-// `pct enter 100` (LXC) or `qm terminal 100` (QEMU serial).
-// Raw data passthrough — no Proxmox protocol framing.
-//
-// Browser sends:
-//   Binary (ArrayBuffer) → terminal input
-//   Text (JSON string)   → control messages (resize)
-//
-// Server sends:
-//   Binary (Buffer) → terminal output
 
 function handleSSH(clientWs: WsWebSocket, session: SSHSession) {
     const ssh = new SSH2Client();
@@ -148,7 +94,6 @@ function handleSSH(clientWs: WsWebSocket, session: SSHSession) {
                 // Browser → SSH
                 clientWs.on('message', (raw, isBinary) => {
                     if (!isBinary) {
-                        // Text message = JSON control
                         try {
                             const msg = JSON.parse(raw.toString());
                             if (msg.type === 'resize' && msg.cols && msg.rows) {
@@ -156,7 +101,7 @@ function handleSSH(clientWs: WsWebSocket, session: SSHSession) {
                                 return;
                             }
                         } catch {
-                            // Not valid JSON — treat as text input
+                            // Not JSON — treat as text input
                         }
                     }
                     if (stream.writable) {
@@ -205,7 +150,6 @@ function handleSSH(clientWs: WsWebSocket, session: SSHSession) {
         }
     });
 
-    // Connect
     const connectConfig: any = {
         host: session.sshHost,
         port: session.sshPort,
@@ -225,9 +169,6 @@ function handleSSH(clientWs: WsWebSocket, session: SSHSession) {
 }
 
 // ── VNC Mode: Proxmox WebSocket Bridge ───────────────────────────────
-//
-// Proxies the browser WebSocket to Proxmox's /vncwebsocket endpoint.
-// noVNC handles the RFB protocol on both ends — we just bridge bytes.
 
 function handleVNC(clientWs: WsWebSocket, session: VNCSession) {
     const base = new URL(session.proxmoxUrl);
@@ -241,7 +182,6 @@ function handleVNC(clientWs: WsWebSocket, session: VNCSession) {
 
     console.log(`[ConsoleProxy/VNC] Connecting: ${session.node}/${session.vmType}/${session.vmid}`);
 
-    // Auth headers
     const headers: Record<string, string> = {};
     if (session.authToken) {
         headers['Authorization'] = `PVEAPIToken=${session.authToken}`;
@@ -265,7 +205,6 @@ function handleVNC(clientWs: WsWebSocket, session: VNCSession) {
         buffer.length = 0;
     });
 
-    // Proxmox → Browser
     proxmoxWs.on('message', (data) => {
         if (clientWs.readyState === WsWebSocket.OPEN) {
             clientWs.send(data);
@@ -286,7 +225,6 @@ function handleVNC(clientWs: WsWebSocket, session: VNCSession) {
         }
     });
 
-    // Browser → Proxmox
     clientWs.on('message', (data) => {
         if (ready && proxmoxWs.readyState === WsWebSocket.OPEN) {
             proxmoxWs.send(data);

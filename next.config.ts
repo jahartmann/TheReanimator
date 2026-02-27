@@ -5,8 +5,9 @@ const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 
 const nextConfig: NextConfig = {
   // Exclude native Node.js modules from bundling
-  serverExternalPackages: ['ssh2', 'better-sqlite3', 'esbuild'],
-  // experimental: { instrumentationHook: true } // Removed as it's default in Next.js 16+
+  serverExternalPackages: ['ssh2', 'better-sqlite3', 'esbuild', 'ws'],
+  // Transpile CJS packages for browser compatibility
+  transpilePackages: ['@novnc/novnc'],
 };
 
 export default withNextIntl(nextConfig);
