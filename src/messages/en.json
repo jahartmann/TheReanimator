@@ -61,6 +61,7 @@
     "running": "running",
     "noVMs": "No VMs found. Add a PVE server first.",
     "noResults": "No results for this search.",
+    "loading": "Loading VMs...",
     "refresh": "Refresh"
   },
   "tools": {

@@ -72,6 +72,7 @@
     "running": "laufend",
     "noVMs": "Keine VMs gefunden. Fügen Sie einen PVE-Server hinzu.",
     "noResults": "Keine Treffer für diese Suche.",
+    "loading": "VMs werden geladen...",
     "refresh": "Aktualisieren"
   },
   "tools": {

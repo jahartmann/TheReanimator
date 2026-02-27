@@ -60,6 +60,7 @@
     "running": "en ejecución",
     "noVMs": "No se encontraron VMs. Añada un servidor PVE.",
     "noResults": "No hay resultados para esta búsqueda.",
+    "loading": "Cargando VMs...",
     "refresh": "Actualizar"
   },
   "dashboard": {

@@ -17,38 +17,23 @@ async function getServerAndClient(serverId: number) {
     });
 
     if (!server.token) await client.authenticate();
-    const nodes = await client.getNodes();
 
-    return { server, client, nodes };
+    return { server, client };
 }
 
 /**
- * Find the node and type for a given VM/CT across all cluster nodes.
+ * Find the node and type for a given VM/CT using cluster resources (single API call).
  */
-async function findVMNode(
+async function findVMInCluster(
     client: ProxmoxClient,
-    nodes: { name: string }[],
     vmid: number
 ): Promise<{ node: string; vmType: 'qemu' | 'lxc' }> {
-    for (const n of nodes) {
-        // Check QEMU
-        try {
-            const vms = await client.getVMs(n.name);
-            if (vms.find(v => v.vmid === vmid)) {
-                return { node: n.name, vmType: 'qemu' };
-            }
-        } catch { /* node may not have QEMU API */ }
-
-        // Check LXC
-        try {
-            const lxcs = await client.getLXCs(n.name);
-            if (lxcs.find(v => v.vmid === vmid)) {
-                return { node: n.name, vmType: 'lxc' };
-            }
-        } catch { /* node may not have LXC API */ }
-    }
-
-    throw new Error(`VM/CT ${vmid} not found`);
+    const resources = await client.getClusterResources();
+    const found = resources.find(r =>
+        (r.type === 'qemu' || r.type === 'lxc') && r.vmid === vmid && r.node
+    );
+    if (!found || !found.node) throw new Error(`VM/CT ${vmid} not found`);
+    return { node: found.node, vmType: found.type as 'qemu' | 'lxc' };
 }
 
 /**
@@ -61,10 +46,10 @@ export async function getConsoleAccess(
     vmType: 'qemu' | 'lxc',
     mode: 'vnc' | 'terminal'
 ): Promise<{ sessionToken: string; wsPort: number }> {
-    const { server, client, nodes } = await getServerAndClient(serverId);
+    const { server, client } = await getServerAndClient(serverId);
 
-    // Find the correct node for this VM/CT
-    const { node } = await findVMNode(client, nodes, vmid);
+    // Find the correct node via cluster resources
+    const { node } = await findVMInCluster(client, vmid);
 
     const connInfo = client.getConnectionInfo();
 
@@ -97,11 +82,10 @@ export async function getConsoleAccess(
  * Generate SPICE .vv file content for native client.
  */
 export async function getSpiceFile(serverId: number, vmid: number): Promise<string> {
-    const { client, nodes } = await getServerAndClient(serverId);
-    const { node } = await findVMNode(client, nodes, vmid);
+    const { client } = await getServerAndClient(serverId);
+    const { node } = await findVMInCluster(client, vmid);
     const spiceConfig = await client.getSpiceProxy(node, vmid);
 
-    // Build .vv file content
     const lines = ['[virt-viewer]'];
     for (const [key, value] of Object.entries(spiceConfig)) {
         lines.push(`${key}=${value}`);
@@ -112,7 +96,7 @@ export async function getSpiceFile(serverId: number, vmid: number): Promise<stri
 
 /**
  * Get VM info for the console page header.
- * Searches all nodes in the cluster to find the VM.
+ * Uses getClusterResources() to search all nodes in one API call.
  */
 export async function getVMInfoForConsole(serverId: number, vmid: number): Promise<{
     name: string;
@@ -122,47 +106,30 @@ export async function getVMInfoForConsole(serverId: number, vmid: number): Promi
     serverId: number;
     serverName: string;
 }> {
-    const { server, client, nodes } = await getServerAndClient(serverId);
+    const { server, client } = await getServerAndClient(serverId);
 
-    for (const n of nodes) {
-        // Try QEMU on this node
-        try {
-            const vms = await client.getVMs(n.name);
-            const vm = vms.find(v => v.vmid === vmid);
-            if (vm) {
-                return {
-                    name: vm.name,
-                    status: vm.status,
-                    type: 'qemu',
-                    node: n.name,
-                    serverId: server.id,
-                    serverName: server.name
-                };
-            }
-        } catch { /* continue */ }
+    const resources = await client.getClusterResources();
+    const found = resources.find(r =>
+        (r.type === 'qemu' || r.type === 'lxc') && r.vmid === vmid && r.node
+    );
 
-        // Try LXC on this node
-        try {
-            const lxcs = await client.getLXCs(n.name);
-            const lxc = lxcs.find(v => v.vmid === vmid);
-            if (lxc) {
-                return {
-                    name: lxc.name,
-                    status: lxc.status,
-                    type: 'lxc',
-                    node: n.name,
-                    serverId: server.id,
-                    serverName: server.name
-                };
-            }
-        } catch { /* continue */ }
+    if (!found || !found.node) {
+        throw new Error(`VM/CT ${vmid} not found`);
     }
 
-    throw new Error(`VM/CT ${vmid} not found`);
+    return {
+        name: found.name || `${found.type === 'lxc' ? 'CT' : 'VM'} ${vmid}`,
+        status: found.status || 'unknown',
+        type: found.type as 'qemu' | 'lxc',
+        node: found.node,
+        serverId: server.id,
+        serverName: server.name
+    };
 }
 
 /**
  * Get all VMs and CTs across all PVE servers for the console page.
+ * Runs all server queries in parallel to avoid slow sequential timeouts.
  */
 export async function getAllVMsForConsole(): Promise<{
     vmid: number;
@@ -174,17 +141,8 @@ export async function getAllVMsForConsole(): Promise<{
     serverName: string;
 }[]> {
     const servers = db.prepare("SELECT * FROM servers WHERE type = 'pve'").all() as any[];
-    const results: {
-        vmid: number;
-        name: string;
-        status: string;
-        type: 'qemu' | 'lxc';
-        node: string;
-        serverId: number;
-        serverName: string;
-    }[] = [];
 
-    for (const server of servers) {
+    const perServer = servers.map(async (server) => {
         try {
             const client = new ProxmoxClient({
                 url: server.url,
@@ -196,25 +154,23 @@ export async function getAllVMsForConsole(): Promise<{
 
             if (!server.token) await client.authenticate();
 
-            // Use cluster resources for efficient single-request VM listing
             const resources = await client.getClusterResources();
-            for (const r of resources) {
-                if ((r.type === 'qemu' || r.type === 'lxc') && r.vmid && r.node) {
-                    results.push({
-                        vmid: r.vmid,
-                        name: r.name || `${r.type === 'lxc' ? 'CT' : 'VM'} ${r.vmid}`,
-                        status: r.status || 'unknown',
-                        type: r.type,
-                        node: r.node,
-                        serverId: server.id,
-                        serverName: server.name
-                    });
-                }
-            }
+            return resources
+                .filter(r => (r.type === 'qemu' || r.type === 'lxc') && r.vmid && r.node)
+                .map(r => ({
+                    vmid: r.vmid!,
+                    name: r.name || `${r.type === 'lxc' ? 'CT' : 'VM'} ${r.vmid}`,
+                    status: r.status || 'unknown',
+                    type: r.type as 'qemu' | 'lxc',
+                    node: r.node!,
+                    serverId: server.id,
+                    serverName: server.name
+                }));
         } catch {
-            // Skip unreachable servers silently
+            return [];
         }
-    }
+    });
 
-    return results;
+    const results = await Promise.allSettled(perServer);
+    return results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
 }

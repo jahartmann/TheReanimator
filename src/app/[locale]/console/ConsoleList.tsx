@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
-import { Monitor, Terminal, Download, Search, RefreshCw, Server, Cpu } from 'lucide-react';
+import { Monitor, Terminal, Download, Search, RefreshCw, Server, Cpu, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,10 +19,6 @@ type VM = {
     serverName: string;
 };
 
-interface ConsoleListProps {
-    initialVMs: VM[];
-}
-
 function StatusBadge({ status }: { status: string }) {
     const isRunning = status === 'running';
     return (
@@ -36,13 +32,28 @@ function StatusBadge({ status }: { status: string }) {
     );
 }
 
-export function ConsoleList({ initialVMs }: ConsoleListProps) {
-    const [vms, setVMs] = useState<VM[]>(initialVMs);
+export function ConsoleList() {
+    const [vms, setVMs] = useState<VM[]>([]);
+    const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
-    const [loading, setLoading] = useState(false);
     const router = useRouter();
     const locale = useLocale();
     const t = useTranslations('consolePage');
+
+    const fetchVMs = async () => {
+        setLoading(true);
+        try {
+            const data = await getAllVMsForConsole();
+            setVMs(data);
+        } catch {
+            setVMs([]);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Fetch on mount, client-side — doesn't block page render
+    useEffect(() => { fetchVMs(); }, []);
 
     const filtered = useMemo(() => {
         const q = search.toLowerCase();
@@ -54,16 +65,6 @@ export function ConsoleList({ initialVMs }: ConsoleListProps) {
             vm.status.toLowerCase().includes(q)
         );
     }, [vms, search]);
-
-    const handleRefresh = async () => {
-        setLoading(true);
-        try {
-            const fresh = await getAllVMsForConsole();
-            setVMs(fresh);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     const openConsole = (vm: VM, tab?: string) => {
         const url = `/${locale}/servers/${vm.serverId}/console/${vm.vmid}${tab ? `?tab=${tab}` : ''}`;
@@ -81,7 +82,7 @@ export function ConsoleList({ initialVMs }: ConsoleListProps) {
                 <Button
                     variant="outline"
                     size="sm"
-                    onClick={handleRefresh}
+                    onClick={fetchVMs}
                     disabled={loading}
                     className="gap-2"
                 >
@@ -102,21 +103,33 @@ export function ConsoleList({ initialVMs }: ConsoleListProps) {
             </div>
 
             {/* Stats */}
-            <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                <span>{filtered.length} {t('vmCount')}</span>
-                <span>·</span>
-                <span className="text-emerald-500">{filtered.filter(v => v.status === 'running').length} {t('running')}</span>
-                <span>·</span>
-                <span>{filtered.filter(v => v.type === 'qemu').length} VMs / {filtered.filter(v => v.type === 'lxc').length} CTs</span>
-            </div>
+            {!loading && (
+                <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                    <span>{filtered.length} {t('vmCount')}</span>
+                    <span>·</span>
+                    <span className="text-emerald-500">{filtered.filter(v => v.status === 'running').length} {t('running')}</span>
+                    <span>·</span>
+                    <span>{filtered.filter(v => v.type === 'qemu').length} VMs / {filtered.filter(v => v.type === 'lxc').length} CTs</span>
+                </div>
+            )}
+
+            {/* Loading state */}
+            {loading && (
+                <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <p className="text-sm">{t('loading')}</p>
+                </div>
+            )}
 
             {/* VM Grid */}
-            {filtered.length === 0 ? (
+            {!loading && filtered.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
                     <Monitor className="h-10 w-10 opacity-20" />
                     <p className="text-sm">{vms.length === 0 ? t('noVMs') : t('noResults')}</p>
                 </div>
-            ) : (
+            )}
+
+            {!loading && filtered.length > 0 && (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {filtered.map(vm => (
                         <div
