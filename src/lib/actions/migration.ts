@@ -295,7 +295,7 @@ async function executeMigrationTask(taskId: number, vms: any[], options: { stora
             const targetStorage = vm.targetStorage && vm.targetStorage !== 'auto' ? vm.targetStorage : (options.storage || '');
             const targetBridge = vm.targetBridge && vm.targetBridge !== 'auto' ? vm.targetBridge : (options.bridge || '');
             // Filter out 'auto' entries from network mapping (auto = keep original config)
-            const rawNetworkMapping = vm.networkMapping || {};
+            const rawNetworkMapping: Record<string, string> = vm.networkMapping || {};
             const networkMapping: Record<string, string> = {};
             for (const [netId, bridge] of Object.entries(rawNetworkMapping)) {
                 if (bridge && bridge !== 'auto') {
@@ -372,7 +372,7 @@ async function executeMigrationTask(taskId: number, vms: any[], options: { stora
                                 });
                                 await ssh.connect();
                                 const stopCmd = `${cmd} stop ${vm.vmid} --skiplock 2>/dev/null; sleep 2`;
-                                await ssh.exec(stopCmd).catch(() => {});
+                                await ssh.exec(stopCmd).catch(() => { });
                                 const destroyCmd = vm.type === 'qemu' ? `qm destroy ${vm.vmid} --purge` : `pct destroy ${vm.vmid} --purge`;
                                 await ssh.exec(destroyCmd);
                                 await ssh.disconnect();
