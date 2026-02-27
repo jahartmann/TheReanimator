@@ -54,15 +54,6 @@ async function loadRFB(): Promise<any> {
         }
     }
 
-    // Strategy 3: Try core/rfb path (source, not lib)
-    try {
-        const mod = await import('@novnc/novnc/core/rfb.js');
-        rfbClassCache = mod.default || mod;
-        if (typeof rfbClassCache === 'function') return rfbClassCache;
-    } catch (e) {
-        console.warn('[VNC] Core rfb import failed:', e);
-    }
-
     throw new Error('Failed to load VNC library (noVNC). Check browser console for details.');
 }
 
