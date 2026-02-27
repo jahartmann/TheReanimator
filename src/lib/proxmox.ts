@@ -645,7 +645,8 @@ export class ProxmoxClient {
         const headers = await this.getHeaders();
         const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/${type}/${vmid}/termproxy`, {
             method: 'POST',
-            headers
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ websocket: '1' }).toString()
         });
         if (!res.ok) throw new Error(`Failed to get term proxy: ${res.status}`);
         const data = await res.json() as { data: { ticket: string; port: number; upid: string; user: string } };
@@ -657,7 +658,8 @@ export class ProxmoxClient {
         const headers = await this.getHeaders();
         const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/termproxy`, {
             method: 'POST',
-            headers
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ websocket: '1' }).toString()
         });
         if (!res.ok) throw new Error(`Failed to get node term proxy: ${res.status}`);
         const data = await res.json() as { data: { ticket: string; port: number; upid: string; user: string } };

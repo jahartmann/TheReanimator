@@ -160,10 +160,10 @@ function buildProxmoxWsUrl(session: ConsoleSession): string {
             : `/api2/json/nodes/${session.node}/qemu/${session.vmid}/vncwebsocket`;
         return `${wsProtocol}//${base.host}${path}?port=${session.port}&vncticket=${encodeURIComponent(session.vncTicket)}`;
     } else {
-        // Terminal WebSocket endpoint
+        // Terminal WebSocket endpoint (uses /termwebsocket + ticket, NOT vncwebsocket + vncticket)
         const path = session.vmType === 'lxc'
-            ? `/api2/json/nodes/${session.node}/lxc/${session.vmid}/vncwebsocket`
-            : `/api2/json/nodes/${session.node}/qemu/${session.vmid}/vncwebsocket`;
-        return `${wsProtocol}//${base.host}${path}?port=${session.port}&vncticket=${encodeURIComponent(session.vncTicket)}`;
+            ? `/api2/json/nodes/${session.node}/lxc/${session.vmid}/termwebsocket`
+            : `/api2/json/nodes/${session.node}/qemu/${session.vmid}/termwebsocket`;
+        return `${wsProtocol}//${base.host}${path}?port=${session.port}&ticket=${encodeURIComponent(session.vncTicket)}`;
     }
 }
