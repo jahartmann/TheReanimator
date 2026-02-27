@@ -18,14 +18,42 @@ async function getServerAndClient(serverId: number) {
 
     if (!server.token) await client.authenticate();
     const nodes = await client.getNodes();
-    const node = nodes[0]?.name || 'pve';
 
-    return { server, client, node };
+    return { server, client, nodes };
 }
 
 /**
- * Get console access token for VNC or Terminal
- * Returns a one-time session token for the WebSocket proxy
+ * Find the node and type for a given VM/CT across all cluster nodes.
+ */
+async function findVMNode(
+    client: ProxmoxClient,
+    nodes: { name: string }[],
+    vmid: number
+): Promise<{ node: string; vmType: 'qemu' | 'lxc' }> {
+    for (const n of nodes) {
+        // Check QEMU
+        try {
+            const vms = await client.getVMs(n.name);
+            if (vms.find(v => v.vmid === vmid)) {
+                return { node: n.name, vmType: 'qemu' };
+            }
+        } catch { /* node may not have QEMU API */ }
+
+        // Check LXC
+        try {
+            const lxcs = await client.getLXCs(n.name);
+            if (lxcs.find(v => v.vmid === vmid)) {
+                return { node: n.name, vmType: 'lxc' };
+            }
+        } catch { /* node may not have LXC API */ }
+    }
+
+    throw new Error(`VM/CT ${vmid} not found`);
+}
+
+/**
+ * Get console access token for VNC or Terminal.
+ * Returns a one-time session token for the WebSocket proxy.
  */
 export async function getConsoleAccess(
     serverId: number,
@@ -33,7 +61,11 @@ export async function getConsoleAccess(
     vmType: 'qemu' | 'lxc',
     mode: 'vnc' | 'terminal'
 ): Promise<{ sessionToken: string; wsPort: number }> {
-    const { server, client, node } = await getServerAndClient(serverId);
+    const { server, client, nodes } = await getServerAndClient(serverId);
+
+    // Find the correct node for this VM/CT
+    const { node } = await findVMNode(client, nodes, vmid);
+
     const connInfo = client.getConnectionInfo();
 
     let proxyResult: { ticket: string; port: number };
@@ -62,10 +94,11 @@ export async function getConsoleAccess(
 }
 
 /**
- * Generate SPICE .vv file content for native client
+ * Generate SPICE .vv file content for native client.
  */
 export async function getSpiceFile(serverId: number, vmid: number): Promise<string> {
-    const { client, node } = await getServerAndClient(serverId);
+    const { client, nodes } = await getServerAndClient(serverId);
+    const { node } = await findVMNode(client, nodes, vmid);
     const spiceConfig = await client.getSpiceProxy(node, vmid);
 
     // Build .vv file content
@@ -78,7 +111,8 @@ export async function getSpiceFile(serverId: number, vmid: number): Promise<stri
 }
 
 /**
- * Get VM info for console page header
+ * Get VM info for the console page header.
+ * Searches all nodes in the cluster to find the VM.
  */
 export async function getVMInfoForConsole(serverId: number, vmid: number): Promise<{
     name: string;
@@ -88,39 +122,99 @@ export async function getVMInfoForConsole(serverId: number, vmid: number): Promi
     serverId: number;
     serverName: string;
 }> {
-    const { server, client, node } = await getServerAndClient(serverId);
+    const { server, client, nodes } = await getServerAndClient(serverId);
 
-    // Try QEMU first
-    try {
-        const vms = await client.getVMs(node);
-        const vm = vms.find(v => v.vmid === vmid);
-        if (vm) {
-            return {
-                name: vm.name,
-                status: vm.status,
-                type: 'qemu',
-                node,
-                serverId: server.id,
-                serverName: server.name
-            };
-        }
-    } catch {}
+    for (const n of nodes) {
+        // Try QEMU on this node
+        try {
+            const vms = await client.getVMs(n.name);
+            const vm = vms.find(v => v.vmid === vmid);
+            if (vm) {
+                return {
+                    name: vm.name,
+                    status: vm.status,
+                    type: 'qemu',
+                    node: n.name,
+                    serverId: server.id,
+                    serverName: server.name
+                };
+            }
+        } catch { /* continue */ }
 
-    // Try LXC
-    try {
-        const lxcs = await client.getLXCs(node);
-        const lxc = lxcs.find(v => v.vmid === vmid);
-        if (lxc) {
-            return {
-                name: lxc.name,
-                status: lxc.status,
-                type: 'lxc',
-                node,
-                serverId: server.id,
-                serverName: server.name
-            };
-        }
-    } catch {}
+        // Try LXC on this node
+        try {
+            const lxcs = await client.getLXCs(n.name);
+            const lxc = lxcs.find(v => v.vmid === vmid);
+            if (lxc) {
+                return {
+                    name: lxc.name,
+                    status: lxc.status,
+                    type: 'lxc',
+                    node: n.name,
+                    serverId: server.id,
+                    serverName: server.name
+                };
+            }
+        } catch { /* continue */ }
+    }
 
     throw new Error(`VM/CT ${vmid} not found`);
+}
+
+/**
+ * Get all VMs and CTs across all PVE servers for the console page.
+ */
+export async function getAllVMsForConsole(): Promise<{
+    vmid: number;
+    name: string;
+    status: string;
+    type: 'qemu' | 'lxc';
+    node: string;
+    serverId: number;
+    serverName: string;
+}[]> {
+    const servers = db.prepare("SELECT * FROM servers WHERE type = 'pve'").all() as any[];
+    const results: {
+        vmid: number;
+        name: string;
+        status: string;
+        type: 'qemu' | 'lxc';
+        node: string;
+        serverId: number;
+        serverName: string;
+    }[] = [];
+
+    for (const server of servers) {
+        try {
+            const client = new ProxmoxClient({
+                url: server.url,
+                token: server.token || undefined,
+                username: server.token ? undefined : (server.ssh_user || 'root@pam'),
+                password: server.token ? undefined : server.ssh_key,
+                type: 'pve'
+            });
+
+            if (!server.token) await client.authenticate();
+
+            // Use cluster resources for efficient single-request VM listing
+            const resources = await client.getClusterResources();
+            for (const r of resources) {
+                if ((r.type === 'qemu' || r.type === 'lxc') && r.vmid && r.node) {
+                    results.push({
+                        vmid: r.vmid,
+                        name: r.name || `${r.type === 'lxc' ? 'CT' : 'VM'} ${r.vmid}`,
+                        status: r.status || 'unknown',
+                        type: r.type,
+                        node: r.node,
+                        serverId: server.id,
+                        serverName: server.name
+                    });
+                }
+            }
+        } catch {
+            // Skip unreachable servers silently
+        }
+    }
+
+    return results;
 }

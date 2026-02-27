@@ -50,7 +50,18 @@
     "administration": "Administration",
     "agentTools": "Agent Tools",
     "organs": "Agent Status",
-    "disasterRecovery": "Disaster Recovery"
+    "disasterRecovery": "Disaster Recovery",
+    "console": "Console"
+  },
+  "consolePage": {
+    "title": "Console",
+    "subtitle": "Quick access to all VMs and containers via VNC or Terminal",
+    "searchPlaceholder": "Search by VM name, ID, server or node...",
+    "vmCount": "VMs/CTs",
+    "running": "running",
+    "noVMs": "No VMs found. Add a PVE server first.",
+    "noResults": "No results for this search.",
+    "refresh": "Refresh"
   },
   "tools": {
     "title": "Agent Tools",
