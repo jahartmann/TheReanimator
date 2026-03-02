@@ -107,7 +107,7 @@ export class VMResourceCheck extends MonitorCheck {
             let status: CheckStatus = 'ok';
             for (const s of [cpuStatus, ramStatus, valueStatus]) {
                 if (s === 'critical') { status = 'critical'; break; }
-                if (s === 'warning' && status !== 'critical') status = 'warning';
+                if (s === 'warning') status = 'warning';
             }
 
             const value = Math.max(cpuUsage, ramUsage);
