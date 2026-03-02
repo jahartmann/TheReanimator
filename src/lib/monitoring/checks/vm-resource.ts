@@ -48,24 +48,24 @@ export class VMResourceCheck extends MonitorCheck {
             for (const node of nodes) {
                 try {
                     // Try QEMU first
-                    const qemuVms = await client.getVMs(node.node);
+                    const qemuVms = await client.getVMs(node.name);
                     const found = qemuVms?.find((v: any) => v.vmid.toString() === vmid.toString());
                     if (found) {
                         vmData = found;
                         vmType = 'qemu';
-                        nodeName = node.node;
+                        nodeName = node.name;
                         break;
                     }
                 } catch { /* ignore */ }
 
                 try {
                     // Try LXC
-                    const lxcVms = await client.getLXCs(node.node);
+                    const lxcVms = await client.getLXCs(node.name);
                     const found = lxcVms?.find((v: any) => v.vmid.toString() === vmid.toString());
                     if (found) {
                         vmData = found;
                         vmType = 'lxc';
-                        nodeName = node.node;
+                        nodeName = node.name;
                         break;
                     }
                 } catch { /* ignore */ }
