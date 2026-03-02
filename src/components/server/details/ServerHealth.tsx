@@ -55,7 +55,7 @@ export function ServerHealth({ initialResults, serverId }: ServerHealthProps) {
                 };
                 setResults(prev => [newResult, ...prev.filter(r => r.type !== 'host')]);
             } else {
-                toast.error(t('scanError') + res.error);
+                toast.error(t('scanError') + ('error' in res ? res.error : ''));
             }
         } catch (e) { toast.error(t('scanError')); }
         finally { setScanningHost(false); }
@@ -71,7 +71,7 @@ export function ServerHealth({ initialResults, serverId }: ServerHealthProps) {
                 // We'd ideally reload data here, but for now prompt refresh or fetch again
                 window.location.reload();
             } else {
-                toast.error(t('scanError') + res.error);
+                toast.error(t('scanError') + ('error' in res ? res.error : ''));
             }
         } catch (e) { toast.error(t('scanError')); }
 
@@ -85,7 +85,7 @@ export function ServerHealth({ initialResults, serverId }: ServerHealthProps) {
             if (res.success) {
                 toast.success(t('backgroundTaskCreated'));
             } else {
-                toast.error(res.error || t('creationError'));
+                toast.error(('error' in res ? res.error : '') || t('creationError'));
             }
         } catch (e) {
             toast.error('Error: ' + e);
