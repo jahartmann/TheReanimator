@@ -263,14 +263,15 @@ export const COMMANDS: Record<string, { description: string; handler: CommandHan
             }
             try {
                 bot.sendChatAction(chatId, 'typing');
-                const result = await tools.getHAStatus.execute({ serverId });
+                const result = await tools.getHAStatus.execute({ serverId }) as any;
                 if (result.success) {
                     let text = `🔄 *HA-Status Server ${serverId}*\n\n`;
-                    text += `Manager: ${result.manager?.status || 'N/A'}\n`;
-                    text += `Ressourcen: ${result.resources?.length || 0}\n`;
+                    const mgr = result.managerStatus?.[0];
+                    text += `Manager: ${mgr?.status || 'N/A'} (${mgr?.node || '?'})\n`;
+                    text += `Ressourcen: ${result.resourceCount || 0}\n`;
                     if (result.resources?.length > 0) {
                         for (const r of result.resources.slice(0, 10)) {
-                            text += `• ${r.sid || r.name}: ${r.state || r.status}\n`;
+                            text += `• ${r.sid}: ${r.state}\n`;
                         }
                     }
                     await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
