@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Maximize2, Minimize2, RotateCcw, Terminal } from 'lucide-react';
+import '@xterm/xterm/css/xterm.css';
 
 interface TerminalClientProps {
     wsUrl: string;
@@ -30,9 +31,6 @@ export default function TerminalClient({ wsUrl, serverName, vmid }: TerminalClie
         const { Terminal } = await import('@xterm/xterm');
         const { FitAddon } = await import('@xterm/addon-fit');
         const { WebLinksAddon } = await import('@xterm/addon-web-links');
-
-        // Import CSS
-        await import('@xterm/xterm/css/xterm.css');
 
         // Dispose previous terminal if exists
         if (xtermRef.current) {
