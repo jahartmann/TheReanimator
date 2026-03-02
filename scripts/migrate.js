@@ -1,5 +1,4 @@
 const Database = require('better-sqlite3');
-const bcrypt = require('bcryptjs');
 const fs = require('fs');
 const path = require('path');
 
@@ -15,7 +14,13 @@ if (!fs.existsSync(backupDir)) {
   fs.mkdirSync(backupDir, { recursive: true });
 }
 
-const db = new Database(path.join(dataDir, 'proxhost.db'));
+let db;
+try {
+  db = new Database(path.join(dataDir, 'proxhost.db'));
+} catch (e) {
+  console.error('Failed to open database:', e.message);
+  process.exit(1);
+}
 
 // Enable WAL mode for better concurrency
 db.pragma('journal_mode = WAL');
@@ -821,4 +826,5 @@ if (!adminExists) {
 
 console.log('Database migrations completed.');
 db.close();
+process.exit(0);
 

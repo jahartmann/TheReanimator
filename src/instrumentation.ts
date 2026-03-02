@@ -26,5 +26,6 @@ export async function register() {
         } catch (e) {
             // Custom tools are optional
         }
+
     }
 }

@@ -49,7 +49,7 @@
     "users": "usuario",
     "administration": "Administración",
     "agentTools": "Herramientas del Agente",
-    "organs": "Estado del Agente"
+    "organs": "Estado del Agente",
   },
   "dashboard": {
     "title": "panel de control",

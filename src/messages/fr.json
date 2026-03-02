@@ -49,7 +49,7 @@
     "users": "Utilisateur",
     "administration": "Administration",
     "agentTools": "Outils de l'Agent",
-    "organs": "État de l'Agent"
+    "organs": "État de l'Agent",
   },
   "dashboard": {
     "title": "Tableau de bord",
