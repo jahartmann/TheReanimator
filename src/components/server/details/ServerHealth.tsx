@@ -42,7 +42,7 @@ export function ServerHealth({ initialResults, serverId }: ServerHealthProps) {
         setScanningHost(true);
         try {
             const res = await scanHost(serverId);
-            if (res.success && res.result) {
+            if (res.success && 'result' in res) {
                 toast.success(t('scanHostComplete'));
                 // Optimistic update
                 const newResult: ScanResult = {
