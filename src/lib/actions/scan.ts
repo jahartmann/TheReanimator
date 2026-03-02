@@ -183,7 +183,7 @@ export async function runServerScan(serverId: number) {
         // 1. Scan Host Files
         updateLog(t('fetchingSystemFiles'));
         const hostRes = await scanHost(server.id);
-        if (!hostRes.success) throw new Error(hostRes.error);
+        if (!hostRes.success) throw new Error('error' in hostRes ? hostRes.error : 'Scan failed');
 
         // 2. Network Analysis
         updateLog(t('analyzingNetwork'));
