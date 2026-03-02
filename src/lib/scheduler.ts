@@ -701,7 +701,7 @@ export async function runJob(job: any) {
 
             // 1. Scan Host
             const hostRes = await scanHost(job.source_server_id);
-            if (!hostRes.success) throw new Error(`Host Scan Failed: ${hostRes.error}`);
+            if (!hostRes.success) throw new Error(`Host Scan Failed: ${'error' in hostRes ? hostRes.error : 'unknown'}`);
 
             // 2. Scan VMs
             const vmRes = await scanAllVMs(job.source_server_id);
