@@ -62,7 +62,19 @@
     "agentTools": "Agent Tools",
     "organs": "Agenten-Status",
     "disasterRecovery": "Disaster Recovery",
-    "auditLog": "Audit-Log"
+    "auditLog": "Audit-Log",
+    "console": "Konsole"
+  },
+  "consolePage": {
+    "title": "Konsole",
+    "subtitle": "Direktzugriff auf alle VMs und Container per VNC oder Terminal",
+    "searchPlaceholder": "VM-Name, ID, Server oder Node suchen...",
+    "vmCount": "VMs/CTs",
+    "running": "laufend",
+    "noVMs": "Keine VMs gefunden. Fügen Sie einen PVE-Server hinzu.",
+    "noResults": "Keine Treffer für diese Suche.",
+    "loading": "VMs werden geladen...",
+    "refresh": "Aktualisieren"
   },
   "tools": {
     "title": "Agent Tools",

@@ -50,7 +50,19 @@
     "administration": "Administración",
     "agentTools": "Herramientas del Agente",
     "organs": "Estado del Agente",
-    "auditLog": "Registro de Auditoría"
+    "auditLog": "Registro de Auditoría",
+    "console": "Consola"
+  },
+  "consolePage": {
+    "title": "Consola",
+    "subtitle": "Acceso rápido a todas las VMs y contenedores vía VNC o Terminal",
+    "searchPlaceholder": "Buscar por nombre de VM, ID, servidor o nodo...",
+    "vmCount": "VMs/CTs",
+    "running": "en ejecución",
+    "noVMs": "No se encontraron VMs. Añada un servidor PVE.",
+    "noResults": "No hay resultados para esta búsqueda.",
+    "loading": "Cargando VMs...",
+    "refresh": "Actualizar"
   },
   "dashboard": {
     "title": "panel de control",

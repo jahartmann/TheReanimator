@@ -634,6 +634,80 @@ export class ProxmoxClient {
         }));
     }
 
+    // --- Console / Remote Access ---
+
+    // VNC Proxy for QEMU VMs
+    async getVNCProxy(node: string, vmid: number): Promise<{ ticket: string; port: number; upid: string }> {
+        const headers = await this.getHeaders();
+        const url = `${this.config.url}/api2/json/nodes/${node}/qemu/${vmid}/vncproxy`;
+        const res = await this.secureFetch(url, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ websocket: '1' }).toString()
+        });
+        if (!res.ok) {
+            const errText = await res.text().catch(() => '');
+            throw new Error(`VNC proxy failed (${res.status}): ${errText.slice(0, 200)}`);
+        }
+        const data = await res.json() as { data: { ticket: string; port: number; upid: string } };
+        return data.data;
+    }
+
+    // VNC Proxy for LXC containers
+    async getLXCVNCProxy(node: string, vmid: number): Promise<{ ticket: string; port: number; upid: string }> {
+        const headers = await this.getHeaders();
+        const url = `${this.config.url}/api2/json/nodes/${node}/lxc/${vmid}/vncproxy`;
+        const res = await this.secureFetch(url, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ websocket: '1' }).toString()
+        });
+        if (!res.ok) {
+            const errText = await res.text().catch(() => '');
+            throw new Error(`LXC VNC proxy failed (${res.status}): ${errText.slice(0, 200)}`);
+        }
+        const data = await res.json() as { data: { ticket: string; port: number; upid: string } };
+        return data.data;
+    }
+
+    // Terminal Proxy (shell for LXC, serial for QEMU)
+    async getTermProxy(node: string, vmid: number, type: 'qemu' | 'lxc'): Promise<{ ticket: string; port: number; upid: string; user: string }> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/${type}/${vmid}/termproxy`, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ websocket: '1' }).toString()
+        });
+        if (!res.ok) throw new Error(`Failed to get term proxy: ${res.status}`);
+        const data = await res.json() as { data: { ticket: string; port: number; upid: string; user: string } };
+        return data.data;
+    }
+
+    // Node shell proxy
+    async getNodeTermProxy(node: string): Promise<{ ticket: string; port: number; upid: string; user: string }> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/termproxy`, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ websocket: '1' }).toString()
+        });
+        if (!res.ok) throw new Error(`Failed to get node term proxy: ${res.status}`);
+        const data = await res.json() as { data: { ticket: string; port: number; upid: string; user: string } };
+        return data.data;
+    }
+
+    // SPICE proxy config for QEMU VMs
+    async getSpiceProxy(node: string, vmid: number): Promise<Record<string, string>> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/qemu/${vmid}/spiceproxy`, {
+            method: 'POST',
+            headers
+        });
+        if (!res.ok) throw new Error(`Failed to get SPICE proxy: ${res.status}`);
+        const data = await res.json() as { data: Record<string, string> };
+        return data.data;
+    }
+
     // Guest Agent: read file from VM
     async agentFileRead(node: string, vmid: number, filePath: string): Promise<string> {
         const headers = await this.getHeaders();
