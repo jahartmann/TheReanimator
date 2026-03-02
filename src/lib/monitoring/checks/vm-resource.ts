@@ -48,7 +48,7 @@ export class VMResourceCheck extends MonitorCheck {
             for (const node of nodes) {
                 try {
                     // Try QEMU first
-                    const qemuVms = await client.get(`/nodes/${node.node}/qemu`) as any[];
+                    const qemuVms = await client.getVMs(node.node);
                     const found = qemuVms?.find((v: any) => v.vmid.toString() === vmid.toString());
                     if (found) {
                         vmData = found;
@@ -60,7 +60,7 @@ export class VMResourceCheck extends MonitorCheck {
 
                 try {
                     // Try LXC
-                    const lxcVms = await client.get(`/nodes/${node.node}/lxc`) as any[];
+                    const lxcVms = await client.getLXCs(node.node);
                     const found = lxcVms?.find((v: any) => v.vmid.toString() === vmid.toString());
                     if (found) {
                         vmData = found;
