@@ -1,9 +1,13 @@
 'use server'
 
 import { ProxmoxClient } from '@/lib/proxmox';
+import { getCurrentUser } from '@/lib/actions/userAuth';
 
 export async function generateApiToken(url: string, user: string, pass: string, type: 'pve' | 'pbs') {
-    console.log(`Attempting to generate token for ${user} at ${url}...`);
+    const currentUser = await getCurrentUser();
+    if (!currentUser) return { success: false, message: 'Unauthorized' };
+
+    console.log(`Attempting to generate token at ${url}...`);
 
     try {
         // 1. Initialize Client with User/Pass

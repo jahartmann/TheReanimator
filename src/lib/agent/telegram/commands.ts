@@ -4,7 +4,8 @@
 
 import type TelegramBot from 'node-telegram-bot-api';
 import db from '@/lib/db';
-import { tools } from '../tools';
+import { tools, createChatSession } from '../tools';
+import { searchBrain, listBrainEntries } from '../memory/brain';
 import { formatVMList, formatServerList, formatHealthStatus, formatError } from './formatting';
 import { mainMenuKeyboard, vmActionKeyboard, serverSelectKeyboard } from './keyboards';
 import { getMonitorStatus } from '@/lib/monitoring/scheduler';
@@ -168,6 +169,128 @@ export const COMMANDS: Record<string, { description: string; handler: CommandHan
                     ? '✅ *Scan abgeschlossen*\n\nAlle Checks wurden ausgeführt\\.'
                     : `❌ *Scan fehlgeschlagen*\n\n${result.error}`;
                 await bot.sendMessage(chatId, msg, { parse_mode: 'MarkdownV2' });
+            } catch (e: any) {
+                await bot.sendMessage(chatId, formatError(e.message), { parse_mode: 'Markdown' });
+            }
+        },
+    },
+
+    '/audit': {
+        description: 'Letzte Audit-Einträge anzeigen',
+        handler: async (bot, chatId) => {
+            try {
+                const entries = db.prepare(`
+                    SELECT category, action, details, created_at
+                    FROM audit_log ORDER BY created_at DESC LIMIT 5
+                `).all() as any[];
+
+                if (entries.length === 0) {
+                    await bot.sendMessage(chatId, '📋 Keine Audit-Einträge vorhanden.');
+                    return;
+                }
+
+                let text = '📋 *Letzte 5 Audit-Einträge*\n\n';
+                for (const e of entries) {
+                    const time = new Date(e.created_at).toLocaleString('de-DE');
+                    text += `• *${e.category}* — ${e.action}\n  ${time}\n`;
+                    if (e.details) text += `  ${String(e.details).slice(0, 80)}\n`;
+                    text += '\n';
+                }
+                await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+            } catch (e: any) {
+                await bot.sendMessage(chatId, formatError(e.message), { parse_mode: 'Markdown' });
+            }
+        },
+    },
+
+    '/brain': {
+        description: 'Brain-Statistik anzeigen',
+        handler: async (bot, chatId) => {
+            try {
+                const total = (db.prepare('SELECT COUNT(*) as count FROM brain_entries').get() as any)?.count || 0;
+                const domains = db.prepare('SELECT domain, COUNT(*) as count FROM brain_entries GROUP BY domain ORDER BY count DESC').all() as any[];
+
+                let text = `🧠 *Brain-Statistik*\n\n📊 Gesamt: ${total} Einträge\n\n`;
+                if (domains.length > 0) {
+                    text += '*Domains:*\n';
+                    for (const d of domains) {
+                        text += `• ${d.domain}: ${d.count}\n`;
+                    }
+                }
+                await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+            } catch (e: any) {
+                await bot.sendMessage(chatId, formatError(e.message), { parse_mode: 'Markdown' });
+            }
+        },
+    },
+
+    '/search': {
+        description: 'Brain durchsuchen (z.B. /search proxmox)',
+        handler: async (bot, chatId, args) => {
+            if (!args.trim()) {
+                await bot.sendMessage(chatId, '⚠️ Bitte Suchbegriff angeben.\n\nBeispiel: `/search netzwerk`', { parse_mode: 'Markdown' });
+                return;
+            }
+            try {
+                bot.sendChatAction(chatId, 'typing');
+                const results = await searchBrain(args.trim(), 5);
+
+                if (results.length === 0) {
+                    await bot.sendMessage(chatId, `🔍 Keine Ergebnisse für "${args.trim()}".`);
+                    return;
+                }
+
+                let text = `🔍 *Ergebnisse für "${args.trim()}":*\n\n`;
+                for (const r of results) {
+                    text += `• *${r.entry.title}* (${r.entry.domain})\n`;
+                    if (r.entry.summary) text += `  ${r.entry.summary.slice(0, 100)}\n`;
+                    text += '\n';
+                }
+                await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+            } catch (e: any) {
+                await bot.sendMessage(chatId, formatError(e.message), { parse_mode: 'Markdown' });
+            }
+        },
+    },
+
+    '/ha': {
+        description: 'HA-Status für Server (z.B. /ha 1)',
+        handler: async (bot, chatId, args) => {
+            const serverId = parseInt(args);
+            if (!serverId) {
+                await bot.sendMessage(chatId, '⚠️ Bitte Server-ID angeben.\n\nBeispiel: `/ha 1`', { parse_mode: 'Markdown' });
+                return;
+            }
+            try {
+                bot.sendChatAction(chatId, 'typing');
+                const result = await tools.getHAStatus.execute({ serverId });
+                if (result.success) {
+                    let text = `🔄 *HA-Status Server ${serverId}*\n\n`;
+                    text += `Manager: ${result.manager?.status || 'N/A'}\n`;
+                    text += `Ressourcen: ${result.resources?.length || 0}\n`;
+                    if (result.resources?.length > 0) {
+                        for (const r of result.resources.slice(0, 10)) {
+                            text += `• ${r.sid || r.name}: ${r.state || r.status}\n`;
+                        }
+                    }
+                    await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+                } else {
+                    await bot.sendMessage(chatId, formatError(result.error || 'HA nicht verfügbar'), { parse_mode: 'Markdown' });
+                }
+            } catch (e: any) {
+                await bot.sendMessage(chatId, formatError(e.message), { parse_mode: 'Markdown' });
+            }
+        },
+    },
+
+    '/new': {
+        description: 'Neue Chat-Session starten',
+        handler: async (bot, chatId) => {
+            try {
+                const chatIdStr = String(chatId);
+                const newSessionId = createChatSession();
+                db.prepare('INSERT OR REPLACE INTO telegram_sessions (chat_id, session_id) VALUES (?, ?)').run(chatIdStr, newSessionId);
+                await bot.sendMessage(chatId, '🆕 *Neue Session gestartet*\n\nDein Gesprächskontext wurde zurückgesetzt.', { parse_mode: 'Markdown' });
             } catch (e: any) {
                 await bot.sendMessage(chatId, formatError(e.message), { parse_mode: 'Markdown' });
             }

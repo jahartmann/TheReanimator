@@ -7,7 +7,7 @@ import { Client, SFTPWrapper } from 'ssh2';
 import fs from 'fs';
 import path from 'path';
 
-interface SSHConfig {
+export interface SSHConfig {
     host: string;
     port: number;
     username: string;
@@ -24,72 +24,88 @@ interface FileInfo {
 export class SSHClient {
     private config: SSHConfig;
     private client: Client;
+    private _alive: boolean = false;
+    private _closeCallbacks: Array<() => void> = [];
 
     constructor(config: SSHConfig) {
         this.config = config;
         this.client = new Client();
+        this._trackLifecycle();
+    }
+
+    private _trackLifecycle() {
+        this.client.on('close', () => {
+            this._alive = false;
+            this._closeCallbacks.forEach(cb => { try { cb(); } catch {} });
+        });
+        this.client.on('end', () => {
+            this._alive = false;
+        });
+        this.client.on('error', () => {
+            this._alive = false;
+        });
+    }
+
+    /** Check if the SSH connection is still alive */
+    isAlive(): boolean {
+        return this._alive;
+    }
+
+    /** Register a callback for when the connection dies */
+    onClose(cb: () => void) {
+        this._closeCallbacks.push(cb);
+    }
+
+    /** Get a unique key for connection pooling: host:port:user */
+    getPoolKey(): string {
+        return `${this.config.host}:${this.config.port}:${this.config.username}`;
+    }
+
+    /** Get the underlying config (for pool reuse) */
+    getConfig(): SSHConfig {
+        return this.config;
     }
 
     // Connect to the server
     async connect(): Promise<void> {
-        return new Promise((resolve, reject) => {
-            this.client.on('ready', () => {
+        const connectConfig: any = {
+            host: this.config.host,
+            port: this.config.port,
+            username: this.config.username,
+            readyTimeout: 15000,
+            keepaliveInterval: 20000,
+            keepaliveCountMax: 15,
+            ...(process.env.SSH_DEBUG === '1' ? { debug: (msg: string) => console.log(`[SSH Debug] ${msg}`) } : {})
+        };
+
+        if (this.config.privateKey) {
+            connectConfig.privateKey = this.config.privateKey;
+        } else if (this.config.password) {
+            connectConfig.password = this.config.password;
+        }
+
+        const connectTimeout = new Promise<never>((_, reject) =>
+            setTimeout(() => { this.client.destroy(); reject(new Error('SSH connection timed out after 10000ms')); }, 10000)
+        );
+
+        const connection = new Promise<void>((resolve, reject) => {
+            this.client.once('ready', () => {
+                this._alive = true;
                 console.log(`[SSH] Connected to ${this.config.host}`);
                 resolve();
             });
-
-            this.client.on('error', (err) => {
+            this.client.once('error', (err) => {
                 console.error(`[SSH] Connection error:`, err);
                 reject(err);
             });
-
-            const connectConfig: any = {
-                host: this.config.host,
-                port: this.config.port,
-                username: this.config.username,
-                readyTimeout: 15000, // 15 seconds timeout for handshake
-                keepaliveInterval: 20000, // 20s - more aggressive per agent guidelines
-                keepaliveCountMax: 15,     // Higher tolerance for saturated networks
-                debug: (msg: string) => console.log(`[SSH Debug] ${msg}`)
-            };
-
-            if (this.config.privateKey) {
-                connectConfig.privateKey = this.config.privateKey;
-            } else if (this.config.password) {
-                connectConfig.password = this.config.password;
+            try {
+                this.client.connect(connectConfig);
+            } catch (e) {
+                reject(e);
             }
-
-            // Wrap connect in a promise race to handle TCP connection timeouts
-            const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => {
-                    this.client.destroy(); // Force close
-                    reject(new Error('SSH Connection timed out after 10000ms'));
-                }, 10000);
-            });
-
-            const connectPromise = new Promise<void>((resolveConnect, rejectConnect) => {
-                this.client.on('ready', () => {
-                    console.log(`[SSH] Connected to ${this.config.host}`);
-                    resolveConnect();
-                });
-
-                this.client.on('error', (err) => {
-                    console.error(`[SSH] Connection error:`, err);
-                    rejectConnect(err);
-                });
-
-                try {
-                    this.client.connect(connectConfig);
-                } catch (e) {
-                    rejectConnect(e);
-                }
-            });
-
-            // Return the race
-            Promise.race([connectPromise, timeoutPromise])
-                .then(() => resolve())
-                .catch(err => reject(err));
         });
+
+        await Promise.race([connection, connectTimeout]);
     }
 
 
@@ -127,8 +143,10 @@ export class SSHClient {
     // Execute a command
     // Reconnect helper
     async reconnect(): Promise<void> {
+        this._alive = false;
         try { this.client.end(); } catch { }
         this.client = new Client();
+        this._trackLifecycle();
         await this.connect();
     }
 
@@ -390,7 +408,29 @@ export class SSHClient {
         });
     }
     async disconnect(): Promise<void> {
+        this._alive = false;
         this.client.end();
+    }
+
+    /** Alias for disconnect (backwards compat) */
+    dispose(): void {
+        this._alive = false;
+        this.client.end();
+    }
+
+    /** Get an interactive shell stream (for terminal sessions) */
+    async shell(options?: { term?: string; cols?: number; rows?: number }): Promise<import('ssh2').ClientChannel> {
+        return new Promise((resolve, reject) => {
+            const ptyOpts = {
+                term: options?.term || 'xterm-256color',
+                cols: options?.cols || 80,
+                rows: options?.rows || 24,
+            };
+            this.client.shell(ptyOpts, (err, stream) => {
+                if (err) return reject(err);
+                resolve(stream);
+            });
+        });
     }
 }
 

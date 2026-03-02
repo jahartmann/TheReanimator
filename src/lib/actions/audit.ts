@@ -6,6 +6,8 @@ import db from '@/lib/db';
 import { sendTelegramMessage } from '@/lib/notifications/telegram';
 import { broadcastWithKeyboard } from '@/lib/agent/telegram';
 import { registerApproval, approvalKeyboard } from '@/lib/agent/telegram/approvals';
+import { getAuditLogs, type AuditFilters, type AuditEntry } from '@/lib/audit-log';
+import { getCurrentUser } from '@/lib/actions/userAuth';
 
 interface AuditFinding {
     severity: 'critical' | 'warning' | 'info';
@@ -257,4 +259,38 @@ function buildTelegramAlert(date: string, criticals: AuditFinding[]): string {
         msg += `\n...und ${criticals.length - 5} weitere. Siehe data/reports/${date}-audit.md`;
     }
     return msg;
+}
+
+// ====== AUDIT LOG SERVER ACTIONS ======
+
+export async function fetchAuditLogs(filters?: AuditFilters): Promise<{ logs: AuditEntry[]; total: number }> {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    return getAuditLogs(filters);
+}
+
+export async function getAuditStats(): Promise<{ totalToday: number; byCategory: Record<string, number>; topUsers: { username: string; count: number }[] }> {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const totalToday = (db.prepare(
+        `SELECT COUNT(*) as count FROM audit_log WHERE timestamp >= ?`
+    ).get(today) as { count: number }).count;
+
+    const categories = db.prepare(
+        `SELECT category, COUNT(*) as count FROM audit_log WHERE timestamp >= ? GROUP BY category`
+    ).all(today) as { category: string; count: number }[];
+
+    const byCategory: Record<string, number> = {};
+    for (const row of categories) {
+        byCategory[row.category] = row.count;
+    }
+
+    const topUsers = db.prepare(
+        `SELECT username, COUNT(*) as count FROM audit_log WHERE timestamp >= ? GROUP BY username ORDER BY count DESC LIMIT 5`
+    ).all(today) as { username: string; count: number }[];
+
+    return { totalToday, byCategory, topUsers };
 }

@@ -17,8 +17,19 @@ export function ChatMessage({ role, content, timestamp, toolInvocations }: ChatM
     if (role === 'data') return null;
     if (!content?.trim()) return null;
 
+    // Clean out status/tool blockquotes injected by the old streaming pipeline
+    let cleaned = content;
+    if (role === 'assistant') {
+        // Remove "> 🤖 *status...*" and "> 🛠️ **Starte Tool:**" lines
+        cleaned = cleaned.replace(/^>\s*[🤖🛠️❌]\s*.+$/gm, '');
+        // Remove consecutive blank lines left over
+        cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
+    }
+
+    if (!cleaned) return null;
+
     // Parse content for tool logs <<<TOOL:name:args>>>
-    const parts = content.split(/(<<<TOOL:[^>]+>>>)/g);
+    const parts = cleaned.split(/(<<<TOOL:[^>]+>>>)/g);
     const hasOnlyToolLogs = parts.every(p => !p.trim() || p.startsWith('<<<TOOL:'));
 
     if (role === 'system') {
@@ -105,10 +116,11 @@ export function ChatMessage({ role, content, timestamp, toolInvocations }: ChatM
                                         h2: ({ children }) => <h2 className="text-lg font-semibold mt-3 mb-2">{children}</h2>,
                                         h3: ({ children }) => <h3 className="text-base font-semibold mt-2 mb-1">{children}</h3>,
                                         blockquote: ({ children }) => (
-                                            <blockquote className="border-l-4 border-primary/50 pl-4 italic text-muted-foreground my-2">
+                                            <blockquote className="border-l-3 border-primary/40 pl-3 text-muted-foreground my-2 text-[13px]">
                                                 {children}
                                             </blockquote>
                                         ),
+                                        hr: () => <hr className="my-3 border-border/40" />,
                                         a: ({ children, href }) => (
                                             <a href={href} className="text-primary hover:underline" target="_blank" rel="noopener noreferrer">
                                                 {children}

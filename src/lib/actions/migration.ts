@@ -3,6 +3,8 @@
 import db from '@/lib/db';
 import { createSSHClient } from '@/lib/ssh';
 import { getVMs, migrateVM, MigrationOptions } from './vm';
+import { getCurrentUser } from '@/lib/actions/userAuth';
+import { logAudit } from '@/lib/audit-log';
 
 export interface MigrationStep {
     type: 'config' | 'vm' | 'lxc' | 'finalize';
@@ -48,6 +50,9 @@ export async function startServerMigration(
     }
 ): Promise<{ success: boolean; taskId?: number; message?: string }> {
     try {
+        const user = await getCurrentUser();
+        if (!user) return { success: false, message: 'Unauthorized' };
+
         const source = db.prepare('SELECT * FROM servers WHERE id = ?').get(sourceId) as any;
         const target = db.prepare('SELECT * FROM servers WHERE id = ?').get(targetId) as any;
 
@@ -110,6 +115,8 @@ export async function startServerMigration(
             sourceServerId: sourceId
         };
 
+        logAudit({ userId: user.id, username: user.username, action: 'migration.start', category: 'migration', targetType: 'server', targetId: String(sourceId), targetName: source.name, serverId: sourceId, details: { targetId, vmCount: sourceVms.length } });
+
         // Execute asynchronously
         setTimeout(() => executeMigrationTask(taskId, sourceVms, migrationExecOptions), 100);
 
@@ -136,6 +143,9 @@ export async function startVMMigration(
     }
 ): Promise<{ success: boolean; taskId?: number; message?: string }> {
     try {
+        const user = await getCurrentUser();
+        if (!user) return { success: false, message: 'Unauthorized' };
+
         const source = db.prepare('SELECT * FROM servers WHERE id = ?').get(sourceId) as any;
         const target = db.prepare('SELECT * FROM servers WHERE id = ?').get(targetId) as any;
 
@@ -440,6 +450,9 @@ async function executeMigrationTask(taskId: number, vms: any[], options: { stora
 
 // Get migration task status
 export async function getMigrationTask(taskId: number): Promise<MigrationTask | null> {
+    const user = await getCurrentUser();
+    if (!user) return null;
+
     const stmt = db.prepare(`
         SELECT 
             mt.*,
@@ -470,6 +483,9 @@ export async function getMigrationTask(taskId: number): Promise<MigrationTask | 
 
 // Get all migration tasks
 export async function getAllMigrationTasks(): Promise<MigrationTask[]> {
+    const user = await getCurrentUser();
+    if (!user) return [];
+
     const stmt = db.prepare(`
         SELECT 
             mt.*,
@@ -491,6 +507,9 @@ export async function getAllMigrationTasks(): Promise<MigrationTask[]> {
 
 // Cancel a running migration
 export async function cancelMigration(taskId: number): Promise<{ success: boolean }> {
+    const user = await getCurrentUser();
+    if (!user) return { success: false };
+
     const stmt = db.prepare(`
         UPDATE migration_tasks
         SET status = 'cancelled', completed_at = datetime('now')
@@ -502,12 +521,18 @@ export async function cancelMigration(taskId: number): Promise<{ success: boolea
 
 // Delete a migration task
 export async function deleteMigrationTask(taskId: number): Promise<{ success: boolean }> {
+    const user = await getCurrentUser();
+    if (!user) return { success: false };
+
     db.prepare('DELETE FROM migration_tasks WHERE id = ?').run(taskId);
     return { success: true };
 }
 
 // Clear all completed/failed/cancelled migration history
 export async function clearMigrationHistory(): Promise<{ success: boolean }> {
+    const user = await getCurrentUser();
+    if (!user) return { success: false };
+
     db.prepare("DELETE FROM migration_tasks WHERE status IN ('completed', 'failed', 'cancelled')").run();
     return { success: true };
 }

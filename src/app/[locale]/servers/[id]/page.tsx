@@ -4,7 +4,7 @@ import db from '@/lib/db';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Activity, LayoutDashboard, Monitor, Network as NetworkIcon, HardDrive, Terminal } from "lucide-react";
+import { Activity, LayoutDashboard, Monitor, Network as NetworkIcon, HardDrive, Terminal, Shield } from "lucide-react";
 
 import { getServerInfo } from '@/lib/actions/monitoring';
 import { getVMs } from '@/lib/actions/vm';
@@ -97,6 +97,12 @@ export default async function ServerDetailPage({
                             <NetworkIcon className="h-4 w-4" />
                             {t('network')}
                         </TabsTrigger>
+                        {server.type === 'pve' && (
+                            <TabsTrigger value="ha" className="gap-2 px-4 py-2">
+                                <Shield className="h-4 w-4" />
+                                {t('haCluster')}
+                            </TabsTrigger>
+                        )}
                         <TabsTrigger value="debug" className="gap-2 px-4 py-2">
                             <Terminal className="h-4 w-4" />
                             {t('debug')}
@@ -128,6 +134,12 @@ export default async function ServerDetailPage({
                         <ServerNetwork info={info} serverId={serverId} />
                     </TabsContent>
 
+                    {server.type === 'pve' && (
+                        <TabsContent value="ha">
+                            <HADashboard serverId={serverId} />
+                        </TabsContent>
+                    )}
+
                     <TabsContent value="debug">
                         <Card className="overflow-hidden border-muted/60 bg-muted/5">
                             <CardContent className="p-0">
@@ -146,3 +158,4 @@ export default async function ServerDetailPage({
 import { getScanResults } from '@/lib/actions/scan';
 import { ServerHealth } from '@/components/server/details/ServerHealth';
 import { ShieldCheck } from 'lucide-react';
+import HADashboard from '@/components/ha/HADashboard';

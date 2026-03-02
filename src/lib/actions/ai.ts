@@ -1,34 +1,9 @@
 'use server';
 
-import { headers, cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
-import { routing } from '@/i18n/routing';
 import db from '@/lib/db';
 import { request } from 'undici';
-
-// Helper function to get locale from request
-async function getServerLocale(): Promise<string> {
-    const headersList = await headers();
-    const cookieStore = await cookies();
-
-    // Try to get locale from cookie first
-    const cookieLocale = cookieStore.get('NEXT_LOCALE')?.value;
-    if (cookieLocale && routing.locales.includes(cookieLocale as any)) {
-        return cookieLocale;
-    }
-
-    // Try to get from Accept-Language header
-    const acceptLanguage = headersList.get('accept-language');
-    if (acceptLanguage) {
-        const preferredLocale = acceptLanguage.split(',')[0].split('-')[0];
-        if (routing.locales.includes(preferredLocale as any)) {
-            return preferredLocale;
-        }
-    }
-
-    // Fallback to default locale
-    return routing.defaultLocale;
-}
+import { getServerLocale } from '@/lib/utils/locale';
 
 // --- Settings Management ---
 

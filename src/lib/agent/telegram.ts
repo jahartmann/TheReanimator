@@ -1,6 +1,7 @@
 import TelegramBot from 'node-telegram-bot-api';
 import db from '@/lib/db';
 import { chatWithAgent } from './core';
+import { createChatSession } from './tools';
 import { COMMANDS, handleCallbackQuery } from './telegram/commands';
 import { getConversationState, setConversationState, clearConversationState } from './telegram/context';
 
@@ -150,36 +151,74 @@ function isUserAuthorized(chatId: string | number): boolean {
 }
 
 /**
- * Format response text for Telegram — clean and readable.
- * Strip excessive Markdown, keep it plain and professional.
+ * Format response text for Telegram — clean, compact, and readable.
+ * Keeps Telegram-compatible Markdown (bold, italic, code, pre).
+ * Strips what Telegram can't render or what looks bad on mobile.
  */
 function formatForTelegram(text: string): string {
-    let formatted = text;
+    let f = text;
 
-    // Remove tool markers completely
-    formatted = formatted.replace(/<<<TOOL:(\w+):([^>]+)>>>/g, '');
+    // 1. Remove tool markers completely
+    f = f.replace(/<<<TOOL:\w+:[^>]*>>>/g, '');
 
-    // Convert headers to simple text with emoji
-    formatted = formatted.replace(/^### (.+)$/gm, '📌 $1');
-    formatted = formatted.replace(/^## (.+)$/gm, '$1');
-    formatted = formatted.replace(/^# (.+)$/gm, '$1');
+    // 2. Remove blockquote status lines injected by the streaming pipeline
+    f = f.replace(/^>\s*[🤖🛠️❌⚠️]\s*\*?.+?\*?\s*$/gm, '');
 
-    // Remove bold/italic markers — keep the text
-    formatted = formatted.replace(/\*\*(.+?)\*\*/g, '$1');
-    formatted = formatted.replace(/\*(.+?)\*/g, '$1');
-    formatted = formatted.replace(/_(.+?)_/g, '$1');
+    // 3. Convert markdown headers → bold text (Telegram has no header support)
+    f = f.replace(/^#{1,3}\s+(.+)$/gm, '*$1*');
 
-    // Status indicators
-    formatted = formatted.replace(/\[OK\]/g, '✅');
-    formatted = formatted.replace(/\[ERROR\]/g, '❌');
-    formatted = formatted.replace(/\[WARNING\]/g, '⚠️');
-    formatted = formatted.replace(/\[INFO\]/g, 'ℹ️');
-    formatted = formatted.replace(/\[SUCCESS\]/g, '✅');
+    // 4. Convert **bold** → *bold* (Telegram Markdown uses single asterisks)
+    f = f.replace(/\*\*(.+?)\*\*/g, '*$1*');
 
-    // Clean up excessive newlines (max 2 consecutive)
-    formatted = formatted.replace(/\n{3,}/g, '\n\n');
+    // 5. Convert `inline code` stays as-is (Telegram supports it)
+    // 6. Convert ```code blocks``` → Telegram pre blocks
+    f = f.replace(/```(\w*)\n([\s\S]*?)```/g, '```\n$2```');
 
-    return formatted.trim();
+    // 7. Status indicators
+    f = f.replace(/\[OK\]/g, '✅');
+    f = f.replace(/\[ERROR\]/g, '❌');
+    f = f.replace(/\[WARNING\]/g, '⚠️');
+    f = f.replace(/\[INFO\]/g, 'ℹ️');
+    f = f.replace(/\[SUCCESS\]/g, '✅');
+
+    // 8. Convert markdown tables to compact text (tables look terrible on mobile)
+    f = f.replace(/^\|(.+)\|$/gm, (_, row: string) => {
+        const cells = row.split('|').map((c: string) => c.trim()).filter(Boolean);
+        return cells.join(' | ');
+    });
+    // Remove table separator lines
+    f = f.replace(/^[\s|:-]+$/gm, '');
+
+    // 9. Convert markdown links [text](url) → text (url)
+    f = f.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
+
+    // 10. Clean up: max 2 consecutive newlines, trim each line
+    f = f.replace(/\n{3,}/g, '\n\n');
+    f = f.split('\n').map(l => l.trimEnd()).join('\n');
+
+    return f.trim();
+}
+
+/**
+ * Truncate a response that's too long for Telegram.
+ * Tries to cut at a natural boundary (sentence, paragraph).
+ */
+function truncateForTelegram(text: string, maxLen: number = 3500): string {
+    if (text.length <= maxLen) return text;
+
+    // Try to cut at last paragraph break before limit
+    const cutAt = text.lastIndexOf('\n\n', maxLen);
+    if (cutAt > maxLen * 0.5) {
+        return text.slice(0, cutAt) + '\n\n... (gekürzt)';
+    }
+
+    // Fall back to last sentence
+    const sentenceEnd = text.lastIndexOf('. ', maxLen);
+    if (sentenceEnd > maxLen * 0.5) {
+        return text.slice(0, sentenceEnd + 1) + '\n\n... (gekürzt)';
+    }
+
+    return text.slice(0, maxLen) + '... (gekürzt)';
 }
 
 function setupListeners(bot: TelegramBot) {
@@ -235,23 +274,16 @@ function setupListeners(bot: TelegramBot) {
             if (sessionRow) {
                 sessionId = sessionRow.session_id;
             } else {
-                // Create new session via tool/core helper usually, but here we invoke core directly
-                // We need to import createChatSession from tools or core? 
-                // It's exported from tools.ts (which core uses). 
-                // Let's import it dynamically to avoid cycles if possible or just use what we have.
-                // We will rely on chatWithAgent to create it if we pass undefined, BUT we want to persist it.
-                // So we should create it first.
-                // We need to import `createChatSession` from `./tools`? No, `core.ts` imports it.
-                // Let's assume chatWithAgent returns sessionId and we save it then.
-                sessionId = 0; // Placeholder
+                // Create a real session and persist the mapping
+                sessionId = createChatSession();
+                telegramSessions.set(chatId, sessionId);
+                db.prepare('INSERT OR REPLACE INTO telegram_sessions (chat_id, session_id) VALUES (?, ?)')
+                    .run(chatIdStr, sessionId);
             }
 
-            // 2. Load History if session exists
+            // 2. Load recent history for context
             let history: any[] = [];
             if (sessionId) {
-                // Import getChatHistory dynamically or assume availability?
-                // It is better to move getChatHistory to a shared helper or db.
-                // For now, let's duplicate the DB call for safety/speed or import.
                 const messages = db.prepare(`
                     SELECT role, content 
                     FROM chat_messages 
@@ -266,63 +298,65 @@ function setupListeners(bot: TelegramBot) {
                 }));
             }
 
-            // 3. Call Agent with History & Platform Info
-            // We need to update chatWithAgent signature in core.ts to accept options/platform
-            // For now, we inject a system instruction into history if core doesn't support it yet
-            // OR we update core.ts next. 
-            // Let's assume we will update core.ts to accept `platform` options.
-            // But since I cannot update both atomically, I will pass it as a special system message appended?
-            // No, deeper integration is better.
+            // 3. Call agent with Telegram platform flag (keeps responses short)
+            const result = await chatWithAgent(text, history, sessionId || undefined, 'telegram');
 
-            // For this step, I will use the history.
-            const result = await chatWithAgent(text, history, sessionId || undefined);
-
-            // 4. Persist Session ID if new
-            if (!sessionId && result.sessionId) {
+            // 4. Update session mapping if core created a different session
+            if (result.sessionId && result.sessionId !== sessionId) {
                 db.prepare('INSERT OR REPLACE INTO telegram_sessions (chat_id, session_id) VALUES (?, ?)').run(chatIdStr, result.sessionId);
+                telegramSessions.set(chatId, result.sessionId);
                 sessionId = result.sessionId;
             }
 
-            // Format and send response with improved Telegram formatting
-            const maxLen = 4000;
-            let response = result.response;
+            // Format for Telegram
+            let response = formatForTelegram(result.response);
 
-            // Enhance formatting for Telegram
-            response = formatForTelegram(response);
-
-            const sendSafeMessage = async (text: string) => {
+            const sendSafeMessage = async (msg: string) => {
                 try {
-                    // Send as plain text — clean and reliable
-                    await bot.sendMessage(chatId, text, {
-                        disable_web_page_preview: true
+                    // Try Markdown first, fall back to plain text
+                    await bot.sendMessage(chatId, msg, {
+                        parse_mode: 'Markdown',
+                        disable_web_page_preview: true,
                     });
-                } catch (e: any) {
-                    console.error('[Telegram] Failed to send message:', e.message);
+                } catch {
+                    // Markdown parsing failed — send as plain text
+                    try {
+                        await bot.sendMessage(chatId, msg, {
+                            disable_web_page_preview: true,
+                        });
+                    } catch (e: any) {
+                        console.error('[Telegram] Failed to send message:', e.message);
+                    }
                 }
             };
+
+            // Telegram max is 4096, keep margin for safety
+            const maxLen = 3800;
 
             if (response.length <= maxLen) {
                 await sendSafeMessage(response);
             } else {
-                // Smart split: try to split at newlines, not mid-sentence
+                // Split into chunks at paragraph boundaries
                 const chunks: string[] = [];
                 let currentChunk = '';
-                const lines = response.split('\n');
 
-                for (const line of lines) {
+                for (const line of response.split('\n')) {
                     if ((currentChunk + line + '\n').length > maxLen) {
                         if (currentChunk) chunks.push(currentChunk.trim());
-                        currentChunk = line + '\n';
+                        // If a single line exceeds maxLen, truncate it
+                        currentChunk = line.length > maxLen ? truncateForTelegram(line, maxLen) + '\n' : line + '\n';
                     } else {
                         currentChunk += line + '\n';
                     }
                 }
                 if (currentChunk.trim()) chunks.push(currentChunk.trim());
 
-                // Send chunks with small delay
-                for (let i = 0; i < chunks.length; i++) {
-                    await sendSafeMessage(`${chunks[i]}\n\n${i < chunks.length - 1 ? '↓ _Fortsetzung..._' : ''}`);
-                    if (i < chunks.length - 1) await new Promise(r => setTimeout(r, 500));
+                // Max 3 chunks — truncate if too many parts
+                const toSend = chunks.slice(0, 3);
+                for (let i = 0; i < toSend.length; i++) {
+                    const suffix = i < toSend.length - 1 ? '\n\n_...weiter_' : '';
+                    await sendSafeMessage(toSend[i] + suffix);
+                    if (i < toSend.length - 1) await new Promise(r => setTimeout(r, 300));
                 }
             }
         } catch (error: any) {

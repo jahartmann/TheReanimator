@@ -1,52 +1,49 @@
-# TOOLS of the Trade
+# Tool Invocation Protocol
 
-*A compendium of the artifacts and spells available to the Reanimator.*
+## Syntax
+Call tools with this EXACT format:
+```
+<<<TOOL:ToolName:{"param":"value","param2":"value2"}>>>
+```
 
-## 1. Observation Tools (The Eyes)
+## Rules
+1. ALWAYS use the `<<<TOOL:Name:{args}>>>` syntax. Never invent tool results.
+2. You can call MULTIPLE tools in one response — each on its own line.
+3. After calling a tool, WAIT for the result before interpreting it.
+4. If a tool fails, explain the error and suggest alternatives.
+5. Use tools BEFORE answering infrastructure questions — don't guess.
 
-### `getServers`
-- **Desc:** Lists all nodes in the cluster.
-- **Use:** First step in any reconnaissance.
+## Examples
 
-### `listVMs(serverId?)`
-- **Desc:** Returns a census of the undead (VMs/CTs).
-- **Use:** To find a target ID or check status.
+List all servers:
+```
+<<<TOOL:getServers:{}>>>
+```
 
-### `getVMStatus(vmid)`
-- **Desc:** A focused gaze on a single entity.
-- **Use:** Verifying if a VM is truly dead or just sleeping.
+Start a VM:
+```
+<<<TOOL:manageVM:{"vmid":100,"action":"start"}>>>
+```
 
-## 2. Manipulation Tools (The Hands)
+Read a file from a remote server:
+```
+<<<TOOL:readFile:{"serverId":1,"path":"/etc/hostname"}>>>
+```
 
-### `manageVM(vmid, action)`
-- **Actions:** `start`, `stop`, `reboot`, `shutdown`.
-- **Cost:** High (Risk of service interruption).
-- **Note:** Always verify with `getVMStatus` after casting.
+Save knowledge to Brain:
+```
+<<<TOOL:manageBrain:{"action":"save","key":"server1-ip","title":"Server 1 IP","content":"192.168.1.10"}>>>
+```
 
-### `executeSSHCommand(serverId, command)`
-- **Desc:** The universal spell. Executes raw shell commands.
-- **Risk:** Extreme.
-- **Constraint:** Requires `confirmed=true` for non-read-only commands.
+Multiple tools in one response:
+```
+<<<TOOL:getServers:{}>>>
+<<<TOOL:listVMs:{}>>>
+```
 
-## 3. Creation Tools (The Spark)
+## Risk Levels
+- **Safe (auto):** getServers, listVMs, getVMStatus, readFile, listDirectory, getSystemMetrics
+- **Moderate:** manageVM (start/stop), executeSSHCommand (read-only), manageService
+- **High (confirm first):** executeCommand (write ops), writeFile, managePackages (install/remove)
 
-### `createVM` / `createContainer`
-- **Desc:** Fabricates a new shell from the void.
-- **Parameters:** Needs precise specs (Cores, RAM, Disk).
-- **Default:** Debian 12 is the standard clay.
-
-## 4. Mental Tools (The Brain)
-
-### `remember(category, content)`
-- **Desc:** Archives a fact into `MEMORY.md`.
-- **Use:** When you learn something new that shouldn't be forgotten.
-
-### `recall()`
-- **Desc:** Reads the entire `MEMORY.md`.
-- **Use:** To study history before acting.
-
-## 5. Communication (The Voice)
-
-### `notify_user`
-- **Desc:** Sends a message to the Summoner.
-- **Use:** ONLY for task boundaries or critical alerts.
+The full list of available tools is injected dynamically below.

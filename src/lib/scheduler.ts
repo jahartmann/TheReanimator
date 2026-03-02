@@ -17,6 +17,7 @@ import { sendTaskNotification } from '@/lib/monitoring/notification-manager';
 const globalForScheduler = global as unknown as { schedulerInitialized: boolean | undefined };
 
 let scheduledTasks: any[] = [];
+let intervalHandles: ReturnType<typeof setInterval>[] = [];
 if (globalForScheduler.schedulerInitialized) {
     // If reloaded, we might need to clear old tasks if we could access them.
     // But since we can't easily access the *previous* module's variables,
@@ -67,7 +68,7 @@ function writeHeartbeat() {
 function initHeartbeat() {
     console.log('[Scheduler] Starting Heartbeat (every 30s) → data/heartbeat.json');
     writeHeartbeat(); // Write immediately
-    setInterval(writeHeartbeat, 30000); // Then every 30s
+    intervalHandles.push(setInterval(writeHeartbeat, 30000)); // Then every 30s
 }
 
 async function initNetworkAnalysisJobs() {
@@ -100,9 +101,9 @@ function initOneTimeJobTicker() {
     checkOneTimeJobs();
 
     // Loop every 60s
-    setInterval(() => {
+    intervalHandles.push(setInterval(() => {
         checkOneTimeJobs();
-    }, 60000);
+    }, 60000));
 }
 
 function checkOneTimeJobs() {
@@ -145,9 +146,11 @@ export function initScheduler() {
     console.log('[Scheduler] Initializing...');
     globalForScheduler.schedulerInitialized = true;
 
-    // Stop existing tasks
+    // Stop existing tasks and intervals
     scheduledTasks.forEach(task => task.stop());
     scheduledTasks = [];
+    intervalHandles.forEach(h => clearInterval(h));
+    intervalHandles = [];
 
     // Auto-create system jobs
     // Note: Network Analysis removed by user request. Replaced with System Audit.
@@ -180,23 +183,35 @@ export function initScheduler() {
     refreshNodeStats().catch(e => console.error('[Startup Node Stats] Failed:', e));
 }
 
-// Background refresh of node stats (CPU, RAM) every 30 minutes
-function initNodeStatsTicker() {
-    console.log('[Scheduler] Starting Node Stats Ticker (every 30 min)...');
+// Background refresh of node stats (CPU, RAM) - interval configurable via settings
+function getNodeStatsInterval(): number {
+    try {
+        const row = db.prepare("SELECT value FROM settings WHERE key = 'monitoring_interval_minutes'").get() as { value: string } | undefined;
+        const minutes = parseInt(row?.value || '5');
+        return Math.max(1, Math.min(60, minutes)) * 60 * 1000;
+    } catch {
+        return 5 * 60 * 1000; // Default 5 minutes
+    }
+}
 
-    setInterval(() => {
+function initNodeStatsTicker() {
+    const intervalMs = getNodeStatsInterval();
+    const intervalMin = Math.round(intervalMs / 60000);
+    console.log(`[Scheduler] Starting Node Stats Ticker (every ${intervalMin} min)...`);
+
+    intervalHandles.push(setInterval(() => {
         refreshNodeStats().catch(e => console.error('[Node Stats Ticker] Failed:', e));
-    }, 30 * 60 * 1000); // Every 30 minutes
+    }, intervalMs));
 }
 
 // Periodic infrastructure scans every 5 hours
 function initPeriodicScans() {
     console.log('[Scheduler] Starting Periodic Scan Ticker (every 5 hours)...');
 
-    setInterval(() => {
+    intervalHandles.push(setInterval(() => {
         console.log('[Scheduler] Running periodic infrastructure scan...');
         scanEntireInfrastructure().catch(e => console.error('[Periodic Scan] Failed:', e));
-    }, 5 * 60 * 60 * 1000); // Every 5 hours
+    }, 5 * 60 * 60 * 1000)); // Every 5 hours
 }
 
 // Refresh node stats and cache to DB
@@ -311,6 +326,17 @@ async function refreshNodeStats() {
                     serverId: server.id,
                 }).catch(() => { });
 
+                // Emit sense event for reflex system (failover integration)
+                try {
+                    const { emitSenseEvent } = await import('@/lib/agent/senses/event-bus');
+                    emitSenseEvent({
+                        type: 'infrastructure_change',
+                        source: `server:${server.id}`,
+                        data: { eventType: 'node_offline', serverId: server.id, serverName: server.name },
+                        severity: 'critical',
+                    });
+                } catch { /* event-bus optional */ }
+
                 // Brain: Learn about server going offline
                 try {
                     const { learnFromInfraChange } = await import('@/lib/agent/memory/active-learning');
@@ -326,7 +352,7 @@ async function refreshNodeStats() {
 // Monitoring ticker - run due checks every minute
 function initMonitoringTicker() {
     console.log('[Scheduler] Starting Monitor Check Ticker (every 60s)...');
-    setInterval(async () => {
+    intervalHandles.push(setInterval(async () => {
         try {
             const result = await runDueChecks();
             if (result.executed > 0) {
@@ -345,7 +371,7 @@ function initMonitoringTicker() {
         } catch (e) {
             console.error('[Monitor] Ticker failed:', e);
         }
-    }, 60000); // Every 60 seconds
+    }, 60000)); // Every 60 seconds
 }
 
 // Daily digest at 8:00 AM
@@ -389,18 +415,16 @@ async function classifyMissingVMs(
 
     try {
         const { getServer, determineNodeName } = await import('@/lib/actions/vm');
-        const { createSSHClient } = await import('@/lib/ssh');
+        const { withSSH } = await import('@/lib/ssh-pool');
 
         const srv = await getServer(serverId);
-        const ssh = createSSHClient(srv);
-        await ssh.connect();
-        const nodeName = await determineNodeName(ssh);
-
-        // Fetch recent tasks (last 2 hours), filter for destroy operations
-        const tasksJson = await ssh.exec(
-            `pvesh get /nodes/${nodeName}/tasks --output-format json --limit 100 2>/dev/null || echo "[]"`
-        );
-        await ssh.disconnect();
+        const { nodeName, tasksJson } = await withSSH(srv, async (ssh) => {
+            const nodeName = await determineNodeName(ssh);
+            const tasksJson = await ssh.exec(
+                `pvesh get /nodes/${nodeName}/tasks --output-format json --limit 100 2>/dev/null || echo "[]"`
+            );
+            return { nodeName, tasksJson };
+        });
 
         const tasks: any[] = JSON.parse(tasksJson);
         const twoHoursAgo = Date.now() / 1000 - 7200;

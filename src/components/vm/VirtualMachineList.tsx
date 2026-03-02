@@ -1,15 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Monitor, Smartphone, ArrowRightLeft, PlayCircle, StopCircle, Loader2, Stethoscope, MoreHorizontal, Power, RefreshCw, Trash2, HardDrive, FileText, Activity, Sparkles, CheckCircle, AlertTriangle, Info, AlertCircle } from "lucide-react"
+import { Monitor, Smartphone, ArrowRightLeft, PlayCircle, StopCircle, Loader2, Stethoscope, MoreHorizontal, Power, RefreshCw, Trash2, HardDrive, FileText, Activity, Sparkles, CheckCircle, AlertTriangle, Info, AlertCircle, Camera } from "lucide-react"
 import { VirtualMachine } from '@/lib/actions/vm';
 import { MigrationDialog } from './MigrationDialog';
+import { SnapshotDialog } from './SnapshotDialog';
+import { BackupDialog } from './BackupDialog';
 import { Tag, assignTagsToResource } from '@/lib/actions/tags';
 import { TagSelector } from '@/components/ui/TagSelector';
 import { toast } from 'sonner';
@@ -29,8 +31,13 @@ interface VirtualMachineListProps {
 export function VirtualMachineList({ vms, currentServerId, otherServers, availableTags }: VirtualMachineListProps) {
     const t = useTranslations('virtualMachineList');
     const locale = useLocale();
+    const [localVms, setLocalVms] = useState<VirtualMachine[]>(vms);
     const [selectedVm, setSelectedVm] = useState<VirtualMachine | null>(null);
+    const [snapshotVm, setSnapshotVm] = useState<VirtualMachine | null>(null);
+    const [backupVm, setBackupVm] = useState<VirtualMachine | null>(null);
     const [loadingTags, setLoadingTags] = useState<Record<string, boolean>>({});
+
+    useEffect(() => { setLocalVms(vms); }, [vms]);
 
     // AI Health Check
     const [healthCheckLoading, setHealthCheckLoading] = useState<Record<string, boolean>>({});
@@ -55,7 +62,7 @@ export function VirtualMachineList({ vms, currentServerId, otherServers, availab
             const res = await assignTagsToResource(currentServerId, vm.vmid, newTags);
             if (res.success) {
                 toast.success(t('tagsUpdated', { name: vm.name }));
-                vm.tags = newTags;
+                setLocalVms(prev => prev.map(v => v.vmid === vm.vmid ? { ...v, tags: newTags } : v));
             } else {
                 toast.error(res.message || t('failedUpdateTags'));
             }
@@ -73,19 +80,19 @@ export function VirtualMachineList({ vms, currentServerId, otherServers, availab
                     <Monitor className="h-5 w-5" />
                     {t('title')}
                     <Badge variant="secondary" className="ml-2">
-                        {vms.length}
+                        {localVms.length}
                     </Badge>
                 </CardTitle>
             </CardHeader>
             <CardContent>
-                {vms.length === 0 ? (
+                {localVms.length === 0 ? (
                     <div className="text-center py-6 text-muted-foreground">
                         <Monitor className="h-8 w-8 mx-auto mb-2 opacity-50" />
                         <p>{t('noVms')}</p>
                     </div>
                 ) : (
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                        {vms.map((vm) => (
+                        {localVms.map((vm) => (
                             <div
                                 key={vm.vmid}
                                 className="flex flex-col gap-2 p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
@@ -161,6 +168,24 @@ export function VirtualMachineList({ vms, currentServerId, otherServers, availab
                                         <Button
                                             variant="ghost"
                                             size="icon"
+                                            onClick={() => setSnapshotVm(vm)}
+                                            title={t('snapshots')}
+                                            className="text-cyan-500 hover:text-cyan-600 hover:bg-cyan-500/10"
+                                        >
+                                            <Camera className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            onClick={() => setBackupVm(vm)}
+                                            title={t('backup')}
+                                            className="text-amber-500 hover:text-amber-600 hover:bg-amber-500/10"
+                                        >
+                                            <HardDrive className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
                                             onClick={() => setSelectedVm(vm)}
                                             title={t('migrate')}
                                         >
@@ -189,6 +214,24 @@ export function VirtualMachineList({ vms, currentServerId, otherServers, availab
                     otherServers={otherServers}
                     open={!!selectedVm}
                     onOpenChange={(open) => !open && setSelectedVm(null)}
+                />
+            )}
+
+            {snapshotVm && (
+                <SnapshotDialog
+                    vm={snapshotVm}
+                    serverId={currentServerId}
+                    open={!!snapshotVm}
+                    onOpenChange={(open) => !open && setSnapshotVm(null)}
+                />
+            )}
+
+            {backupVm && (
+                <BackupDialog
+                    vm={backupVm}
+                    serverId={currentServerId}
+                    open={!!backupVm}
+                    onOpenChange={(open) => !open && setBackupVm(null)}
                 />
             )}
 

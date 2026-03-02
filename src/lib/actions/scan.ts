@@ -1,39 +1,14 @@
 'use server';
 
-import { headers, cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
-import { routing } from '@/i18n/routing';
 import db from '@/lib/db';
-import { createSSHClient } from '@/lib/ssh';
+import { withSSH } from '@/lib/ssh-pool';
 import { getServer, determineNodeName } from './vm';
 import { getVMs, getVMConfig } from './vm';
 import { analyzeConfigWithAI, analyzeHostWithAI, HealthResult, getAISettings } from './ai';
 import { runNetworkAnalysis } from './network_analysis';
 import { getCurrentUser } from './userAuth';
-
-// Helper function to get locale from request
-async function getServerLocale(): Promise<string> {
-    const headersList = await headers();
-    const cookieStore = await cookies();
-
-    // Try to get locale from cookie first
-    const cookieLocale = cookieStore.get('NEXT_LOCALE')?.value;
-    if (cookieLocale && routing.locales.includes(cookieLocale as any)) {
-        return cookieLocale;
-    }
-
-    // Try to get from Accept-Language header
-    const acceptLanguage = headersList.get('accept-language');
-    if (acceptLanguage) {
-        const preferredLocale = acceptLanguage.split(',')[0].split('-')[0];
-        if (routing.locales.includes(preferredLocale as any)) {
-            return preferredLocale;
-        }
-    }
-
-    // Fallback to default locale
-    return routing.defaultLocale;
-}
+import { getServerLocale } from '@/lib/utils/locale';
 
 export interface ScanResult {
     id: number;
@@ -117,58 +92,54 @@ export async function scanHost(serverId: number) {
     const server = await getServer(serverId);
     if (!server) throw new Error('Server not found');
 
-    const ssh = createSSHClient(server);
     try {
-        await ssh.connect();
+        return await withSSH(server, async (ssh) => {
+            // Fetch critical files
+            const filesToFetch = [
+                '/etc/network/interfaces',
+                '/etc/pve/storage.cfg',
+                '/etc/sysctl.conf',
+                '/etc/hosts'
+            ];
 
-        // Fetch critical files
-        const filesToFetch = [
-            '/etc/network/interfaces',
-            '/etc/pve/storage.cfg',
-            '/etc/sysctl.conf',
-            '/etc/hosts'
-        ];
+            const files = [];
 
-        const files = [];
+            for (const file of filesToFetch) {
+                try {
+                    const content = await ssh.exec(`cat ${file} 2>/dev/null`);
+                    if (content && content.length > 0) {
+                        files.push({ filename: file, content });
+                    }
+                } catch { }
+            }
 
-        for (const file of filesToFetch) {
+            // Get ZFS status if exists
             try {
-                const content = await ssh.exec(`cat ${file} 2>/dev/null`);
-                if (content && content.length > 0) {
-                    files.push({ filename: file, content });
-                }
+                const zpool = await ssh.exec('zpool status 2>/dev/null');
+                if (zpool) files.push({ filename: 'zpool status', content: zpool });
             } catch { }
-        }
 
-        // Get ZFS status if exists
-        try {
-            const zpool = await ssh.exec('zpool status 2>/dev/null');
-            if (zpool) files.push({ filename: 'zpool status', content: zpool });
-        } catch { }
+            // Get Storage status
+            try {
+                const pvesm = await ssh.exec('pvesm status 2>/dev/null');
+                if (pvesm) files.push({ filename: 'pvesm status', content: pvesm });
+            } catch { }
 
-        // Get Storage status
-        try {
-            const pvesm = await ssh.exec('pvesm status 2>/dev/null');
-            if (pvesm) files.push({ filename: 'pvesm status', content: pvesm });
-        } catch { }
+            // Analyze
+            const analysis = await analyzeHostWithAI(files);
 
-        // Analyze
-        const analysis = await analyzeHostWithAI(files);
+            // Save
+            const stmt = db.prepare(`
+                INSERT INTO scan_results (server_id, vmid, type, result_json)
+                VALUES (?, ?, ?, ?)
+            `);
+            stmt.run(serverId, null, 'host', JSON.stringify(analysis));
 
-        // Save
-        const stmt = db.prepare(`
-            INSERT INTO scan_results (server_id, vmid, type, result_json)
-            VALUES (?, ?, ?, ?)
-        `);
-        stmt.run(serverId, null, 'host', JSON.stringify(analysis));
-
-        return { success: true, result: analysis };
-
+            return { success: true, result: analysis };
+        });
     } catch (e: any) {
         console.error('Host Scan Error:', e);
         return { success: false, error: e.message };
-    } finally {
-        await ssh.disconnect();
     }
 }
 // ... existing code ...

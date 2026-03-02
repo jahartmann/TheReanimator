@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { randomBytes } from 'crypto';
+import { logAudit } from '@/lib/audit-log';
 
 // ====== TYPES ======
 
@@ -102,21 +103,6 @@ export async function login(username: string, password: string): Promise<{ succe
 
         let validPassword = await bcrypt.compare(password, user.password_hash);
 
-        // AUTO-REPAIR FOR ADMIN
-        // If login failed, but user is 'admin' and tried password 'admin',
-        // it means the DB hash is likely from the old system or a different environment (mismatch).
-        // We force-repair the hash to allow entry.
-        if (!validPassword && username === 'admin' && password === 'admin') {
-            console.log('[Auth] Admin hash mismatch detected. Auto-repairing...');
-            const salt = bcrypt.genSaltSync(10);
-            const newHash = bcrypt.hashSync('admin', salt);
-            db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, user.id);
-            validPassword = true;
-            // Mark as needing change so they don't stay on default
-            db.prepare('UPDATE users SET force_password_change = 1 WHERE id = ?').run(user.id);
-            user.force_password_change = 1;
-        }
-
         if (!validPassword) {
             return { success: false, error: 'Ungültiger Benutzername oder Passwort' };
         }
@@ -133,9 +119,9 @@ export async function login(username: string, password: string): Promise<{ succe
             path: '/',
         });
 
-        // Add expiration timestamp cookie (readable by middleware for client-side validation)
+        // Add expiration timestamp cookie
         cookieStore.set('session_expires', expiresAt, {
-            httpOnly: false,
+            httpOnly: true,
             secure: false,
             sameSite: 'lax',
             maxAge: SESSION_DURATION_HOURS * 60 * 60,
@@ -143,6 +129,7 @@ export async function login(username: string, password: string): Promise<{ succe
         });
 
         db.prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?").run(user.id);
+        logAudit({ userId: user.id, username: user.username, action: 'auth.login', category: 'auth' });
 
         if (user.force_password_change) {
             return { success: true, requiresPasswordChange: true };
@@ -157,6 +144,9 @@ export async function login(username: string, password: string): Promise<{ succe
 
 export async function logout(): Promise<void> {
     try {
+        const user = await getCurrentUser();
+        if (user) logAudit({ userId: user.id, username: user.username, action: 'auth.logout', category: 'auth' });
+
         const cookieStore = await cookies();
         const sessionId = cookieStore.get('session')?.value;
 
@@ -208,6 +198,10 @@ export async function changePassword(currentPassword: string, newPassword: strin
     const user = await getCurrentUser();
     if (!user) return { success: false, error: 'Nicht angemeldet' };
 
+    if (!newPassword || newPassword.length < 12) {
+        return { success: false, error: 'Password must be at least 12 characters' };
+    }
+
     // Simplified First Run Flow:
     // If usage is 'force_password_change' (First Run), we trust the session (user must have just logged in)
     // and skip strict old password verification to allow recovery from mismatch / setup issues.
@@ -246,14 +240,8 @@ export async function createUser(data: { username: string; password: string; ema
         const result = db.prepare('INSERT INTO users (username, password_hash, email, is_admin, force_password_change) VALUES (?, ?, ?, ?, 1)')
             .run(data.username, hash, data.email || null, data.is_admin ? 1 : 0);
 
-        // Return created user for UI update
-        const newUser = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid) as any;
-        return {
-            success: true,
-            // Normally returning user object, but simplifying for now or check if UI needs it. 
-            // The UI code expects { success: true, user: ... } usually.
-            // Adding minimal user object return if possible, or success is enough for refresh.
-        };
+        logAudit({ userId: currentUser.id, username: currentUser.username, action: 'auth.createUser', category: 'auth', targetType: 'user', targetName: data.username });
+        return { success: true };
     } catch (e: any) {
         return { success: false, error: e.message };
     }
@@ -285,7 +273,9 @@ export async function deleteUser(userId: number): Promise<{ success: boolean; er
     const currentUser = await getCurrentUser();
     if (!currentUser?.is_admin) return { success: false, error: 'Unauthorized' };
     if (currentUser.id === userId) return { success: false, error: 'Self-deletion not allowed' };
+    const targetUser = db.prepare('SELECT username FROM users WHERE id = ?').get(userId) as { username: string } | undefined;
     db.prepare('DELETE FROM users WHERE id=?').run(userId);
+    logAudit({ userId: currentUser.id, username: currentUser.username, action: 'auth.deleteUser', category: 'auth', targetType: 'user', targetId: String(userId), targetName: targetUser?.username });
     return { success: true };
 }
 

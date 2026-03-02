@@ -5,6 +5,7 @@ import { Client } from 'ssh2';
 import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
+import { getCurrentUser } from '@/lib/actions/userAuth';
 
 // Types
 export interface ProvisioningProfile {
@@ -29,11 +30,17 @@ export interface ProvisioningStep {
 // --- Profile CRUD ---
 
 export async function getProfiles(): Promise<ProvisioningProfile[]> {
+    const user = await getCurrentUser();
+    if (!user) return [];
+
     const db = getDb();
     return db.prepare('SELECT * FROM provisioning_profiles ORDER BY name').all() as ProvisioningProfile[];
 }
 
 export async function getProfile(id: number): Promise<ProvisioningProfile | null> {
+    const user = await getCurrentUser();
+    if (!user) return null;
+
     const db = getDb();
     const profile = db.prepare('SELECT * FROM provisioning_profiles WHERE id = ?').get(id) as ProvisioningProfile | undefined;
     if (!profile) return null;
@@ -43,6 +50,9 @@ export async function getProfile(id: number): Promise<ProvisioningProfile | null
 }
 
 export async function createProfile(data: { name: string; description?: string; icon?: string }): Promise<{ success: boolean; id?: number; error?: string }> {
+    const user = await getCurrentUser();
+    if (!user) return { success: false, error: 'Unauthorized' };
+
     const db = getDb();
     try {
         const result = db.prepare('INSERT INTO provisioning_profiles (name, description, icon) VALUES (?, ?, ?)').run(
@@ -57,6 +67,9 @@ export async function createProfile(data: { name: string; description?: string; 
 }
 
 export async function updateProfile(id: number, data: { name?: string; description?: string; icon?: string }): Promise<{ success: boolean; error?: string }> {
+    const user = await getCurrentUser();
+    if (!user) return { success: false, error: 'Unauthorized' };
+
     const db = getDb();
     try {
         const updates: string[] = [];
@@ -77,6 +90,9 @@ export async function updateProfile(id: number, data: { name?: string; descripti
 }
 
 export async function deleteProfile(id: number): Promise<{ success: boolean; error?: string }> {
+    const user = await getCurrentUser();
+    if (!user) return { success: false, error: 'Unauthorized' };
+
     const db = getDb();
     try {
         db.prepare('DELETE FROM provisioning_profiles WHERE id = ?').run(id);
@@ -89,6 +105,9 @@ export async function deleteProfile(id: number): Promise<{ success: boolean; err
 // --- Step CRUD ---
 
 export async function addStep(profileId: number, step: { name: string; step_type: 'script' | 'file' | 'packages'; content: string; target_path?: string }): Promise<{ success: boolean; id?: number; error?: string }> {
+    const user = await getCurrentUser();
+    if (!user) return { success: false, error: 'Unauthorized' };
+
     const db = getDb();
     try {
         // Get max step_order
@@ -110,6 +129,9 @@ export async function addStep(profileId: number, step: { name: string; step_type
 }
 
 export async function updateStep(stepId: number, data: { name?: string; step_type?: string; content?: string; target_path?: string; step_order?: number }): Promise<{ success: boolean; error?: string }> {
+    const user = await getCurrentUser();
+    if (!user) return { success: false, error: 'Unauthorized' };
+
     const db = getDb();
     try {
         const updates: string[] = [];
@@ -132,6 +154,9 @@ export async function updateStep(stepId: number, data: { name?: string; step_typ
 }
 
 export async function deleteStep(stepId: number): Promise<{ success: boolean; error?: string }> {
+    const user = await getCurrentUser();
+    if (!user) return { success: false, error: 'Unauthorized' };
+
     const db = getDb();
     try {
         db.prepare('DELETE FROM provisioning_steps WHERE id = ?').run(stepId);
@@ -142,6 +167,9 @@ export async function deleteStep(stepId: number): Promise<{ success: boolean; er
 }
 
 export async function reorderSteps(profileId: number, stepIds: number[]): Promise<{ success: boolean; error?: string }> {
+    const user = await getCurrentUser();
+    if (!user) return { success: false, error: 'Unauthorized' };
+
     const db = getDb();
     try {
         const updateStmt = db.prepare('UPDATE provisioning_steps SET step_order = ? WHERE id = ? AND profile_id = ?');

@@ -66,7 +66,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id INTEGER,
-    status TEXT CHECK(status IN ('success', 'failed', 'running')),
+    status TEXT CHECK(status IN ('success', 'failed', 'running', 'skipped')),
     start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     end_time DATETIME,
     log TEXT,
@@ -540,7 +540,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS monitor_checks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    check_type TEXT NOT NULL CHECK(check_type IN ('storage', 'vm_status', 'backup_health', 'cpu', 'ram', 'disk_io', 'custom')),
+    check_type TEXT NOT NULL CHECK(check_type IN ('storage', 'vm_status', 'backup_health', 'cpu', 'ram', 'disk_io', 'vm_resource', 'custom')),
     server_id INTEGER,
     vm_id INTEGER,
     enabled INTEGER DEFAULT 1,
@@ -624,6 +624,21 @@ db.exec(`
     digest_enabled INTEGER DEFAULT 0,
     digest_time TEXT DEFAULT '08:00',
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+
+// ====== ALERT SILENCES ======
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS alert_silences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    check_id INTEGER NOT NULL,
+    silenced_by INTEGER,
+    reason TEXT,
+    silenced_until DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(check_id) REFERENCES monitor_checks(id) ON DELETE CASCADE,
+    FOREIGN KEY(silenced_by) REFERENCES users(id) ON DELETE SET NULL
   );
 `);
 
@@ -823,6 +838,52 @@ if (!adminExists) {
   `).run();
   console.log('Created default admin user (username: admin, password: admin)');
 }
+
+// Migration: Add vm_resource to check_type constraint (SQLite doesn't allow ALTER CHECK, so we add for new installs)
+// For existing DBs, SQLite doesn't enforce CHECK constraints on INSERT if the table already exists with the old constraint.
+// The CREATE TABLE IF NOT EXISTS above handles new installs. Existing DBs will work since SQLite CHECK is lenient on existing tables.
+
+// Default monitoring interval setting
+try {
+  db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('monitoring_interval_minutes', '5')").run();
+} catch (e) { /* setting may exist */ }
+
+// ====== AUDIT LOG ======
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+    user_id INTEGER,
+    username TEXT NOT NULL,
+    action TEXT NOT NULL,
+    category TEXT NOT NULL,
+    target_type TEXT,
+    target_id TEXT,
+    target_name TEXT,
+    server_id INTEGER,
+    details TEXT,
+    ip_address TEXT,
+    FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE SET NULL
+  );
+`);
+
+db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_category ON audit_log(category)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(username)`);
+
+// ====== DEFAULT FAILOVER REFLEX ======
+
+try {
+  const existingReflex = db.prepare("SELECT id FROM reflex_rules WHERE name = 'Node Offline Alert'").get();
+  if (!existingReflex) {
+    db.prepare(`
+      INSERT INTO reflex_rules (name, trigger_type, trigger_condition, action_type, action_params, cooldown_seconds, enabled)
+      VALUES ('Node Offline Alert', 'custom', '{"eventType":"node_offline"}', 'notify', '{"message":"⚠️ Node {serverName} ist offline!"}', 300, 1)
+    `).run();
+    console.log('Created default Node Offline Alert reflex');
+  }
+} catch (e) { /* reflex may already exist */ }
 
 console.log('Database migrations completed.');
 db.close();

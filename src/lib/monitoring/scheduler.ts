@@ -6,6 +6,7 @@ import { StorageCheck } from './checks/storage';
 import { VMStatusCheck } from './checks/vm-status';
 import { BackupHealthCheck } from './checks/backup-health';
 import { SystemHealthCheck } from './checks/system-health';
+import { VMResourceCheck } from './checks/vm-resource';
 import type { MonitorCheck, CheckConfig, CheckResult } from './checks/base';
 
 /**
@@ -25,6 +26,16 @@ export async function runDueChecks(): Promise<{ executed: number; errors: number
     for (const checkRow of dueChecks) {
         try {
             const config = parseCheckConfig(checkRow);
+
+            // Skip silenced checks
+            const silence = db.prepare(
+                `SELECT id FROM alert_silences WHERE check_id = ? AND silenced_until > datetime('now') LIMIT 1`
+            ).get(config.id);
+            if (silence) {
+                // Still run the check to track status, but suppress notifications
+                config.notification_mode = '__silenced__';
+            }
+
             const check = createCheck(config);
             if (!check) continue;
 
@@ -103,8 +114,8 @@ export async function runDueChecks(): Promise<{ executed: number; errors: number
                 }).catch(err => console.error('[Monitor] SenseEvent emission failed:', err));
             }
 
-            // Send notification if needed
-            if (result.status !== 'ok' || previousStatus !== 'ok') {
+            // Send notification if needed (skip if silenced)
+            if ((result.status !== 'ok' || previousStatus !== 'ok') && config.notification_mode !== '__silenced__') {
                 await sendNotification({
                     checkId: config.id,
                     checkName: config.name,
@@ -194,6 +205,7 @@ function createCheck(config: CheckConfig): MonitorCheck | null {
         case 'cpu':
         case 'ram':
         case 'disk_io': return new SystemHealthCheck(config);
+        case 'vm_resource': return new VMResourceCheck(config);
         default:
             console.warn(`[Monitor] Unknown check type: ${config.check_type}`);
             return null;

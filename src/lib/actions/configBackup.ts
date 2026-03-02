@@ -1,36 +1,13 @@
 'use server';
 
-import { headers, cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
-import { routing } from '@/i18n/routing';
 import db from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 import { performFullBackup, restoreFileToRemote } from '@/lib/backup-logic';
-
-// Helper function to get locale from request
-async function getServerLocale(): Promise<string> {
-    const headersList = await headers();
-    const cookieStore = await cookies();
-
-    // Try to get locale from cookie first
-    const cookieLocale = cookieStore.get('NEXT_LOCALE')?.value;
-    if (cookieLocale && routing.locales.includes(cookieLocale as any)) {
-        return cookieLocale;
-    }
-
-    // Try to get from Accept-Language header
-    const acceptLanguage = headersList.get('accept-language');
-    if (acceptLanguage) {
-        const preferredLocale = acceptLanguage.split(',')[0].split('-')[0];
-        if (routing.locales.includes(preferredLocale as any)) {
-            return preferredLocale;
-        }
-    }
-
-    // Fallback to default locale
-    return routing.defaultLocale;
-}
+import { getCurrentUser } from '@/lib/actions/userAuth';
+import { getServerLocale } from '@/lib/utils/locale';
+import { logAudit } from '@/lib/audit-log';
 
 interface Server {
     id: number;
@@ -54,6 +31,9 @@ interface ConfigBackup {
 }
 
 export async function getConfigBackups(serverId: number): Promise<ConfigBackup[]> {
+    const user = await getCurrentUser();
+    if (!user) return [];
+
     return db.prepare(`
         SELECT * FROM config_backups 
         WHERE server_id = ? 
@@ -62,6 +42,9 @@ export async function getConfigBackups(serverId: number): Promise<ConfigBackup[]
 }
 
 export async function createConfigBackup(serverId: number): Promise<{ success: boolean; message: string; backupId?: number }> {
+    const user = await getCurrentUser();
+    if (!user) return { success: false, message: 'Unauthorized' };
+
     const locale = await getServerLocale();
     const t = await getTranslations({ locale, namespace: 'actionsConfigBackup' });
 
@@ -79,7 +62,11 @@ export async function createConfigBackup(serverId: number): Promise<{ success: b
         console.log(`[ConfigBackup] Starting backup for server ${server.name}`);
         // Delegate to pure node logic to avoid Turbopack analysis issues
         // and benefit from faster TAR streaming
-        return await performFullBackup(serverId, server);
+        const result = await performFullBackup(serverId, server);
+        if (result.success) {
+            logAudit({ userId: user.id, username: user.username, action: 'config.backup', category: 'backup', targetType: 'server', targetId: String(serverId), targetName: server.name, serverId });
+        }
+        return result;
     } catch (err) {
         console.error('[ConfigBackup] Backup failed:', err);
         const locale = await getServerLocale();
@@ -95,6 +82,8 @@ export async function createConfigBackup(serverId: number): Promise<{ success: b
 // --- Helper Wrapper for reading files ---
 // We keep read logic here or move it too. Moving read logic is safer.
 export async function getBackupFiles(backupId: number) {
+    const user = await getCurrentUser();
+    if (!user) return [];
     // We can also move this logic if needed, but getBackupFiles is usually fine.
     // Let's implement a simple version here that doesn't trigger warnings?
     // The previous implementation had warnings because of path traversal checking with dynamic "backup.backup_path"
@@ -137,6 +126,9 @@ export async function getBackupFiles(backupId: number) {
 }
 
 export async function readBackupFile(backupId: number, filePath: string) {
+    const user = await getCurrentUser();
+    if (!user) return null;
+
     const backup = db.prepare('SELECT * FROM config_backups WHERE id = ?').get(backupId) as ConfigBackup | undefined;
     if (!backup) return null;
 
@@ -157,6 +149,9 @@ export async function readBackupFile(backupId: number, filePath: string) {
 }
 
 export async function deleteConfigBackup(backupId: number) {
+    const user = await getCurrentUser();
+    if (!user) return { success: false, message: 'Unauthorized' };
+
     const locale = await getServerLocale();
     const t = await getTranslations({ locale, namespace: 'actionsConfigBackup' });
 
@@ -174,6 +169,9 @@ export async function deleteConfigBackup(backupId: number) {
     }
 }
 export async function restoreFile(backupId: number, filePath: string, serverId: number) {
+    const user = await getCurrentUser();
+    if (!user) return { success: false, message: 'Unauthorized' };
+
     try {
         return await restoreFileToRemote(serverId, backupId, filePath);
     } catch (e) {

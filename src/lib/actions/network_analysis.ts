@@ -1,29 +1,11 @@
 'use server';
 
-import { headers, cookies } from 'next/headers';
 import db from '@/lib/db';
 import { getNetworkConfig } from './network';
 import { explainNetworkConfig, getAISettings } from './ai';
 import { getTranslations } from 'next-intl/server';
-import { routing } from '@/i18n/routing';
-
-async function getServerLocale(): Promise<string> {
-    const headersList = await headers();
-    const cookieStore = await cookies();
-    const localeCookie = cookieStore.get('NEXT_LOCALE');
-    if (localeCookie?.value && routing.locales.includes(localeCookie.value as any)) {
-        return localeCookie.value;
-    }
-    const referer = headersList.get('referer') || '';
-    const localeMatch = referer.match(/\/([a-z]{2})\//);
-    if (localeMatch) {
-        const locale = localeMatch[1];
-        if (routing.locales.includes(locale as any)) {
-            return locale;
-        }
-    }
-    return routing.defaultLocale;
-}
+import { getCurrentUser } from '@/lib/actions/userAuth';
+import { getServerLocale } from '@/lib/utils/locale';
 
 export interface AnalysisResult {
     id: number;
@@ -34,6 +16,9 @@ export interface AnalysisResult {
 }
 
 export async function getLatestNetworkAnalysis(serverId: number): Promise<AnalysisResult | null> {
+    const user = await getCurrentUser();
+    if (!user) return null;
+
     const row = db.prepare(`
         SELECT * FROM server_ai_analysis 
         WHERE server_id = ? AND type = 'network' 
@@ -45,6 +30,9 @@ export async function getLatestNetworkAnalysis(serverId: number): Promise<Analys
 }
 
 export async function runNetworkAnalysis(serverId: number): Promise<string> {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+
     console.log(`[AI Analysis] Starting Network Analysis for Server ${serverId}...`);
 
     const locale = await getServerLocale();

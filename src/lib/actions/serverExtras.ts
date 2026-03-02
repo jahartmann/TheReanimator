@@ -1,31 +1,16 @@
 'use server'
 
-import { headers, cookies } from 'next/headers';
 import db from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import { routing } from '@/i18n/routing';
-
-async function getServerLocale(): Promise<string> {
-    const headersList = await headers();
-    const cookieStore = await cookies();
-    const localeCookie = cookieStore.get('NEXT_LOCALE');
-    if (localeCookie?.value && routing.locales.includes(localeCookie.value as any)) {
-        return localeCookie.value;
-    }
-    const referer = headersList.get('referer') || '';
-    const localeMatch = referer.match(/\/([a-z]{2})\//);
-    if (localeMatch) {
-        const locale = localeMatch[1];
-        if (routing.locales.includes(locale as any)) {
-            return locale;
-        }
-    }
-    return routing.defaultLocale;
-}
+import { getCurrentUser } from '@/lib/actions/userAuth';
+import { getServerLocale } from '@/lib/utils/locale';
 
 export async function addServer(formData: FormData) {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+
     const name = formData.get('name') as string;
     const type = formData.get('type') as string;
     const url = formData.get('url') as string;
@@ -133,6 +118,9 @@ export async function addServer(formData: FormData) {
 }
 
 export async function updateServer(id: number, formData: FormData) {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+
     const name = formData.get('name') as string;
     const type = formData.get('type') as string;
     const url = formData.get('url') as string;
@@ -179,11 +167,17 @@ export async function updateServer(id: number, formData: FormData) {
 }
 
 export async function deleteServer(id: number) {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+
     db.prepare('DELETE FROM servers WHERE id = ?').run(id);
     revalidatePath('/servers');
 }
 
 export async function addJob(formData: FormData) {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+
     const name = formData.get('name') as string;
     const sourceId = formData.get('sourceId') as string;
     const targetIdStr = formData.get('targetId') as string;
@@ -201,11 +195,17 @@ export async function addJob(formData: FormData) {
 
 
 export async function deleteJob(id: number) {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+
     db.prepare('DELETE FROM jobs WHERE id = ?').run(id);
     revalidatePath('/jobs');
 }
 
 export async function testSSHConnection(formData: FormData) {
+    const user = await getCurrentUser();
+    if (!user) return { success: false, message: 'Unauthorized' };
+
     const host = formData.get('ssh_host') as string;
     const port = parseInt(formData.get('ssh_port') as string) || 22;
     const username = formData.get('ssh_user') as string || 'root';
@@ -285,6 +285,9 @@ export async function testSSHConnection(formData: FormData) {
 }
 
 export async function generateApiToken(formData: FormData) {
+    const user = await getCurrentUser();
+    if (!user) return { success: false, message: 'Unauthorized' };
+
     const url = formData.get('url') as string;
     const username = formData.get('user') as string;
     const password = formData.get('password') as string;

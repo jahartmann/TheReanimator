@@ -6,8 +6,7 @@
 
 import { Agent, fetch as undiciFetch } from 'undici';
 
-// Create an agent that ignores SSL certificate errors
-// Required for Proxmox servers with self-signed certificates
+// Fallback insecure agent for servers without configured SSL fingerprint
 const insecureAgent = new Agent({
     connect: {
         rejectUnauthorized: false
@@ -20,24 +19,47 @@ interface ProxmoxConfig {
     username?: string;
     password?: string;
     type: 'pve' | 'pbs';
+    sslFingerprint?: string;
 }
 
 export class ProxmoxClient {
     private config: ProxmoxConfig;
     private ticket: string | null = null;
     private csrfToken: string | null = null;
+    private agent: Agent;
 
     constructor(config: ProxmoxConfig) {
         this.config = config;
+
+        if (config.sslFingerprint) {
+            const expectedFp = config.sslFingerprint.replace(/:/g, '').toLowerCase();
+            this.agent = new Agent({
+                connect: {
+                    rejectUnauthorized: true,
+                    checkServerIdentity: (_host: string, cert: any) => {
+                        const actualFp = (cert.fingerprint256 || '').replace(/:/g, '').toLowerCase();
+                        if (actualFp !== expectedFp) {
+                            return new Error(
+                                `SSL fingerprint mismatch: expected ${config.sslFingerprint}, got ${cert.fingerprint256}`
+                            );
+                        }
+                        return undefined;
+                    }
+                } as any
+            });
+        } else {
+            console.warn(`[Proxmox] No SSL fingerprint configured for ${config.url} — using insecure TLS`);
+            this.agent = insecureAgent;
+        }
     }
 
-    // Custom fetch that uses undici with SSL bypass
+    // Custom fetch that uses undici with SSL verification
     private async secureFetch(url: string, options: RequestInit = {}): Promise<Response> {
         console.log(`[Proxmox] Fetching: ${url}`);
         try {
             const response = await undiciFetch(url, {
                 ...options,
-                dispatcher: insecureAgent
+                dispatcher: this.agent
             } as any);
             return response as unknown as Response;
         } catch (error) {
@@ -612,80 +634,6 @@ export class ProxmoxClient {
         }));
     }
 
-    // --- Console / Remote Access ---
-
-    // VNC Proxy for QEMU VMs
-    async getVNCProxy(node: string, vmid: number): Promise<{ ticket: string; port: number; upid: string }> {
-        const headers = await this.getHeaders();
-        const url = `${this.config.url}/api2/json/nodes/${node}/qemu/${vmid}/vncproxy`;
-        const res = await this.secureFetch(url, {
-            method: 'POST',
-            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ websocket: '1' }).toString()
-        });
-        if (!res.ok) {
-            const errText = await res.text().catch(() => '');
-            throw new Error(`VNC proxy failed (${res.status}): ${errText.slice(0, 200)}`);
-        }
-        const data = await res.json() as { data: { ticket: string; port: number; upid: string } };
-        return data.data;
-    }
-
-    // VNC Proxy for LXC containers
-    async getLXCVNCProxy(node: string, vmid: number): Promise<{ ticket: string; port: number; upid: string }> {
-        const headers = await this.getHeaders();
-        const url = `${this.config.url}/api2/json/nodes/${node}/lxc/${vmid}/vncproxy`;
-        const res = await this.secureFetch(url, {
-            method: 'POST',
-            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ websocket: '1' }).toString()
-        });
-        if (!res.ok) {
-            const errText = await res.text().catch(() => '');
-            throw new Error(`LXC VNC proxy failed (${res.status}): ${errText.slice(0, 200)}`);
-        }
-        const data = await res.json() as { data: { ticket: string; port: number; upid: string } };
-        return data.data;
-    }
-
-    // Terminal Proxy (shell for LXC, serial for QEMU)
-    async getTermProxy(node: string, vmid: number, type: 'qemu' | 'lxc'): Promise<{ ticket: string; port: number; upid: string; user: string }> {
-        const headers = await this.getHeaders();
-        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/${type}/${vmid}/termproxy`, {
-            method: 'POST',
-            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ websocket: '1' }).toString()
-        });
-        if (!res.ok) throw new Error(`Failed to get term proxy: ${res.status}`);
-        const data = await res.json() as { data: { ticket: string; port: number; upid: string; user: string } };
-        return data.data;
-    }
-
-    // Node shell proxy
-    async getNodeTermProxy(node: string): Promise<{ ticket: string; port: number; upid: string; user: string }> {
-        const headers = await this.getHeaders();
-        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/termproxy`, {
-            method: 'POST',
-            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ websocket: '1' }).toString()
-        });
-        if (!res.ok) throw new Error(`Failed to get node term proxy: ${res.status}`);
-        const data = await res.json() as { data: { ticket: string; port: number; upid: string; user: string } };
-        return data.data;
-    }
-
-    // SPICE proxy config for QEMU VMs
-    async getSpiceProxy(node: string, vmid: number): Promise<Record<string, string>> {
-        const headers = await this.getHeaders();
-        const res = await this.secureFetch(`${this.config.url}/api2/json/nodes/${node}/qemu/${vmid}/spiceproxy`, {
-            method: 'POST',
-            headers
-        });
-        if (!res.ok) throw new Error(`Failed to get SPICE proxy: ${res.status}`);
-        const data = await res.json() as { data: Record<string, string> };
-        return data.data;
-    }
-
     // Guest Agent: read file from VM
     async agentFileRead(node: string, vmid: number, filePath: string): Promise<string> {
         const headers = await this.getHeaders();
@@ -753,6 +701,74 @@ export class ProxmoxClient {
     // Get connection info for WebSocket proxy
     getConnectionInfo(): { url: string; ticket: string | null; token: string | undefined; type: 'pve' | 'pbs' } {
         return { url: this.config.url, ticket: this.ticket, token: this.config.token, type: this.config.type };
+    }
+
+    // --- HA Cluster ---
+
+    async getHAResources(): Promise<HAResource[]> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/cluster/ha/resources`, { headers });
+        if (!res.ok) throw new Error(`Failed to get HA resources: ${res.status}`);
+        const data = await res.json() as { data: HAResource[] };
+        return data.data || [];
+    }
+
+    async getHAGroups(): Promise<HAGroup[]> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/cluster/ha/groups`, { headers });
+        if (!res.ok) throw new Error(`Failed to get HA groups: ${res.status}`);
+        const data = await res.json() as { data: HAGroup[] };
+        return data.data || [];
+    }
+
+    async getHAStatus(): Promise<HAStatusEntry[]> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/cluster/ha/status/current`, { headers });
+        if (!res.ok) throw new Error(`Failed to get HA status: ${res.status}`);
+        const data = await res.json() as { data: HAStatusEntry[] };
+        return data.data || [];
+    }
+
+    async setHAResource(sid: string, config: { group?: string; max_relocate?: number; max_restart?: number; state?: string; comment?: string }): Promise<void> {
+        const headers = await this.getHeaders();
+        const body = new URLSearchParams();
+        if (config.group) body.append('group', config.group);
+        if (config.max_relocate !== undefined) body.append('max_relocate', config.max_relocate.toString());
+        if (config.max_restart !== undefined) body.append('max_restart', config.max_restart.toString());
+        if (config.state) body.append('state', config.state);
+        if (config.comment) body.append('comment', config.comment);
+
+        // Try PUT first (update), fall back to POST (create)
+        let res = await this.secureFetch(`${this.config.url}/api2/json/cluster/ha/resources/${sid}`, {
+            method: 'PUT',
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+        });
+        if (!res.ok) {
+            // Resource doesn't exist yet, create it
+            body.append('sid', sid);
+            res = await this.secureFetch(`${this.config.url}/api2/json/cluster/ha/resources`, {
+                method: 'POST',
+                headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body.toString()
+            });
+            if (!res.ok) {
+                const err = await res.text();
+                throw new Error(`Failed to set HA resource: ${res.status} - ${err}`);
+            }
+        }
+    }
+
+    async removeHAResource(sid: string): Promise<void> {
+        const headers = await this.getHeaders();
+        const res = await this.secureFetch(`${this.config.url}/api2/json/cluster/ha/resources/${sid}`, {
+            method: 'DELETE',
+            headers
+        });
+        if (!res.ok) {
+            const err = await res.text();
+            throw new Error(`Failed to remove HA resource: ${res.status} - ${err}`);
+        }
     }
 }
 
@@ -1031,4 +1047,38 @@ export interface ConsoleProxyTicket {
     port: number;
     upid: string;
     user?: string;
+}
+
+export interface HAResource {
+    sid: string;
+    type: string;
+    status: string;
+    state: string;
+    group?: string;
+    max_relocate?: number;
+    max_restart?: number;
+    comment?: string;
+    digest?: string;
+}
+
+export interface HAGroup {
+    group: string;
+    nodes: string;
+    nofailback?: number;
+    restricted?: number;
+    comment?: string;
+    type?: string;
+}
+
+export interface HAStatusEntry {
+    id: string;
+    type: string;
+    node?: string;
+    status: string;
+    state?: string;
+    crm_state?: string;
+    request_state?: string;
+    sid?: string;
+    quorum?: { node: string; [key: string]: any };
+    timestamp?: number;
 }

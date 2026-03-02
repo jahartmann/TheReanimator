@@ -1,29 +1,10 @@
 'use server';
 
-import { headers, cookies } from 'next/headers';
 import { createSSHClient } from '@/lib/ssh';
 import db from '@/lib/db';
 import { getServer } from './server';
 import { getTranslations } from 'next-intl/server';
-import { routing } from '@/i18n/routing';
-
-async function getServerLocale(): Promise<string> {
-    const headersList = await headers();
-    const cookieStore = await cookies();
-    const localeCookie = cookieStore.get('NEXT_LOCALE');
-    if (localeCookie?.value && routing.locales.includes(localeCookie.value as any)) {
-        return localeCookie.value;
-    }
-    const referer = headersList.get('referer') || '';
-    const localeMatch = referer.match(/\/([a-z]{2})\//);
-    if (localeMatch) {
-        const locale = localeMatch[1];
-        if (routing.locales.includes(locale as any)) {
-            return locale;
-        }
-    }
-    return routing.defaultLocale;
-}
+import { getServerLocale } from '@/lib/utils/locale';
 
 
 export interface CloneOptions {

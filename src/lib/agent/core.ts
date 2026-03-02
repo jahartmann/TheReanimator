@@ -1,4 +1,5 @@
 import { getAISettings } from '@/lib/actions/ai';
+import db from '@/lib/db';
 import { tools, getSystemContext, createChatSession, saveChatMessage, getChatHistory } from './tools';
 import { getBrainSummaryForPrompt, migrateExistingBrainFiles } from './memory/brain';
 import { extractEnhancedContext, getWorkingMemorySummary } from './memory/working';
@@ -279,6 +280,19 @@ export async function* chatWithAgentGenerator(
 
         // If no tool call, we are done
         saveChatMessage(currentSessionId, 'assistant', fullContent);
+
+        // Auto-title: set session title from first user message if not yet set
+        if (turn === 0) {
+            try {
+                const session = db.prepare('SELECT title FROM chat_sessions WHERE id = ?').get(currentSessionId) as any;
+                if (session && (!session.title || session.title === 'Neue Unterhaltung')) {
+                    const title = message.slice(0, 60).replace(/\n/g, ' ').trim();
+                    db.prepare('UPDATE chat_sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+                        .run(title, currentSessionId);
+                }
+            } catch { /* ignore */ }
+        }
+
         break;
     }
 

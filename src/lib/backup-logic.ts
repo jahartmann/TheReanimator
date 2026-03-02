@@ -1,12 +1,10 @@
-import { Client } from 'ssh2';
 import fs from 'fs';
 import path from 'path';
 import * as tar from 'tar';
 import db, { getBackupDir } from '@/lib/db';
-import { createSSHClient } from '@/lib/ssh';
+import { withSSH } from '@/lib/ssh-pool';
 import { getTranslations } from 'next-intl/server';
-import { routing } from '@/i18n/routing';
-import { headers } from 'next/headers';
+import { getServerLocale } from '@/lib/utils/locale';
 
 // Paths to backup
 const BACKUP_PATHS = [
@@ -32,16 +30,6 @@ function formatBytes(bytes: number): string {
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-async function getServerLocale(): Promise<string> {
-    try {
-        const headersList = await headers();
-        const locale = headersList.get('x-locale') || routing.defaultLocale;
-        return locale;
-    } catch {
-        return routing.defaultLocale;
-    }
 }
 
 async function createRecoveryGuide(server: Server, date: Date): Promise<string> {
@@ -215,108 +203,88 @@ export async function performFullBackup(serverId: number, server: Server) {
     // Create dir
     fs.mkdirSync(destPath, { recursive: true });
 
-    // 2. SSH Connection
-    const ssh = createSSHClient(server);
-    await ssh.connect();
-
+    // 2. SSH Connection via Pool
     try {
-        // 3. System Info (Fast)
-        try {
-            const sysInfoCmd = 'cat /etc/os-release; echo "---"; hostname -f; echo "---"; ip a; echo "---"; lsblk -f; echo "---"; cat /etc/fstab';
-            const sysInfo = await ssh.exec(sysInfoCmd);
-            fs.writeFileSync(path.join(destPath, 'SYSTEM_INFO.txt'), sysInfo);
+        return await withSSH(server, async (ssh) => {
+            // 3. System Info (Fast)
+            try {
+                const sysInfoCmd = 'cat /etc/os-release; echo "---"; hostname -f; echo "---"; ip a; echo "---"; lsblk -f; echo "---"; cat /etc/fstab';
+                const sysInfo = await ssh.exec(sysInfoCmd);
+                fs.writeFileSync(path.join(destPath, 'SYSTEM_INFO.txt'), sysInfo);
 
-            const uuidInfo = await ssh.exec('blkid');
-            fs.writeFileSync(path.join(destPath, 'DISK_UUIDS.txt'), uuidInfo);
-        } catch (e) {
-            console.error('[BackupLogic] SysInfo error:', e);
-        }
+                const uuidInfo = await ssh.exec('blkid');
+                fs.writeFileSync(path.join(destPath, 'DISK_UUIDS.txt'), uuidInfo);
+            } catch (e) {
+                console.error('[BackupLogic] SysInfo error:', e);
+            }
 
-        // 4. TAR Streaming (The speed fix)
-        // Check which paths exist
-        const validPaths: string[] = [];
-        for (const p of BACKUP_PATHS) {
-            const check = await ssh.exec(`test -e "${p}" && echo "yes" || echo "no"`);
-            if (check.trim() === 'yes') validPaths.push(p);
-        }
+            // 4. TAR Streaming (The speed fix)
+            const validPaths: string[] = [];
+            for (const p of BACKUP_PATHS) {
+                const check = await ssh.exec(`test -e "${p}" && echo "yes" || echo "no"`);
+                if (check.trim() === 'yes') validPaths.push(p);
+            }
 
-        if (validPaths.length > 0) {
-            console.log(`[BackupLogic] Streaming paths via TAR: ${validPaths.join(', ')}`);
-            const tarFile = path.join(destPath, 'backup.tar.gz');
+            if (validPaths.length > 0) {
+                console.log(`[BackupLogic] Streaming paths via TAR: ${validPaths.join(', ')}`);
+                const tarFile = path.join(destPath, 'backup.tar.gz');
 
-            // Create a writable stream
-            const writeStream = fs.createWriteStream(tarFile);
+                const writeStream = fs.createWriteStream(tarFile);
+                const cmd = `tar -czf - ${validPaths.join(' ')} 2>/dev/null`;
 
-            // Command to tar to stdout
-            // --ignore-failed-read to continue if some files are locked
-            const cmd = `tar -czf - ${validPaths.join(' ')} 2>/dev/null`;
+                await ssh.streamCommand(cmd, writeStream);
+                writeStream.end();
 
-            await ssh.streamCommand(cmd, writeStream);
-            writeStream.end();
+                // 5. Extract locally for file browser access
+                console.log('[BackupLogic] Extracting archive locally for File Browser (excluding symlinks)...');
+                await tar.x({
+                    file: tarFile,
+                    cwd: destPath,
+                    preservePaths: true,
+                    filter: (path, entry) => {
+                        const type = (entry as any).type;
+                        return type !== 'SymbolicLink' && type !== 'Link';
+                    }
+                });
 
-            // 5. Extract locally for file browser access
-            // We do this locally so we can browse files in the UI
-            // CRITICAL: Filter out Symlinks/Links to prevent Turbopack build crashes
-            // when it encounters links pointing outside project root (e.g. /etc/ssl/certs)
-            console.log('[BackupLogic] Extracting archive locally for File Browser (excluding symlinks)...');
-            await tar.x({
-                file: tarFile,
-                cwd: destPath,
-                preservePaths: true,
-                filter: (path, entry) => {
-                    // Skip symbolic links and hard links to prevent build tools from crashing
-                    // on invalid paths or paths outside project root
-                    // Cast entry to any to avoid type issues with @types/tar
-                    const type = (entry as any).type;
-                    return type !== 'SymbolicLink' && type !== 'Link';
-                }
-            });
+                fs.unlinkSync(tarFile);
+            }
 
-            // Optional: Remove tar file to save space? Or keep it?
-            // User might want to download the tar. For now, keep it? 
-            // Actually the current "Download" button zips selected files.
-            // Let's keep the extracted files as the primary storage so the UI works as is.
-            fs.unlinkSync(tarFile);
-        }
+            // 6. Metadata
+            const recoveryGuide = await createRecoveryGuide(server, new Date());
+            fs.writeFileSync(path.join(destPath, 'WIEDERHERSTELLUNG.md'), recoveryGuide);
 
-        // 6. Metadata
-        const recoveryGuide = await createRecoveryGuide(server, new Date());
-        fs.writeFileSync(path.join(destPath, 'WIEDERHERSTELLUNG.md'), recoveryGuide);
+            // 7. Stats
+            const totalFiles = countFiles(destPath);
+            const totalSize = calculateSize(destPath);
 
-        ssh.disconnect();
+            // 8. DB Update
+            const result = db.prepare(`
+                INSERT INTO config_backups (server_id, backup_path, file_count, total_size, status)
+                VALUES (?, ?, ?, ?, ?)
+            `).run(serverId, destPath, totalFiles, totalSize, 'complete');
 
-        // 7. Stats
-        const totalFiles = countFiles(destPath);
-        const totalSize = calculateSize(destPath);
+            const tSuccess = await getTranslations({ locale: await getServerLocale(), namespace: 'backupLogic' });
+            const successMsg = tSuccess('backupSuccess', { files: totalFiles, size: formatBytes(totalSize) });
 
-        // 8. DB Update
-        const result = db.prepare(`
-            INSERT INTO config_backups (server_id, backup_path, file_count, total_size, status)
-            VALUES (?, ?, ?, ?, ?)
-        `).run(serverId, destPath, totalFiles, totalSize, 'complete');
+            // Notification
+            try {
+                const { broadcastMessage } = await import('@/lib/agent/telegram');
+                const notifyMsg = `✅ *Backup erfolgreich*\n\n` +
+                    `🖥️ *Server:* ${server.name}\n` +
+                    `📁 *Dateien:* ${totalFiles}\n` +
+                    `💾 *Größe:* ${formatBytes(totalSize)}`;
+                await broadcastMessage(notifyMsg);
+            } catch (e) {
+                console.error('[BackupLogic] Notification failed:', e);
+            }
 
-        // Get translations for success message
-        const tSuccess = await getTranslations({ locale: await getServerLocale(), namespace: 'backupLogic' });
-        const successMsg = tSuccess('backupSuccess', { files: totalFiles, size: formatBytes(totalSize) });
-
-        // Notification
-        try {
-            const { broadcastMessage } = await import('@/lib/agent/telegram');
-            const notifyMsg = `✅ *Backup erfolgreich*\n\n` +
-                `🖥️ *Server:* ${server.name}\n` +
-                `📁 *Dateien:* ${totalFiles}\n` +
-                `💾 *Größe:* ${formatBytes(totalSize)}`;
-            await broadcastMessage(notifyMsg);
-        } catch (e) {
-            console.error('[BackupLogic] Notification failed:', e);
-        }
-
-        return {
-            success: true,
-            message: successMsg,
-            backupId: result.lastInsertRowid as number
-        };
-
+            return {
+                success: true,
+                message: successMsg,
+                backupId: result.lastInsertRowid as number
+            };
+        });
     } catch (err) {
         try {
             const { broadcastMessage } = await import('@/lib/agent/telegram');
@@ -325,7 +293,6 @@ export async function performFullBackup(serverId: number, server: Server) {
                 `⚠️ *Fehler:*\n\`\`\`\n${err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500)}\n\`\`\``;
             await broadcastMessage(errMsg);
         } catch { }
-        ssh.disconnect();
         throw err;
     }
 }
@@ -347,10 +314,7 @@ export async function restoreFileToRemote(serverId: number, backupId: number, re
     if (!localPath.startsWith(backup.backup_path)) throw new Error(t('invalidPath'));
     if (!fs.existsSync(localPath)) throw new Error(t('fileNotFound'));
 
-    const ssh = createSSHClient(server);
-    await ssh.connect();
-
-    try {
+    return await withSSH(server, async (ssh) => {
         // CRITICAL: Use absolute path on remote (must start with /)
         const remotePath = '/' + normalized;
 
@@ -365,10 +329,6 @@ export async function restoreFileToRemote(serverId: number, backupId: number, re
         }
 
         await ssh.uploadFile(localPath, remotePath);
-        ssh.disconnect();
         return { success: true, message: t('fileRestored', { path: remotePath }) };
-    } catch (e) {
-        ssh.disconnect();
-        throw e;
-    }
+    });
 }

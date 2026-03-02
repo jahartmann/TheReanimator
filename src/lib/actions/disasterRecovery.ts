@@ -1,8 +1,6 @@
 'use server';
 
-import { headers, cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
-import { routing } from '@/i18n/routing';
 import db from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
@@ -11,28 +9,7 @@ import { analyzeBackup, type BackupAnalysis } from '@/lib/disaster-recovery/conf
 import { computeDiff, type DiffResult } from '@/lib/disaster-recovery/config-differ';
 import { generateRecoveryPlan, type RecoveryPlan } from '@/lib/disaster-recovery/recovery-planner';
 import { generateUUIDMapping, applyUUIDMapping, mergeHosts, type UUIDMapping } from '@/lib/disaster-recovery/merge-engine';
-
-// Helper function to get locale from request
-async function getServerLocale(): Promise<string> {
-    try {
-        const headersList = await headers();
-        const cookieStore = await cookies();
-        const cookieLocale = cookieStore.get('NEXT_LOCALE')?.value;
-        if (cookieLocale && routing.locales.includes(cookieLocale as any)) {
-            return cookieLocale;
-        }
-        const acceptLanguage = headersList.get('accept-language');
-        if (acceptLanguage) {
-            const preferredLocale = acceptLanguage.split(',')[0].split('-')[0];
-            if (routing.locales.includes(preferredLocale as any)) {
-                return preferredLocale;
-            }
-        }
-        return routing.defaultLocale;
-    } catch {
-        return routing.defaultLocale;
-    }
-}
+import { getServerLocale } from '@/lib/utils/locale';
 
 interface Server {
     id: number;

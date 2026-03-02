@@ -1,45 +1,57 @@
 import { chatWithAgentGenerator } from '@/lib/agent/core';
+import { getCurrentUser } from '@/lib/actions/userAuth';
 
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
     try {
-        const { messages } = await req.json();
+        const user = await getCurrentUser();
+        if (!user) {
+            return new Response('Unauthorized', { status: 401 });
+        }
+
+        const { messages, sessionId } = await req.json();
 
         if (!messages || !Array.isArray(messages)) {
             return new Response('Invalid request: messages array required', { status: 400 });
         }
 
-        // Initialize Generator
-        const generator = chatWithAgentGenerator(messages[messages.length - 1].content, messages.slice(0, -1));
+        const generator = chatWithAgentGenerator(
+            messages[messages.length - 1].content,
+            messages.slice(0, -1),
+            sessionId || undefined
+        );
 
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
             async start(controller) {
                 try {
                     for await (const event of generator) {
-                        if (event.type === 'text') {
-                            // Standard Text Chunk
-                            controller.enqueue(encoder.encode(`0:${JSON.stringify(event.content)}\n`));
-                        }
-                        else if (event.type === 'status') {
-                            // Render status as italic blockquote
-                            const msg = `\n> 🤖 *${event.content}*\n\n`;
-                            controller.enqueue(encoder.encode(`0:${JSON.stringify(msg)}\n`));
-                        }
-                        else if (event.type === 'tool_start') {
-                            // Render tool start
-                            const msg = `\n> 🛠️ **Starte Tool:** \`${event.tool}\`...\n\n`;
-                            controller.enqueue(encoder.encode(`0:${JSON.stringify(msg)}\n`));
-                        }
-                        else if (event.type === 'tool_end') {
-                            // Optional: Show result summary? Or just checkmark.
-                            // const msg = `\n> ✅ **Ergebnis:** \`${JSON.stringify(event.result).substring(0, 50)}...\`\n\n`;
-                            // controller.enqueue(encoder.encode(`0:${JSON.stringify(msg)}\n`));
-                        }
-                        else if (event.type === 'error') {
-                            const msg = `\n> ❌ **Fehler:** ${event.content}\n\n`;
-                            controller.enqueue(encoder.encode(`0:${JSON.stringify(msg)}\n`));
+                        switch (event.type) {
+                            case 'text':
+                                // Pure content — rendered as markdown in chat bubble
+                                controller.enqueue(encoder.encode(`0:${JSON.stringify(event.content)}\n`));
+                                break;
+                            case 'session':
+                                controller.enqueue(encoder.encode(`s:${JSON.stringify({ id: event.id })}\n`));
+                                break;
+                            case 'status':
+                                // Transient status — shown as indicator, NOT in message
+                                controller.enqueue(encoder.encode(`i:${JSON.stringify(event.content)}\n`));
+                                break;
+                            case 'tool_start':
+                                // Tool indicator — rendered as collapsible pill
+                                controller.enqueue(encoder.encode(`t:${JSON.stringify(event.tool)}\n`));
+                                break;
+                            case 'tool_end':
+                                // Signal tool completion
+                                controller.enqueue(encoder.encode(`T:${JSON.stringify(event.tool)}\n`));
+                                break;
+                            case 'error':
+                                // Error — shown inline in message
+                                const errMsg = `\n\n> **Fehler:** ${event.content}\n\n`;
+                                controller.enqueue(encoder.encode(`0:${JSON.stringify(errMsg)}\n`));
+                                break;
                         }
                     }
                 } catch (e: any) {

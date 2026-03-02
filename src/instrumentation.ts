@@ -27,5 +27,16 @@ export async function register() {
             // Custom tools are optional
         }
 
+        // Graceful shutdown: destroy SSH pool on process termination
+        const shutdownHandler = async () => {
+            console.log('[System] Graceful shutdown: destroying SSH pool...');
+            try {
+                const { sshPool } = await import('@/lib/ssh-pool');
+                sshPool.destroyAll();
+            } catch {}
+            process.exit(0);
+        };
+        process.on('SIGTERM', shutdownHandler);
+        process.on('SIGINT', shutdownHandler);
     }
 }

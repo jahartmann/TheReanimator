@@ -1,34 +1,9 @@
 'use server';
 
-import { headers, cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
-import { routing } from '@/i18n/routing';
-import { createSSHClient } from '@/lib/ssh';
+import { withSSH } from '@/lib/ssh-pool';
 import { Server } from './server';
-
-// Helper function to get locale from request
-async function getServerLocale(): Promise<string> {
-    const headersList = await headers();
-    const cookieStore = await cookies();
-
-    // Try to get locale from cookie first
-    const cookieLocale = cookieStore.get('NEXT_LOCALE')?.value;
-    if (cookieLocale && routing.locales.includes(cookieLocale as any)) {
-        return cookieLocale;
-    }
-
-    // Try to get from Accept-Language header
-    const acceptLanguage = headersList.get('accept-language');
-    if (acceptLanguage) {
-        const preferredLocale = acceptLanguage.split(',')[0].split('-')[0];
-        if (routing.locales.includes(preferredLocale as any)) {
-            return preferredLocale;
-        }
-    }
-
-    // Fallback to default locale
-    return routing.defaultLocale;
-}
+import { getServerLocale } from '@/lib/utils/locale';
 
 export interface NetworkInterface {
     name: string;
@@ -486,44 +461,33 @@ export async function getServerInfo(server: any): Promise<{
 } | null> {
     if (!server.ssh_key) return null;
 
-    let ssh;
     const debug: string[] = [];
 
     try {
-        ssh = createSSHClient({
-            ssh_host: server.ssh_host,
-            ssh_port: server.ssh_port,
-            ssh_user: server.ssh_user,
-            ssh_key: server.ssh_key
+        return await withSSH(server, async (ssh) => {
+            debug.push('SSH Connected');
+
+            const system = await getSystemStats(ssh);
+            debug.push('System Stats Fetched');
+
+            const [networks, disks, pools, filesystems] = await Promise.all([
+                getNetworkStats(ssh, debug),
+                getDiskStats(ssh, debug),
+                getPoolStats(ssh, debug),
+                getFileSystems(ssh, debug)
+            ]);
+
+            return {
+                networks,
+                disks,
+                pools,
+                filesystems,
+                system,
+                debug
+            };
         });
-        await ssh.connect();
-        debug.push('SSH Connected');
-
-        const system = await getSystemStats(ssh);
-        debug.push('System Stats Fetched');
-
-        const [networks, disks, pools, filesystems] = await Promise.all([
-            getNetworkStats(ssh, debug),
-            getDiskStats(ssh, debug),
-            getPoolStats(ssh, debug),
-            getFileSystems(ssh, debug)
-        ]);
-
-        ssh.disconnect();
-
-        return {
-            networks,
-            disks,
-            pools,
-            filesystems,
-            system,
-            debug
-        };
     } catch (e) {
         console.error('[ServerDetail] Connection Error:', e);
-        if (ssh) {
-            try { ssh.disconnect(); } catch { }
-        }
         return {
             networks: [],
             disks: [],
@@ -772,31 +736,20 @@ async function getBackupStats(ssh: any): Promise<BackupInfo[]> {
 export async function getServerHealth(server: any): Promise<ServerHealth | null> {
     if (!server.ssh_key) return null;
 
-    let ssh;
     try {
-        ssh = createSSHClient({
-            ssh_host: server.ssh_host,
-            ssh_port: server.ssh_port,
-            ssh_user: server.ssh_user,
-            ssh_key: server.ssh_key
+        return await withSSH(server, async (ssh) => {
+            const disks = await getDiskStats(ssh, []);
+
+            const [smart, zfs, events, backups] = await Promise.all([
+                getSmartStats(ssh, disks),
+                getZfsStats(ssh),
+                getSystemEvents(ssh),
+                getBackupStats(ssh)
+            ]);
+
+            return { smart, zfs, events, backups };
         });
-        await ssh.connect();
-
-        // Need disks first to check SMART
-        // We reuse getDiskStats but suppress log output by passing dummy debug
-        const disks = await getDiskStats(ssh, []);
-
-        const [smart, zfs, events, backups] = await Promise.all([
-            getSmartStats(ssh, disks),
-            getZfsStats(ssh),
-            getSystemEvents(ssh),
-            getBackupStats(ssh)
-        ]);
-
-        ssh.disconnect();
-        return { smart, zfs, events, backups };
     } catch (e) {
-        if (ssh) ssh.disconnect();
         console.error('Health Check Failed:', e);
         return null;
     }

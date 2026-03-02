@@ -5,6 +5,8 @@ import path from 'path';
 import { getJournalSummary } from '@/lib/agent/memory/journal';
 import { getWorkingMemorySummary } from '@/lib/agent/memory/working';
 import { getBrainSummaryForPrompt } from '@/lib/agent/memory/brain';
+import { tools } from '@/lib/agent/tools';
+import { getActiveToolDefinitions } from '@/lib/agent/dynamic-tools/registry';
 
 /**
  * The Consciousness Organ.
@@ -35,14 +37,28 @@ export class Consciousness {
         const soul = await this.readOrgan('soul', 'SOUL.md');
         const memoryMd = await this.readOrgan('brain', 'MEMORY.md');
         const user = await this.readOrgan('brain', 'USER.md');
-        const tools = await this.readOrgan('hands', 'TOOLS.md');
+        const toolsMd = await this.readOrgan('hands', 'TOOLS.md');
 
         // 2. Retrieve Dynamic/Short-term Memory (The "Existing Brain Structure")
         const workingMemory = sessionId ? getWorkingMemorySummary(sessionId) : '';
         const journal = getJournalSummary(); // Daily logs
         const vectorBrain = getBrainSummaryForPrompt(); // Legacy vector/file brain summary if any
 
-        // 3. Synthesize the "Grimoire" (System Prompt)
+        // 3. Build dynamic tool catalog
+        const builtinToolNames = Object.keys(tools);
+        const customToolDefs = getActiveToolDefinitions();
+        const customToolNames = Object.keys(customToolDefs);
+        const allToolNames = [...builtinToolNames, ...customToolNames];
+
+        const dynamicToolList = allToolNames.map(name => {
+            const def = (tools as any)[name] || customToolDefs[name];
+            const desc = def?.description || '';
+            return `- ${name}: ${desc}`;
+        }).join('\n');
+
+        const dynamicToolSection = `\n## Available Tools (${allToolNames.length})\n${dynamicToolList}\n`;
+
+        // 4. Synthesize the "Grimoire" (System Prompt)
         const grimoire = [
             soul,
             "\n---",
@@ -60,7 +76,8 @@ export class Consciousness {
             journal || "(No logs for today)",
             "\n---",
             "## TOOLING & PROCEDURES",
-            tools,
+            toolsMd,
+            dynamicToolSection,
             "\n---",
             "## CURRENT SPACETIME",
             `Time: ${new Date().toLocaleString('de-DE')}`,

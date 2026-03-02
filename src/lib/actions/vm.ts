@@ -1,35 +1,13 @@
 'use server';
 
-import { headers, cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
-import { routing } from '@/i18n/routing';
 import { createSSHClient, SSHClient } from '@/lib/ssh';
+import { withSSH } from '@/lib/ssh-pool';
 import db from '@/lib/db';
 import { syncServerVMs } from './sync';
-
-// Helper function to get locale from request
-async function getServerLocale(): Promise<string> {
-    const headersList = await headers();
-    const cookieStore = await cookies();
-
-    // Try to get locale from cookie first
-    const cookieLocale = cookieStore.get('NEXT_LOCALE')?.value;
-    if (cookieLocale && routing.locales.includes(cookieLocale as any)) {
-        return cookieLocale;
-    }
-
-    // Try to get from Accept-Language header
-    const acceptLanguage = headersList.get('accept-language');
-    if (acceptLanguage) {
-        const preferredLocale = acceptLanguage.split(',')[0].split('-')[0];
-        if (routing.locales.includes(preferredLocale as any)) {
-            return preferredLocale;
-        }
-    }
-
-    // Fallback to default locale
-    return routing.defaultLocale;
-}
+import { getCurrentUser } from '@/lib/actions/userAuth';
+import { getServerLocale } from '@/lib/utils/locale';
+import { logAudit } from '@/lib/audit-log';
 
 // --- Interfaces ---
 
@@ -76,6 +54,9 @@ interface MigrationContext {
 // --- Helper: Get Server ---
 
 export async function getServer(id: number) {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+
     const stmt = db.prepare('SELECT * FROM servers WHERE id = ?');
     const server = stmt.get(id) as any;
     if (!server) throw new Error(`Server ${id} not found`);
@@ -137,12 +118,16 @@ export async function determineNodeName(ssh: SSHClient): Promise<string> {
 
 // --- Helper: Poll Task ---
 
-async function pollTaskStatus(client: SSHClient, node: string, upid: string) {
+export async function pollTaskStatus(client: SSHClient, node: string, upid: string) {
     let status = 'running';
     let exitStatus = '';
+    const deadline = Date.now() + 4 * 60 * 60 * 1000; // 4 hours max
 
     // Poll every 2s
     while (status === 'running') {
+        if (Date.now() > deadline) {
+            throw new Error('Migration polling timed out after 4 hours');
+        }
         await new Promise(r => setTimeout(r, 2000));
         const checkCmd = `pvesh get /nodes/${node}/tasks/${upid}/status --output-format json`;
         try {
@@ -187,8 +172,6 @@ async function migrateLocal(ctx: MigrationContext): Promise<string> {
     }
 
     let cmd = '';
-    const storageFlag = options.targetStorage ? `--target-storage ${options.targetStorage}` : '';
-
     const apiPath = type === 'qemu' ? 'qemu' : 'lxc';
     const migrateApiCmd = `pvesh create /nodes/${ctx.sourceNode}/${apiPath}/${vmid}/migrate --target ${targetNode} ${options.online ? '--online 1' : ''} ${options.targetStorage ? '--target-storage ' + options.targetStorage : ''}`;
 
@@ -1048,11 +1031,14 @@ export async function migrateVM(
             onLog
         };
 
+        let message: string;
         if (sameCluster) {
-            return { success: true, message: await migrateLocal(ctx) };
+            message = await migrateLocal(ctx);
         } else {
-            return { success: true, message: await migrateRemote(ctx) };
+            message = await migrateRemote(ctx);
         }
+        logAudit({ username: 'system', action: 'vm.migrate', category: 'vm', targetType: type, targetId: vmid, serverId: sourceId, details: { targetServerId: options.targetServerId, sameCluster } });
+        return { success: true, message };
 
     } catch (e: any) {
         console.error('[Migration] Failed:', e);
@@ -1069,205 +1055,187 @@ export async function migrateVM(
 
 export async function getVMs(serverId: number): Promise<VirtualMachine[]> {
     const server = await getServer(serverId);
-    const ssh = createSSHClient(server);
 
     try {
-        await ssh.connect();
+        return await withSSH(server, async (ssh) => {
+            // Use robust node name detection (same as syncServerVMs)
+            const nodeName = await determineNodeName(ssh);
+            console.log(`[getVMs] Server ${serverId}: Using node name "${nodeName}"`);
 
-        // Use robust node name detection (same as syncServerVMs)
-        const nodeName = await determineNodeName(ssh);
-        console.log(`[getVMs] Server ${serverId}: Using node name "${nodeName}"`);
+            let qemuList: any[] = [];
+            let lxcList: any[] = [];
+            let method = 'none';
 
-        let qemuList: any[] = [];
-        let lxcList: any[] = [];
-        let method = 'none';
-
-        // 1. Try Node-Specific API first
-        try {
-            const [qemuJson, lxcJson] = await Promise.all([
-                ssh.exec(`pvesh get /nodes/${nodeName}/qemu --output-format json 2>/dev/null || echo "[]"`),
-                ssh.exec(`pvesh get /nodes/${nodeName}/lxc --output-format json 2>/dev/null || echo "[]"`)
-            ]);
-
-            qemuList = JSON.parse(qemuJson);
-            lxcList = JSON.parse(lxcJson);
-
-            if (qemuList.length > 0 || lxcList.length > 0) {
-                method = 'node-api';
-                console.log(`[getVMs] Found ${qemuList.length} QEMUs and ${lxcList.length} LXCs via node API`);
-            }
-        } catch (e) {
-            console.warn('[getVMs] Node-specific API failed:', e);
-        }
-
-        // 2. Fallback: Cluster Resources (if node API returned empty)
-        if (qemuList.length === 0 && lxcList.length === 0) {
+            // 1. Try Node-Specific API first
             try {
-                console.log('[getVMs] Node API empty. Trying cluster resources...');
-                const json = await ssh.exec('pvesh get /cluster/resources --output-format json 2>/dev/null');
-                const resources = JSON.parse(json);
+                const [qemuJson, lxcJson] = await Promise.all([
+                    ssh.exec(`pvesh get /nodes/${nodeName}/qemu --output-format json 2>/dev/null || echo "[]"`),
+                    ssh.exec(`pvesh get /nodes/${nodeName}/lxc --output-format json 2>/dev/null || echo "[]"`)
+                ]);
 
-                // Filter by node name and type
-                const nodeResources = resources.filter((r: any) =>
-                    r.node === nodeName && (r.type === 'qemu' || r.type === 'lxc')
-                );
-
-                nodeResources.forEach((r: any) => {
-                    const vmData = {
-                        vmid: r.vmid,
-                        name: r.name || (r.type === 'qemu' ? `VM ${r.vmid}` : `CT ${r.vmid}`),
-                        status: r.status,
-                        cpus: r.maxcpu,
-                        maxmem: r.maxmem,
-                        uptime: r.uptime,
-                        tags: r.tags
-                    };
-                    if (r.type === 'qemu') {
-                        qemuList.push(vmData);
-                    } else {
-                        lxcList.push(vmData);
-                    }
-                });
+                qemuList = JSON.parse(qemuJson);
+                lxcList = JSON.parse(lxcJson);
 
                 if (qemuList.length > 0 || lxcList.length > 0) {
-                    method = 'cluster-api';
-                    console.log(`[getVMs] Found ${qemuList.length} QEMUs and ${lxcList.length} LXCs via cluster resources`);
+                    method = 'node-api';
+                    console.log(`[getVMs] Found ${qemuList.length} QEMUs and ${lxcList.length} LXCs via node API`);
                 }
             } catch (e) {
-                console.warn('[getVMs] Cluster resources API failed:', e);
+                console.warn('[getVMs] Node-specific API failed:', e);
             }
-        }
 
-        // 3. Fetch Config Details (for storages and networks)
-        const vmDetails: Record<string, { networks: Set<string>, storages: Set<string>, vlan?: number }> = {};
+            // 2. Fallback: Cluster Resources (if node API returned empty)
+            if (qemuList.length === 0 && lxcList.length === 0) {
+                try {
+                    console.log('[getVMs] Node API empty. Trying cluster resources...');
+                    const json = await ssh.exec('pvesh get /cluster/resources --output-format json 2>/dev/null');
+                    const resources = JSON.parse(json);
 
-        try {
-            const configPath = `/etc/pve/nodes/${nodeName}`;
-            const cmd = `grep -E "^(net|scsi|ide|sata|virtio|rootfs|mp)[0-9]*:" ${configPath}/qemu-server/*.conf ${configPath}/lxc/*.conf 2>/dev/null || echo ""`;
-            const configOutput = await ssh.exec(cmd);
+                    const nodeResources = resources.filter((r: any) =>
+                        r.node === nodeName && (r.type === 'qemu' || r.type === 'lxc')
+                    );
 
-            configOutput.split('\n').forEach(line => {
-                if (!line.trim()) return;
-                const parts = line.split(':');
-                if (parts.length < 3) return;
+                    nodeResources.forEach((r: any) => {
+                        const vmData = {
+                            vmid: r.vmid,
+                            name: r.name || (r.type === 'qemu' ? `VM ${r.vmid}` : `CT ${r.vmid}`),
+                            status: r.status,
+                            cpus: r.maxcpu,
+                            maxmem: r.maxmem,
+                            uptime: r.uptime,
+                            tags: r.tags
+                        };
+                        if (r.type === 'qemu') {
+                            qemuList.push(vmData);
+                        } else {
+                            lxcList.push(vmData);
+                        }
+                    });
 
-                const pathMsg = parts[0];
-                const vmidMatch = pathMsg.match(/\/(\d+)\.conf$/);
-                if (!vmidMatch) return;
-                const vmid = vmidMatch[1];
-
-                if (!vmDetails[vmid]) {
-                    vmDetails[vmid] = { networks: new Set(), storages: new Set(), vlan: undefined };
-                }
-
-                const key = parts[1].trim();
-                const value = parts.slice(2).join(':').trim();
-
-                if (key.startsWith('net')) {
-                    const brMatch = value.match(/bridge=([^,]+)/);
-                    if (brMatch) vmDetails[vmid].networks.add(brMatch[1]);
-
-                    const tagMatch = value.match(/tag=(\d+)/);
-                    if (tagMatch) vmDetails[vmid].vlan = parseInt(tagMatch[1]);
-
-                    const ipMatch = value.match(/ip=([0-9a-fA-F.:/]+)/);
-                    if (ipMatch && ipMatch[1] !== 'dhcp' && ipMatch[1] !== 'manual') {
-                        vmDetails[vmid].networks.add(ipMatch[1]);
+                    if (qemuList.length > 0 || lxcList.length > 0) {
+                        method = 'cluster-api';
+                        console.log(`[getVMs] Found ${qemuList.length} QEMUs and ${lxcList.length} LXCs via cluster resources`);
                     }
+                } catch (e) {
+                    console.warn('[getVMs] Cluster resources API failed:', e);
                 }
+            }
 
-                if (key.match(/^(scsi|ide|sata|virtio|rootfs|mp)/)) {
-                    const storageMatch = value.match(/^([^:]+):/);
-                    if (storageMatch) {
-                        const storage = storageMatch[1];
-                        if (storage !== 'cdrom' && storage !== 'none' && !storage.startsWith('/')) {
-                            vmDetails[vmid].storages.add(storage);
+            // 3. Fetch Config Details (for storages and networks)
+            const vmDetails: Record<string, { networks: Set<string>, storages: Set<string>, vlan?: number }> = {};
+
+            try {
+                const configPath = `/etc/pve/nodes/${nodeName}`;
+                const cmd = `grep -E "^(net|scsi|ide|sata|virtio|rootfs|mp)[0-9]*:" ${configPath}/qemu-server/*.conf ${configPath}/lxc/*.conf 2>/dev/null || echo ""`;
+                const configOutput = await ssh.exec(cmd);
+
+                configOutput.split('\n').forEach(line => {
+                    if (!line.trim()) return;
+                    const parts = line.split(':');
+                    if (parts.length < 3) return;
+
+                    const pathMsg = parts[0];
+                    const vmidMatch = pathMsg.match(/\/(\d+)\.conf$/);
+                    if (!vmidMatch) return;
+                    const vmid = vmidMatch[1];
+
+                    if (!vmDetails[vmid]) {
+                        vmDetails[vmid] = { networks: new Set(), storages: new Set(), vlan: undefined };
+                    }
+
+                    const key = parts[1].trim();
+                    const value = parts.slice(2).join(':').trim();
+
+                    if (key.startsWith('net')) {
+                        const brMatch = value.match(/bridge=([^,]+)/);
+                        if (brMatch) vmDetails[vmid].networks.add(brMatch[1]);
+
+                        const tagMatch = value.match(/tag=(\d+)/);
+                        if (tagMatch) vmDetails[vmid].vlan = parseInt(tagMatch[1]);
+
+                        const ipMatch = value.match(/ip=([0-9a-fA-F.:/]+)/);
+                        if (ipMatch && ipMatch[1] !== 'dhcp' && ipMatch[1] !== 'manual') {
+                            vmDetails[vmid].networks.add(ipMatch[1]);
                         }
                     }
-                }
-            });
-        } catch (e) {
-            console.warn('[getVMs] Config parsing failed (non-critical):', e);
-        }
 
-        const mapVM = (vm: any, type: 'qemu' | 'lxc') => {
-            const vmid = vm.vmid.toString();
-            const details = vmDetails[vmid] || { networks: new Set(), storages: new Set() };
+                    if (key.match(/^(scsi|ide|sata|virtio|rootfs|mp)/)) {
+                        const storageMatch = value.match(/^([^:]+):/);
+                        if (storageMatch) {
+                            const storage = storageMatch[1];
+                            if (storage !== 'cdrom' && storage !== 'none' && !storage.startsWith('/')) {
+                                vmDetails[vmid].storages.add(storage);
+                            }
+                        }
+                    }
+                });
+            } catch (e) {
+                console.warn('[getVMs] Config parsing failed (non-critical):', e);
+            }
 
-            return {
-                vmid: vmid,
-                name: vm.name,
-                status: vm.status,
-                type,
-                cpus: vm.cpus,
-                memory: vm.maxmem,
-                uptime: vm.uptime,
-                tags: vm.tags ? (typeof vm.tags === 'string' ? vm.tags.split(',') : vm.tags) : [],
-                networks: Array.from(details.networks),
-                storages: Array.from(details.storages),
-                vlan: details.vlan
+            const mapVM = (vm: any, type: 'qemu' | 'lxc') => {
+                const vmid = vm.vmid.toString();
+                const details = vmDetails[vmid] || { networks: new Set(), storages: new Set() };
+
+                return {
+                    vmid: vmid,
+                    name: vm.name,
+                    status: vm.status,
+                    type,
+                    cpus: vm.cpus,
+                    memory: vm.maxmem,
+                    uptime: vm.uptime,
+                    tags: vm.tags ? (typeof vm.tags === 'string' ? vm.tags.split(',') : vm.tags) : [],
+                    networks: Array.from(details.networks),
+                    storages: Array.from(details.storages),
+                    vlan: details.vlan
+                };
             };
-        };
 
-        const result = [
-            ...qemuList.map((x: any) => mapVM(x, 'qemu')),
-            ...lxcList.map((x: any) => mapVM(x, 'lxc'))
-        ].sort((a, b) => parseInt(a.vmid) - parseInt(b.vmid));
+            const result = [
+                ...qemuList.map((x: any) => mapVM(x, 'qemu')),
+                ...lxcList.map((x: any) => mapVM(x, 'lxc'))
+            ].sort((a, b) => parseInt(a.vmid) - parseInt(b.vmid));
 
-        console.log(`[getVMs] Server ${serverId}: Returning ${result.length} VMs via ${method}`);
-        return result;
-
+            console.log(`[getVMs] Server ${serverId}: Returning ${result.length} VMs via ${method}`);
+            return result;
+        });
     } catch (e) {
         console.error(`[getVMs] Server ${serverId} failed:`, e);
         return [];
-    } finally {
-        await ssh.disconnect();
     }
 }
 
 export async function getTargetResources(serverId: number) {
     const server = await getServer(serverId);
-    const ssh = createSSHClient(server);
     try {
-        await ssh.connect();
-        // Fetch Storages
-        const st = await ssh.exec(`pvesm status -content images -enabled 1 2>/dev/null | awk 'NR>1 {print $1}'`);
-        // Fetch Bridges
-        const br = await ssh.exec(`ls /sys/class/net/ | grep "^vmbr" || echo "vmbr0"`);
-
-        return {
-            storages: st.split('\n').filter(Boolean),
-            bridges: br.split('\n').filter(Boolean)
-        };
+        return await withSSH(server, async (ssh) => {
+            const st = await ssh.exec(`pvesm status -content images -enabled 1 2>/dev/null | awk 'NR>1 {print $1}'`);
+            const br = await ssh.exec(`ls /sys/class/net/ | grep "^vmbr" || echo "vmbr0"`);
+            return {
+                storages: st.split('\n').filter(Boolean),
+                bridges: br.split('\n').filter(Boolean)
+            };
+        });
     } catch {
         return { storages: [], bridges: [] };
-    } finally {
-        await ssh.disconnect();
     }
 }
 
 
 export async function getVMConfig(serverId: number, vmid: string, type: 'qemu' | 'lxc') {
     const server = await getServer(serverId);
-    const ssh = createSSHClient(server);
     try {
-        await ssh.connect();
-        const nodeName = await determineNodeName(ssh);
-
-        let configPath = '';
-        if (type === 'qemu') {
-            configPath = `/etc/pve/nodes/${nodeName}/qemu-server/${vmid}.conf`;
-        } else {
-            configPath = `/etc/pve/nodes/${nodeName}/lxc/${vmid}.conf`;
-        }
-
-        const content = await ssh.exec(`cat ${configPath} 2>/dev/null`);
-        return content;
+        return await withSSH(server, async (ssh) => {
+            const nodeName = await determineNodeName(ssh);
+            const configPath = type === 'qemu'
+                ? `/etc/pve/nodes/${nodeName}/qemu-server/${vmid}.conf`
+                : `/etc/pve/nodes/${nodeName}/lxc/${vmid}.conf`;
+            return await ssh.exec(`cat ${configPath} 2>/dev/null`);
+        });
     } catch (e) {
         console.error('Failed to get VM config:', e);
         return '';
-    } finally {
-        await ssh.disconnect();
     }
 }
 

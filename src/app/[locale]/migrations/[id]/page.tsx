@@ -105,21 +105,21 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
                 </Link>
                 <div className="flex-1">
                     <div className="flex items-center gap-3">
-                        <h1 className="text-2xl font-bold">Migration Details</h1>
+                        <h1 className="text-2xl font-bold">{t('title')}</h1>
                         <Badge className={`${config.bg} ${config.color} hover:${config.bg}`}>{config.label}</Badge>
                         {task.status === 'completed' && failedVmSteps.length > 0 && (
                             <Badge variant="secondary" className="bg-amber-500/10 text-amber-600">
-                                {completedVmSteps.length}/{vmSteps.length} erfolgreich
+                                {completedVmSteps.length}/{vmSteps.length} {t('successful')}
                             </Badge>
                         )}
                         {task.status === 'completed' && failedVmSteps.length === 0 && vmSteps.length > 0 && (
                             <Badge variant="secondary" className="bg-green-500/10 text-green-600">
-                                {vmSteps.length}/{vmSteps.length} erfolgreich
+                                {vmSteps.length}/{vmSteps.length} {t('successful')}
                             </Badge>
                         )}
                         {task.status === 'failed' && (
                             <Badge variant="secondary" className="bg-red-500/10 text-red-600">
-                                {failedVmSteps.length} fehlgeschlagen
+                                {failedVmSteps.length} {t('failed')}
                             </Badge>
                         )}
                     </div>
@@ -133,7 +133,7 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
                 </div>
                 {(task.status === 'pending' || task.status === 'running') ? (
                     <Button variant="destructive" onClick={handleCancel} className="gap-2">
-                        <StopCircle className="h-4 w-4" /> Abbrechen
+                        <StopCircle className="h-4 w-4" /> {t('cancel')}
                     </Button>
                 ) : (
                     <Button variant="outline" onClick={handleDelete} className="gap-2 text-red-500 hover:text-red-700 hover:bg-red-50 border-red-200">
@@ -156,10 +156,10 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
                                 <div>
                                     <div className="text-2xl font-bold">{progressPercent}%</div>
                                     <div className="text-sm text-muted-foreground">
-                                        {task.status === 'completed' ? 'Abgeschlossen' :
-                                         task.status === 'failed' ? 'Fehlgeschlagen' :
-                                         task.status === 'cancelled' ? 'Abgebrochen' :
-                                         task.steps.find(s => s.status === 'running')?.name || 'Initialisiere...'}
+                                        {task.status === 'completed' ? t('completed') :
+                                         task.status === 'failed' ? t('statusFailed') :
+                                         task.status === 'cancelled' ? t('cancelled') :
+                                         task.steps.find(s => s.status === 'running')?.name || t('initializing')}
                                     </div>
                                 </div>
                             </div>
@@ -175,7 +175,7 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
                     {/* Timeline/Steps */}
                     <Card className="flex-1 flex flex-col min-h-0 overflow-hidden">
                         <CardHeader className="py-4 border-b shrink-0 bg-muted/20">
-                            <CardTitle className="text-base">Ablaufplan</CardTitle>
+                            <CardTitle className="text-base">{t('schedule')}</CardTitle>
                         </CardHeader>
                         <ScrollArea className="flex-1">
                             <div className="p-6 relative">
@@ -228,7 +228,7 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
                     <CardHeader className="py-3 px-4 border-b border-zinc-800 bg-zinc-900/50 shrink-0 flex flex-row items-center justify-between">
                         <div className="flex items-center gap-2">
                             <Terminal className="h-4 w-4 text-zinc-400" />
-                            <CardTitle className="text-sm font-mono text-zinc-300">Live Protokoll</CardTitle>
+                            <CardTitle className="text-sm font-mono text-zinc-300">{t('liveLog')}</CardTitle>
                         </div>
                         <div className="flex items-center gap-3">
                             {task.status === 'failed' && (
@@ -241,7 +241,7 @@ export default function MigrationDetailPage({ params }: { params: Promise<{ id: 
                                 }}
                                 className={`text-[10px] px-2 py-0.5 rounded font-mono transition-colors ${autoScroll ? 'bg-green-500/20 text-green-400' : 'bg-zinc-700/50 text-zinc-500 hover:text-zinc-300'}`}
                             >
-                                Auto-Scroll {autoScroll ? 'ON' : 'OFF'}
+                                {autoScroll ? t('autoScrollOn') : t('autoScrollOff')}
                             </button>
                             <div className="flex gap-1.5">
                                 <div className="h-2.5 w-2.5 rounded-full bg-zinc-700" />
@@ -280,6 +280,7 @@ import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 function AIAnalysisButton({ log }: { log: string }) {
+    const t = useTranslations('migrationDetail');
     const [analyzing, setAnalyzing] = useState(false);
     const [result, setResult] = useState<string | null>(null);
 
@@ -301,7 +302,7 @@ function AIAnalysisButton({ log }: { log: string }) {
                 <div className="absolute top-14 left-4 right-4 z-20 bg-zinc-900/95 border border-purple-500/30 rounded-lg p-4 shadow-2xl backdrop-blur-sm animate-in fade-in slide-in-from-top-2">
                     <div className="flex justify-between items-start mb-2">
                         <h4 className="text-purple-400 text-sm font-bold flex items-center gap-2">
-                            <Sparkles className="h-4 w-4" /> AI Analyse
+                            <Sparkles className="h-4 w-4" /> {t('aiAnalysis')}
                         </h4>
                         <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-zinc-500" onClick={() => setResult(null)}>
                             <XCircle className="h-4 w-4" />
@@ -320,7 +321,7 @@ function AIAnalysisButton({ log }: { log: string }) {
                     className="h-7 text-xs bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 hover:text-purple-300 border border-purple-500/20"
                 >
                     {analyzing ? <Loader2 className="h-3 w-3 animate-spin mr-1.5" /> : <Sparkles className="h-3 w-3 mr-1.5" />}
-                    KI Analyse
+                    {t('aiAnalysis')}
                 </Button>
             )}
         </div>

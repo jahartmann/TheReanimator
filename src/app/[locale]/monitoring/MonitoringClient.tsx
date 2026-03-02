@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Activity, Server, Cpu, MemoryStick, MonitorPlay, RefreshCw } from 'lucide-react';
+import { Activity, Server, Cpu, MemoryStick, MonitorPlay, RefreshCw, Bell } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -12,6 +12,7 @@ import { ResourceChart, type Timeframe } from '@/components/charts/ResourceChart
 import { ClusterCapacityCard } from '@/components/monitoring/ClusterCapacityCard';
 import { ZFSHealthCard } from '@/components/monitoring/ZFSHealthCard';
 import { TaskLogCard } from '@/components/monitoring/TaskLogCard';
+import { AlertsPanel } from '@/components/monitoring/AlertsPanel';
 import {
     getMonitoringSummary,
     getNodeRRDData,
@@ -336,6 +337,10 @@ export function MonitoringClient({ servers }: Props) {
                         {!isAllNodes && (
                             <TabsTrigger value="tasks" className="px-4 py-2 rounded-lg text-sm">Tasks</TabsTrigger>
                         )}
+                        <TabsTrigger value="alerts" className="px-4 py-2 rounded-lg text-sm">
+                            <Bell className="h-3.5 w-3.5 mr-1.5" />
+                            Alerts
+                        </TabsTrigger>
                     </TabsList>
 
                     {/* Charts - works for both "Alle Knoten" and specific node */}
@@ -570,6 +575,11 @@ export function MonitoringClient({ servers }: Props) {
                                 </CardContent>
                             </Card>
                         )}
+                    </TabsContent>
+
+                    {/* Alerts */}
+                    <TabsContent value="alerts" className="mt-5">
+                        <AlertsPanel />
                     </TabsContent>
                 </Tabs>
         </div>

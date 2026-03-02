@@ -331,7 +331,7 @@ export const tools = {
 
                     if (!result.success) return result;
 
-                    if (args.autoApprove !== false && result.toolId) {
+                    if (args.autoApprove === true && result.toolId) {
                         approveTool(result.toolId, 0);
                         return { success: true, message: `Tool ${args.name} created, approved, and ready to use.` };
                     }
@@ -2646,6 +2646,289 @@ export const tools = {
                         maxmem: n.maxmem,
                     })),
                 };
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        },
+    },
+
+    // ========================================================================
+    // HA CLUSTER MANAGEMENT
+    // ========================================================================
+
+    getHAStatus: {
+        description: 'Get HA cluster status: resources, groups, and manager status for a PVE server.',
+        parameters: z.object({
+            serverId: z.number().describe('Server ID (must be PVE type)'),
+        }),
+        execute: async ({ serverId }: { serverId: number }) => {
+            try {
+                const server = getServerByIdOrName(serverId);
+                if (!server) return { success: false, error: `Server ${serverId} not found.` };
+                if (server.type !== 'pve') return { success: false, error: `Server ${server.name} is not a Proxmox VE server.` };
+
+                const { ProxmoxClient } = await import('@/lib/proxmox');
+                const client = new ProxmoxClient({
+                    url: server.url,
+                    token: server.auth_token || undefined,
+                    username: server.ssh_user ? `${server.ssh_user}@pam` : undefined,
+                    type: server.type,
+                    sslFingerprint: server.ssl_fingerprint || undefined,
+                });
+
+                const [resources, groups, status] = await Promise.all([
+                    client.getHAResources().catch(() => []),
+                    client.getHAGroups().catch(() => []),
+                    client.getHAStatus().catch(() => []),
+                ]);
+
+                return {
+                    success: true,
+                    server: server.name,
+                    resources: resources.map((r: any) => ({
+                        sid: r.sid,
+                        state: r.state,
+                        group: r.group || null,
+                        maxRestart: r.max_restart,
+                        maxRelocate: r.max_relocate,
+                    })),
+                    groups: groups.map((g: any) => ({ group: g.group, nodes: g.nodes })),
+                    managerStatus: status.filter((s: any) => s.type === 'crm' || s.type === 'lrm').map((s: any) => ({
+                        type: s.type,
+                        node: s.node,
+                        status: s.status,
+                    })),
+                    resourceCount: resources.length,
+                    groupCount: groups.length,
+                };
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        },
+    },
+
+    manageHA: {
+        description: 'Enable/disable/update HA for a VM or container on PVE.',
+        parameters: z.object({
+            serverId: z.number().describe('Server ID (PVE)'),
+            vmid: z.string().describe('VM/Container ID'),
+            type: z.enum(['qemu', 'ct']).describe('Resource type'),
+            action: z.enum(['enable', 'disable', 'update']).describe('Action'),
+            group: z.string().optional().describe('HA group name (for enable/update)'),
+            maxRestart: z.number().optional().describe('Max restart attempts (default: 1)'),
+            maxRelocate: z.number().optional().describe('Max relocate attempts (default: 1)'),
+            state: z.string().optional().describe('Desired state: started, stopped, disabled, ignored'),
+        }),
+        execute: async ({ serverId, vmid, type, action, group, maxRestart, maxRelocate, state }: {
+            serverId: number, vmid: string, type: 'qemu' | 'ct', action: 'enable' | 'disable' | 'update',
+            group?: string, maxRestart?: number, maxRelocate?: number, state?: string
+        }) => {
+            try {
+                const server = getServerByIdOrName(serverId);
+                if (!server) return { success: false, error: `Server ${serverId} not found.` };
+                if (server.type !== 'pve') return { success: false, error: `Server ${server.name} is not PVE.` };
+
+                const { ProxmoxClient } = await import('@/lib/proxmox');
+                const client = new ProxmoxClient({
+                    url: server.url,
+                    token: server.auth_token || undefined,
+                    username: server.ssh_user ? `${server.ssh_user}@pam` : undefined,
+                    type: server.type,
+                    sslFingerprint: server.ssl_fingerprint || undefined,
+                });
+
+                const sid = `${type}:${vmid}`;
+
+                if (action === 'enable') {
+                    await client.setHAResource(sid, {
+                        state: state || 'started',
+                        max_restart: maxRestart ?? 1,
+                        max_relocate: maxRelocate ?? 1,
+                        group: group || undefined,
+                    });
+                    return { success: true, message: `HA enabled for ${sid} on ${server.name}.`, sid, server: server.name };
+                }
+
+                if (action === 'disable') {
+                    await client.removeHAResource(sid);
+                    return { success: true, message: `HA disabled for ${sid} on ${server.name}.`, sid, server: server.name };
+                }
+
+                if (action === 'update') {
+                    const config: any = {};
+                    if (group !== undefined) config.group = group;
+                    if (maxRestart !== undefined) config.max_restart = maxRestart;
+                    if (maxRelocate !== undefined) config.max_relocate = maxRelocate;
+                    if (state !== undefined) config.state = state;
+                    await client.setHAResource(sid, config);
+                    return { success: true, message: `HA resource ${sid} updated.`, sid, server: server.name, config };
+                }
+
+                return { success: false, error: 'Invalid action.' };
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        },
+    },
+
+    // ========================================================================
+    // AUDIT LOG
+    // ========================================================================
+
+    getAuditLog: {
+        description: 'Query the persistent audit log. Filter by category, user, server, or date range.',
+        parameters: z.object({
+            category: z.string().optional().describe('Filter: auth, vm, backup, config, migration, system'),
+            username: z.string().optional().describe('Filter by username'),
+            serverId: z.number().optional().describe('Filter by server ID'),
+            limit: z.number().optional().describe('Max entries (default: 25)'),
+            offset: z.number().optional().describe('Offset for pagination (default: 0)'),
+        }),
+        execute: async ({ category, username, serverId, limit = 25, offset = 0 }: {
+            category?: string, username?: string, serverId?: number, limit?: number, offset?: number
+        }) => {
+            try {
+                const { getAuditLogs } = await import('@/lib/audit-log');
+                const { logs, total } = getAuditLogs({ category, username, serverId, limit, offset });
+
+                return {
+                    success: true,
+                    total,
+                    count: logs.length,
+                    logs: logs.map(l => ({
+                        id: l.id,
+                        timestamp: l.timestamp,
+                        username: l.username,
+                        action: l.action,
+                        category: l.category,
+                        targetType: l.target_type,
+                        targetId: l.target_id,
+                        targetName: l.target_name,
+                        serverId: l.server_id,
+                        details: l.details ? (() => { try { return JSON.parse(l.details); } catch { return l.details; } })() : undefined,
+                    })),
+                    hasMore: offset + logs.length < total,
+                };
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        },
+    },
+
+    getAuditStats: {
+        description: 'Get audit log statistics: counts by category, top active users today.',
+        parameters: z.object({}),
+        execute: async () => {
+            try {
+                const today = new Date().toISOString().slice(0, 10);
+                const totalToday = (db.prepare(`SELECT COUNT(*) as cnt FROM audit_log WHERE timestamp >= ?`).get(today) as any)?.cnt || 0;
+
+                const byCategory = db.prepare(`
+                    SELECT category, COUNT(*) as cnt FROM audit_log
+                    WHERE timestamp >= ? GROUP BY category ORDER BY cnt DESC
+                `).all(today) as any[];
+
+                const topUsers = db.prepare(`
+                    SELECT username, COUNT(*) as cnt FROM audit_log
+                    WHERE timestamp >= ? GROUP BY username ORDER BY cnt DESC LIMIT 5
+                `).all(today) as any[];
+
+                return {
+                    success: true,
+                    date: today,
+                    totalToday,
+                    byCategory: byCategory.reduce((acc: any, r: any) => { acc[r.category] = r.cnt; return acc; }, {}),
+                    topUsers: topUsers.map((u: any) => ({ username: u.username, actions: u.cnt })),
+                };
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        },
+    },
+
+    // ========================================================================
+    // REMOTE FILE MANAGEMENT (SFTP)
+    // ========================================================================
+
+    manageRemoteFiles: {
+        description: 'Browse, create directories, or delete files/dirs on remote servers via SFTP. For read/write use readFile/writeFile tools.',
+        parameters: z.object({
+            serverId: z.number().describe('Server ID'),
+            action: z.enum(['list', 'mkdir', 'delete']).describe('Action: list directory, create directory, or delete'),
+            path: z.string().describe('Remote path (absolute)'),
+            confirmed: z.boolean().optional().describe('Required for delete (safety)'),
+        }),
+        execute: async ({ serverId, action, path: remotePath, confirmed }: {
+            serverId: number, action: 'list' | 'mkdir' | 'delete', path: string, confirmed?: boolean
+        }) => {
+            try {
+                const BLOCKED_PATHS = ['/', '/boot', '/proc', '/sys', '/dev', '/run'];
+                const normalized = remotePath.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+
+                if (action === 'delete' && BLOCKED_PATHS.includes(normalized)) {
+                    return { success: false, error: `Cannot delete protected path: ${normalized}` };
+                }
+
+                const server = getServerByIdOrName(serverId);
+                if (!server) return { success: false, error: `Server ${serverId} not found.` };
+
+                const client = createSSHClient(server);
+                await client.connect();
+
+                if (action === 'list') {
+                    const output = await client.exec(`ls -la "${normalized}" 2>/dev/null`);
+                    await client.disconnect();
+
+                    const lines = output.trim().split('\n').filter(l => l && !l.startsWith('total'));
+                    const entries = lines.map(line => {
+                        const parts = line.split(/\s+/);
+                        if (parts.length < 9) return null;
+                        const perms = parts[0];
+                        const size = parseInt(parts[4]) || 0;
+                        const modified = `${parts[5]} ${parts[6]} ${parts[7]}`;
+                        const name = parts.slice(8).join(' ');
+                        if (name === '.' || name === '..') return null;
+                        return {
+                            name,
+                            type: perms.startsWith('d') ? 'directory' : 'file',
+                            permissions: perms,
+                            size,
+                            modified,
+                        };
+                    }).filter(Boolean);
+
+                    return {
+                        success: true,
+                        server: server.name,
+                        path: normalized,
+                        count: entries.length,
+                        entries,
+                    };
+                }
+
+                if (action === 'mkdir') {
+                    await client.exec(`mkdir -p "${normalized}"`);
+                    await client.disconnect();
+                    return { success: true, server: server.name, message: `Directory created: ${normalized}` };
+                }
+
+                if (action === 'delete') {
+                    if (!confirmed) {
+                        await client.disconnect();
+                        return {
+                            success: false,
+                            requiresConfirmation: true,
+                            message: `Delete "${normalized}" on ${server.name}? Set confirmed=true to proceed.`,
+                            warning: 'This will permanently delete the file/directory.',
+                        };
+                    }
+                    await client.exec(`rm -rf "${normalized}"`);
+                    await client.disconnect();
+                    return { success: true, server: server.name, message: `Deleted: ${normalized}` };
+                }
+
+                await client.disconnect();
+                return { success: false, error: 'Invalid action.' };
             } catch (e: any) {
                 return { success: false, error: e.message };
             }

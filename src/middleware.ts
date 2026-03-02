@@ -11,6 +11,11 @@ const intlMiddleware = createMiddleware(routing);
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Skip WebSocket paths entirely
+  if (pathname.startsWith('/ws/')) {
+    return NextResponse.next();
+  }
+
   // Skip i18n for API routes and static files - let them pass through directly
   if (
     pathname.startsWith('/api') ||
