@@ -334,6 +334,7 @@ async function refreshNodeStats() {
                         source: `server:${server.id}`,
                         data: { eventType: 'node_offline', serverId: server.id, serverName: server.name },
                         severity: 'critical',
+                        timestamp: new Date(),
                     });
                 } catch { /* event-bus optional */ }
 
