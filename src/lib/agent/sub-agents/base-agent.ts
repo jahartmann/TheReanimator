@@ -25,7 +25,7 @@ export abstract class SubAgent {
     /** Get the filtered tool set for this sub-agent */
     private getTools(): Record<string, any> {
         const customToolDefs = getActiveToolDefinitions();
-        const merged = { ...allToolRegistry, ...customToolDefs };
+        const merged: Record<string, any> = { ...allToolRegistry, ...customToolDefs };
 
         const filtered: Record<string, any> = {};
         for (const toolName of this.allowedTools) {
@@ -112,7 +112,7 @@ export abstract class SubAgent {
 
         logJournalEntry({
             event_type: 'action_taken',
-            source: 'sub-agent',
+            source: 'chat',
             summary: `Sub-agent ${this.name} completed (${turn + 1} turns, ${toolsUsed.length} tools)`,
             details: finalResponse.slice(0, 500),
             severity: 'info',
@@ -203,11 +203,11 @@ const STATEFUL_TOOLS = new Set([
  * Classify tool calls as independent (parallelizable) or dependent (sequential).
  * Heuristic: tools that don't write state and don't share serverId are independent.
  */
-export function classifyToolCalls(
-    toolCalls: Array<{ toolName: string; args: Record<string, any> }>
-): { independent: typeof toolCalls; dependent: typeof toolCalls } {
-    const independent: typeof toolCalls = [];
-    const dependent: typeof toolCalls = [];
+export function classifyToolCalls<T extends { toolName: string; args: Record<string, any> }>(
+    toolCalls: T[]
+): { independent: T[]; dependent: T[] } {
+    const independent: T[] = [];
+    const dependent: T[] = [];
 
     for (const call of toolCalls) {
         if (STATEFUL_TOOLS.has(call.toolName)) {

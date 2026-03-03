@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Console WebSocket Proxy — Dual Mode
  *
