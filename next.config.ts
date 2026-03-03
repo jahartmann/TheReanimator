@@ -8,21 +8,20 @@ const nextConfig: NextConfig = {
   // Exclude native Node.js modules from bundling
   serverExternalPackages: ['ssh2', 'better-sqlite3', 'esbuild', 'ws'],
   experimental: {
-    // Reduce peak memory usage during webpack compilation
     webpackMemoryOptimizations: true,
   },
-  // Webpack config
+  // Webpack config (used for `next dev` without --turbopack, or as fallback)
   webpack: (config, { isServer, dev }) => {
     if (!isServer) {
-      // noVNC uses CJS (module.exports) — tell webpack to handle it as auto-detect
       config.module.rules.push({
         test: /node_modules[\\/]@novnc[\\/]novnc/,
         type: 'javascript/auto',
       });
     }
+    // Disable filesystem cache to free memory during production builds
     if (!dev) {
-      // Production: limit parallel compilation to prevent container OOM
-      config.parallelism = 2;
+      config.cache = false;
+      config.parallelism = 1;
     }
     return config;
   },
