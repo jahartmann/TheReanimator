@@ -17,7 +17,7 @@ export default defineConfig({
       { find: 'next-intl/server',     replacement: path.resolve(__dirname, './src/compat/intl.ts') },
       { find: 'next-intl',            replacement: path.resolve(__dirname, './src/compat/intl.ts') },
       { find: 'next/navigation',      replacement: path.resolve(__dirname, './src/compat/navigation.ts') },
-      { find: 'next/link',            replacement: path.resolve(__dirname, './src/compat/link.ts') },
+      { find: 'next/link',            replacement: path.resolve(__dirname, './src/compat/link.tsx') },
       { find: 'next/cache',           replacement: path.resolve(__dirname, './src/compat/cache.ts') },
       { find: 'next/image',           replacement: path.resolve(__dirname, './src/compat/image.ts') },
       { find: 'next-themes',          replacement: path.resolve(__dirname, './src/compat/next-themes.ts') },

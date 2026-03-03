@@ -274,6 +274,95 @@ app.post('/api/servers', requireAuth, (req: AuthRequest, res: Response) => {
   }
 });
 
+// ─── SSH Test + Fingerprint Fetch ─────────────────────────────────────────────
+app.post('/api/servers/test-ssh', requireAuth, async (req: AuthRequest, res: Response) => {
+  const { ssh_host, ssh_port, ssh_user, ssh_password } = req.body;
+  if (!ssh_host) { res.status(400).json({ success: false, message: 'ssh_host required' }); return; }
+
+  try {
+    const { createSSHClient } = await import('./lib/ssh.js');
+    const client = createSSHClient({
+      ssh_host,
+      ssh_port: parseInt(ssh_port) || 22,
+      ssh_user: ssh_user || 'root',
+      ssh_key: ssh_password || undefined,
+      url: '',
+    });
+    await client.connect();
+
+    // Fetch SSL fingerprint (Proxmox-specific)
+    let fingerprint: string | undefined;
+    try {
+      const result = await client.exec(`openssl x509 -noout -fingerprint -sha256 -in /etc/pve/local/pve-ssl.pem | cut -d= -f2`);
+      if (result && result.trim().length > 10) fingerprint = result.trim();
+    } catch { /* not a PVE node or openssl not available */ }
+
+    // Detect cluster nodes
+    let clusterNodes: { name: string; ip: string }[] = [];
+    try {
+      const membersJson = await client.exec('cat /etc/pve/.members');
+      const members = JSON.parse(membersJson);
+      if (members?.nodename) {
+        for (const [name, data] of Object.entries(members.nodename)) {
+          if (typeof data === 'object' && data !== null && 'ip' in data) {
+            clusterNodes.push({ name, ip: (data as any).ip });
+          }
+        }
+      }
+    } catch { /* not a cluster */ }
+
+    await client.disconnect();
+
+    let message = 'SSH connection successful.';
+    if (fingerprint) message += ' SSL fingerprint loaded.';
+    if (clusterNodes.length > 1) message += ` Cluster detected: ${clusterNodes.length} nodes.`;
+
+    res.json({ success: true, message, fingerprint, clusterNodes });
+  } catch (err: any) {
+    res.json({ success: false, message: `SSH error: ${err.message}` });
+  }
+});
+
+// ─── API Token Generator ───────────────────────────────────────────────────────
+app.post('/api/servers/generate-token', requireAuth, async (req: AuthRequest, res: Response) => {
+  const { url, user, password, type } = req.body;
+  if (!url || !user || !password) {
+    res.status(400).json({ success: false, message: 'url, user, password required' });
+    return;
+  }
+  try {
+    const { ProxmoxClient } = await import('./lib/proxmox.js');
+    const client = new ProxmoxClient({ url, type: type || 'pve', username: user, password });
+    const token = await (client as any).generateToken();
+    res.json({ success: true, token });
+  } catch (err: any) {
+    res.json({ success: false, message: `Token error: ${err.message}` });
+  }
+});
+
+// ─── Raise Undead ─────────────────────────────────────────────────────────────
+app.post('/api/servers/raise-undead', requireAuth, async (req: AuthRequest, res: Response) => {
+  const { hostname, port, username, rootPassword, description } = req.body;
+  if (!hostname || !rootPassword) {
+    res.status(400).json({ success: false, error: 'hostname and rootPassword required' });
+    return;
+  }
+  try {
+    const { raiseUndead } = await import('./lib/actions/necromancer.js');
+    const result = await raiseUndead({ hostname, port: port || 22, username: username || 'root', rootPassword, description });
+    if (result.success) {
+      // Find the newly added server
+      const db = getDb();
+      const server = db.prepare('SELECT id FROM servers WHERE ssh_host = ? ORDER BY id DESC LIMIT 1').get(hostname) as { id: number } | undefined;
+      res.json({ success: true, id: server?.id, message: (result as any).message });
+    } else {
+      res.json({ success: false, error: (result as any).error });
+    }
+  } catch (err: any) {
+    res.json({ success: false, error: err.message });
+  }
+});
+
 app.put('/api/servers/:id', requireAuth, (req: AuthRequest, res: Response) => {
   try {
     const db = getDb();

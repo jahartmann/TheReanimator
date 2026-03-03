@@ -6,14 +6,30 @@
 import React from 'react';
 import {
   Link as RouterLink,
+  LinkProps,
   useNavigate,
   useLocation,
 } from 'react-router-dom';
 
 // ─── Link ─────────────────────────────────────────────────────────────────────
-// next-intl's Link strips locale prefixes automatically.
-// In our SPA there are no locale prefixes in routes, so we pass href through.
-export const Link = RouterLink;
+// next-intl / Next.js Link accepts `href`; React Router Link accepts `to`.
+// This wrapper converts href → to so all nav links actually navigate.
+type NextLinkProps = Omit<LinkProps, 'to'> & {
+  href?: string;
+  to?: string;
+  [key: string]: any;
+};
+
+export function Link({ href, to, children, replace, ...rest }: NextLinkProps) {
+  const dest = to ?? href ?? '/';
+  // Strip next-specific props
+  const { prefetch: _prefetch, ...routerRest } = rest;
+  return React.createElement(
+    RouterLink,
+    { to: dest, replace: replace === true, ...routerRest },
+    children
+  );
+}
 
 // ─── redirect ─────────────────────────────────────────────────────────────────
 // Server-side redirect — no-op in client context.
