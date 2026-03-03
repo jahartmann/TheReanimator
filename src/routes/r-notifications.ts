@@ -266,6 +266,34 @@ export function setupRoutes(app: any, requireAuth: RequireAuth): void {
     }
   });
 
+  // POST /api/server-trust/trust-all — create trust entries for all servers that don't have one yet
+  app.post('/api/server-trust/trust-all', requireAuth, (req: AuthRequest, res: Response) => {
+    try {
+      const db = getDb();
+      const allServers = db.prepare('SELECT id FROM servers').all() as { id: number }[];
+      const trustedIds = new Set(
+        (db.prepare('SELECT server_id FROM server_trust').all() as { server_id: number }[]).map((r) => r.server_id)
+      );
+
+      const untrusted = allServers.filter((s) => !trustedIds.has(s.id));
+      const insert = db.prepare('INSERT INTO server_trust (server_id, status) VALUES (?, \'trusted\')');
+      const insertMany = db.transaction((rows: { id: number }[]) => {
+        for (const row of rows) insert.run(row.id);
+      });
+      insertMany(untrusted);
+
+      res.json({
+        success: true,
+        added: untrusted.length,
+        message: untrusted.length === 0
+          ? 'All servers are already trusted'
+          : `Added trust entries for ${untrusted.length} server${untrusted.length !== 1 ? 's' : ''}`,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/server-trust/scan/:serverId — fetch current fingerprint via SSH
   app.post('/api/server-trust/scan/:serverId', requireAuth, async (req: AuthRequest, res: Response) => {
     try {

@@ -61,9 +61,7 @@ const ServerDetailPage = React.lazy(() => import('./pages/ServerDetail'));
 
 // Newly implemented + additional pages
 const NotificationsPage = React.lazy(() => import('./pages/Notifications'));
-const TelegramTrustPage = React.lazy(() => import('./pages/TelegramTrust'));
 const ServerTrustPage = React.lazy(() => import('./pages/ServerTrust'));
-const NetworkOverviewPage = React.lazy(() => import('./pages/NetworkOverview'));
 const ISOSyncPage = React.lazy(() => import('./pages/ISOSync'));
 
 const MigrationsPage = React.lazy(() => import('./pages/Migrations'));
@@ -79,7 +77,6 @@ const StoragePage = React.lazy(() => import('./pages/Storage'));
 const DisasterRecoveryPage = React.lazy(() => import('./pages/DisasterRecovery'));
 const OptimizerPage = React.lazy(() => import('./pages/Optimizer'));
 const HistoryPage = React.lazy(() => import('./pages/History'));
-const LibraryPage = React.lazy(() => import('./pages/Library'));
 
 // ─── Page spinner ─────────────────────────────────────────────────────────────
 
@@ -256,15 +253,14 @@ function AppRoutes() {
         <Route path="/storage" element={<StoragePage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/audit" element={<AuditPage />} />
-        <Route path="/library" element={<LibraryPage />} />
         <Route path="/organs" element={<OrgansPage />} />
         <Route path="/console" element={<ConsolePage />} />
         <Route path="/disaster-recovery" element={<DisasterRecoveryPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
-        <Route path="/telegram-trust" element={<TelegramTrustPage />} />
         <Route path="/server-trust" element={<ServerTrustPage />} />
-        <Route path="/network" element={<NetworkOverviewPage />} />
         <Route path="/iso-sync" element={<ISOSyncPage />} />
+        <Route path="/library" element={<Navigate to="/iso-sync" replace />} />
+        <Route path="/telegram-trust" element={<Navigate to="/settings" replace />} />
         <Route path="/jobs" element={<Navigate to="/tasks" replace />} />
       </Route>
 

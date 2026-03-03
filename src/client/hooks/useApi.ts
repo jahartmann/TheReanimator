@@ -79,6 +79,11 @@ export function useApi<T>(url: string, options?: RequestInit): ApiState<T> {
   const fetchCountRef = useRef(0);
 
   const fetchData = useCallback(async () => {
+    if (!url) {
+      setData(null);
+      setLoading(false);
+      return;
+    }
     const fetchId = ++fetchCountRef.current;
     setLoading(true);
     setError(null);

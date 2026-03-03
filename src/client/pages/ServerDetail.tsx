@@ -8,12 +8,13 @@ import { useParams, Link } from 'react-router-dom';
 import { useApi, useApiMutation } from '../hooks/useApi';
 import {
   ArrowLeft, Server, Cpu, MemoryStick, HardDrive, Activity,
-  RefreshCw, Download,
+  RefreshCw, Download, Network, Wifi, WifiOff, Globe,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -64,6 +65,21 @@ interface ServerData {
   vms: VmItem[];
   stats: NodeStats | null;
   recentBackups: RecentBackup[];
+}
+
+interface NetworkInterface {
+  name: string;
+  mac: string;
+  status: string;
+  type: string;
+  ips: string[];
+}
+
+interface NetworkData {
+  server_id: number;
+  server_name: string;
+  interfaces: NetworkInterface[];
+  error?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -130,6 +146,9 @@ function vmStatusDot(status: string | null): string {
 export default function ServerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data, loading, error, refetch } = useApi<ServerData>(`/api/servers/${id}/full`);
+  const { data: networkData, loading: networkLoading, refetch: refetchNetwork } = useApi<NetworkData>(
+    id ? `/api/infra/network/${id}` : ''
+  );
   const { mutate } = useApiMutation();
   const [backingUp, setBackingUp] = React.useState(false);
   const [scanning, setScanning] = React.useState(false);
@@ -313,152 +332,203 @@ export default function ServerDetailPage() {
               </Card>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* VMs list */}
-              <div className="lg:col-span-2">
-                <Card className="border-muted/60">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-medium flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Server className="h-4 w-4" />
-                        Virtual Machines ({vms.length})
-                      </div>
-                      <div className="flex gap-2 text-xs font-normal">
-                        {runningVms > 0 && (
-                          <span className="text-green-600">{runningVms} running</span>
-                        )}
-                        {stoppedVms > 0 && (
-                          <span className="text-red-600">{stoppedVms} stopped</span>
-                        )}
-                      </div>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    {vms.length === 0 ? (
-                      <div className="p-6 text-center text-sm text-muted-foreground">
-                        No VMs found. Run a scan to discover VMs.
-                      </div>
-                    ) : (
-                      <div className="divide-y divide-border/50">
-                        {vms.map((vm) => {
-                          let parsedTags: string[] = [];
-                          try {
-                            parsedTags = JSON.parse(vm.tags || '[]');
-                          } catch { /* ignore */ }
-                          return (
-                            <div
-                              key={vm.id}
-                              className="flex items-center justify-between p-3 hover:bg-muted/30 transition-colors"
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div className={`w-2 h-2 rounded-full shrink-0 ${vmStatusDot(vm.status)}`} />
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-sm font-medium">
-                                      {vm.name || `VM ${vm.vmid}`}
-                                    </span>
-                                    <code className="text-[10px] text-muted-foreground">{vm.vmid}</code>
-                                    <Badge variant="outline" className="text-[10px]">
-                                      {vm.type === 'qemu' ? 'VM' : 'CT'}
-                                    </Badge>
-                                  </div>
-                                  {parsedTags.length > 0 && (
-                                    <div className="flex gap-1 mt-0.5 flex-wrap">
-                                      {parsedTags.map((tag) => (
-                                        <span
-                                          key={tag}
-                                          className="text-[10px] px-1.5 py-0 rounded-full bg-primary/10 text-primary"
-                                        >
-                                          {tag}
-                                        </span>
-                                      ))}
+            <Tabs defaultValue="vms">
+              <TabsList>
+                <TabsTrigger value="vms" className="flex items-center gap-1.5">
+                  <Server className="h-3.5 w-3.5" />
+                  VMs ({vms.length})
+                </TabsTrigger>
+                <TabsTrigger value="network" className="flex items-center gap-1.5">
+                  <Network className="h-3.5 w-3.5" />
+                  Network
+                </TabsTrigger>
+              </TabsList>
+
+              {/* VMs tab */}
+              <TabsContent value="vms">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-4">
+                  <div className="lg:col-span-2">
+                    <Card className="border-muted/60">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-medium flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Server className="h-4 w-4" />
+                            Virtual Machines ({vms.length})
+                          </div>
+                          <div className="flex gap-2 text-xs font-normal">
+                            {runningVms > 0 && <span className="text-green-600">{runningVms} running</span>}
+                            {stoppedVms > 0 && <span className="text-red-600">{stoppedVms} stopped</span>}
+                          </div>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="p-0">
+                        {vms.length === 0 ? (
+                          <div className="p-6 text-center text-sm text-muted-foreground">
+                            No VMs found. Run a scan to discover VMs.
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-border/50">
+                            {vms.map((vm) => {
+                              let parsedTags: string[] = [];
+                              try { parsedTags = JSON.parse(vm.tags || '[]'); } catch { /* ignore */ }
+                              return (
+                                <div key={vm.id} className="flex items-center justify-between p-3 hover:bg-muted/30 transition-colors">
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    <div className={`w-2 h-2 rounded-full shrink-0 ${vmStatusDot(vm.status)}`} />
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-sm font-medium">{vm.name || `VM ${vm.vmid}`}</span>
+                                        <code className="text-[10px] text-muted-foreground">{vm.vmid}</code>
+                                        <Badge variant="outline" className="text-[10px]">{vm.type === 'qemu' ? 'VM' : 'CT'}</Badge>
+                                      </div>
+                                      {parsedTags.length > 0 && (
+                                        <div className="flex gap-1 mt-0.5 flex-wrap">
+                                          {parsedTags.map((tag) => (
+                                            <span key={tag} className="text-[10px] px-1.5 py-0 rounded-full bg-primary/10 text-primary">{tag}</span>
+                                          ))}
+                                        </div>
+                                      )}
                                     </div>
-                                  )}
+                                  </div>
+                                  <Badge variant="outline" className={`text-[10px] shrink-0 ${vm.status === 'running' ? 'text-green-600 border-green-200' : vm.status === 'stopped' ? 'text-red-600 border-red-200' : ''}`}>
+                                    {vm.status || 'unknown'}
+                                  </Badge>
                                 </div>
-                              </div>
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] shrink-0 ${
-                                  vm.status === 'running' ? 'text-green-600 border-green-200' :
-                                  vm.status === 'stopped' ? 'text-red-600 border-red-200' :
-                                  ''
-                                }`}
-                              >
-                                {vm.status || 'unknown'}
-                              </Badge>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
 
-              {/* Sidebar */}
-              <div className="space-y-4">
-                {/* Server info */}
-                <Card className="border-muted/60">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-medium">Connection Details</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {[
-                      { label: 'Type', value: server?.type.toUpperCase() },
-                      { label: 'URL', value: server?.url },
-                      { label: 'SSH Host', value: server?.ssh_host ? `${server.ssh_host}:${server.ssh_port}` : '—' },
-                      { label: 'SSH User', value: server?.ssh_user || 'root' },
-                      { label: 'Group', value: server?.group_name || '—' },
-                    ].map(({ label, value }) => (
-                      <div key={label} className="flex justify-between gap-2">
-                        <span className="text-xs text-muted-foreground shrink-0">{label}</span>
-                        <span className="text-xs font-medium text-right truncate">{value}</span>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-
-                {/* Recent backups */}
-                <Card className="border-muted/60">
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm font-medium">Recent Backups</CardTitle>
-                      <Link to="/configs" className="text-xs text-muted-foreground hover:text-primary">
-                        View All
-                      </Link>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    {recentBackups.length === 0 ? (
-                      <div className="p-4 text-center text-xs text-muted-foreground">
-                        No backups yet
-                      </div>
-                    ) : (
-                      <div className="divide-y divide-border/50">
-                        {recentBackups.map((b) => (
-                          <Link key={b.id} to={`/configs/${b.id}`}>
-                            <div className="flex items-center justify-between p-3 hover:bg-muted/30 transition-colors">
-                              <div>
-                                <p className="text-xs font-medium">{formatDate(b.backup_date)}</p>
-                                <p className="text-[10px] text-muted-foreground">
-                                  {b.file_count} files
-                                </p>
-                              </div>
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] ${b.status === 'complete' ? 'text-green-600 border-green-200' : ''}`}
-                              >
-                                {b.status}
-                              </Badge>
-                            </div>
-                          </Link>
+                  <div className="space-y-4">
+                    <Card className="border-muted/60">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-medium">Connection Details</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-2">
+                        {[
+                          { label: 'Type', value: server?.type.toUpperCase() },
+                          { label: 'URL', value: server?.url },
+                          { label: 'SSH Host', value: server?.ssh_host ? `${server.ssh_host}:${server.ssh_port}` : '—' },
+                          { label: 'SSH User', value: server?.ssh_user || 'root' },
+                          { label: 'Group', value: server?.group_name || '—' },
+                        ].map(({ label, value }) => (
+                          <div key={label} className="flex justify-between gap-2">
+                            <span className="text-xs text-muted-foreground shrink-0">{label}</span>
+                            <span className="text-xs font-medium text-right truncate">{value}</span>
+                          </div>
                         ))}
+                      </CardContent>
+                    </Card>
+
+                    <Card className="border-muted/60">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-sm font-medium">Recent Backups</CardTitle>
+                          <Link to="/configs" className="text-xs text-muted-foreground hover:text-primary">View All</Link>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="p-0">
+                        {recentBackups.length === 0 ? (
+                          <div className="p-4 text-center text-xs text-muted-foreground">No backups yet</div>
+                        ) : (
+                          <div className="divide-y divide-border/50">
+                            {recentBackups.map((b) => (
+                              <Link key={b.id} to={`/configs/${b.id}`}>
+                                <div className="flex items-center justify-between p-3 hover:bg-muted/30 transition-colors">
+                                  <div>
+                                    <p className="text-xs font-medium">{formatDate(b.backup_date)}</p>
+                                    <p className="text-[10px] text-muted-foreground">{b.file_count} files</p>
+                                  </div>
+                                  <Badge variant="outline" className={`text-[10px] ${b.status === 'complete' ? 'text-green-600 border-green-200' : ''}`}>
+                                    {b.status}
+                                  </Badge>
+                                </div>
+                              </Link>
+                            ))}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
+              </TabsContent>
+
+              {/* Network tab */}
+              <TabsContent value="network">
+                <div className="mt-4">
+                  <Card className="border-muted/60">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm font-medium flex items-center gap-2">
+                          <Network className="h-4 w-4" />
+                          Network Interfaces
+                        </CardTitle>
+                        <Button variant="outline" size="sm" onClick={refetchNetwork} disabled={networkLoading}>
+                          <RefreshCw className={`h-3.5 w-3.5 ${networkLoading ? 'animate-spin' : ''}`} />
+                        </Button>
                       </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
+                    </CardHeader>
+                    <CardContent>
+                      {networkLoading && !networkData && (
+                        <div className="flex items-center justify-center h-24">
+                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
+                        </div>
+                      )}
+                      {networkData?.error && (
+                        <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
+                          {networkData.error}
+                        </div>
+                      )}
+                      {networkData && !networkData.error && networkData.interfaces.length === 0 && (
+                        <p className="text-sm text-muted-foreground text-center py-6">No network interfaces found.</p>
+                      )}
+                      {networkData && networkData.interfaces.length > 0 && (
+                        <div className="space-y-3">
+                          {networkData.interfaces.map((iface) => (
+                            <div key={iface.name} className="flex items-start gap-3 p-3 rounded-lg border border-muted/60">
+                              <div className="shrink-0 mt-0.5">
+                                {iface.status === 'UP'
+                                  ? <Wifi className="h-4 w-4 text-green-500" />
+                                  : <WifiOff className="h-4 w-4 text-muted-foreground" />
+                                }
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-sm font-medium font-mono">{iface.name}</span>
+                                  <Badge variant="outline" className="text-[10px]">{iface.type}</Badge>
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-[10px] ${iface.status === 'UP' ? 'text-green-600 border-green-200' : 'text-muted-foreground'}`}
+                                  >
+                                    {iface.status}
+                                  </Badge>
+                                </div>
+                                {iface.ips.length > 0 && (
+                                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                    {iface.ips.map((ip) => (
+                                      <span key={ip} className="inline-flex items-center gap-1 text-[11px] font-mono bg-muted/50 px-2 py-0.5 rounded">
+                                        <Globe className="h-3 w-3 text-muted-foreground" />
+                                        {ip}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                                {iface.mac && (
+                                  <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">{iface.mac}</p>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+            </Tabs>
           </>
         )}
       </div>

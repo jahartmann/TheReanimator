@@ -72,6 +72,8 @@ export default function ServerTrustPage() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [scanResults, setScanResults] = useState<Record<number, ScanResult>>({});
   const [scanningId, setScanningId] = useState<number | null>(null);
+  const [trustingAll, setTrustingAll] = useState(false);
+  const [trustAllMsg, setTrustAllMsg] = useState<string | null>(null);
 
   // Add dialog state
   const [showAdd, setShowAdd] = useState(false);
@@ -157,6 +159,21 @@ export default function ServerTrustPage() {
     }
   }
 
+  async function handleTrustAll() {
+    setTrustingAll(true);
+    setTrustAllMsg(null);
+    try {
+      const result = await apiCall<{ added: number; message: string }>('/api/server-trust/trust-all', { method: 'POST' });
+      setTrustAllMsg(result.message || `Added ${result.added} trust entries`);
+      refetchEntries();
+      setTimeout(() => setTrustAllMsg(null), 4000);
+    } catch (err: any) {
+      setTrustAllMsg(`Error: ${err.message}`);
+    } finally {
+      setTrustingAll(false);
+    }
+  }
+
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     setAdding(true);
@@ -196,12 +213,34 @@ export default function ServerTrustPage() {
             <RefreshCw className={`h-4 w-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
+          {untrustedServers.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleTrustAll}
+              disabled={trustingAll}
+              className="text-green-600 hover:text-green-700 border-green-200 hover:border-green-300 hover:bg-green-50"
+            >
+              {trustingAll
+                ? <div className="h-3.5 w-3.5 animate-spin rounded-full border-b border-current mr-1.5" />
+                : <ShieldCheck className="h-4 w-4 mr-1.5" />
+              }
+              Trust All ({untrustedServers.length})
+            </Button>
+          )}
           <Button size="sm" onClick={() => setShowAdd(true)} disabled={untrustedServers.length === 0}>
             <Plus className="h-4 w-4 mr-1.5" />
             Add Trust
           </Button>
         </div>
       </div>
+
+      {/* Trust all message */}
+      {trustAllMsg && (
+        <div className={`p-3 rounded-lg text-sm ${trustAllMsg.startsWith('Error') ? 'bg-destructive/10 text-destructive border border-destructive/20' : 'bg-green-50 text-green-700 border border-green-200'}`}>
+          {trustAllMsg}
+        </div>
+      )}
 
       {/* Explanation panel */}
       <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20">

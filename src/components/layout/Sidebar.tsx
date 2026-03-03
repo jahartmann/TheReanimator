@@ -3,7 +3,7 @@
 import { getAISettings } from '@/lib/actions/ai';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { LayoutDashboard, Server, FolderCog, ArrowRightLeft, Tag as TagIcon, HardDrive, Users, Terminal, Activity, ListTodo, Calendar, TrendingUp, Disc, Sparkles, Wrench, HeartPulse, ShieldCheck, Shield, Monitor, Network, Disc2, Bell, KeyRound, Send } from 'lucide-react';
+import { LayoutDashboard, Server, FolderCog, ArrowRightLeft, Tag as TagIcon, HardDrive, Users, Terminal, Activity, ListTodo, TrendingUp, Sparkles, Wrench, HeartPulse, ShieldCheck, Shield, Monitor, Disc2, KeyRound } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { getCurrentUser, logout, User as UserType } from '@/lib/actions/userAuth';
 import { APP_VERSION, IS_BETA } from '@/lib/constants';
@@ -25,13 +25,11 @@ const mainNav = [
 const toolsNav = [
     { key: 'optimizer', href: '/optimizer', icon: TrendingUp },
     { key: 'migrations', href: '/migrations', icon: ArrowRightLeft },
-    { key: 'library', href: '/library', icon: Disc },
     { key: 'tags', href: '/tags', icon: TagIcon },
 ];
 
 const systemNav = [
     { key: 'storage', href: '/storage', icon: HardDrive },
-    { key: 'network', href: '/network', icon: Network },
     { key: 'configs', href: '/configs', icon: FolderCog },
     { key: 'isoSync', href: '/iso-sync', icon: Disc2 },
     { key: 'disasterRecovery', href: '/disaster-recovery', icon: ShieldCheck },
@@ -46,7 +44,6 @@ const agentToolsNav = [
 const adminNavItems = [
     { key: 'bulkCommands', href: '/tools/bulk-command', icon: Terminal },
     { key: 'serverTrust', href: '/server-trust', icon: KeyRound },
-    { key: 'telegramTrust', href: '/telegram-trust', icon: Send },
     { key: 'users', href: '/users', icon: Users },
     { key: 'auditLog', href: '/audit', icon: Shield },
 ];
