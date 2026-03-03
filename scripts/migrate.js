@@ -885,6 +885,48 @@ try {
   }
 } catch (e) { /* reflex may already exist */ }
 
+// ====== AUTONOMOUS SYSTEM ======
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS autonomous_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    details TEXT,
+    status TEXT DEFAULT 'neutral',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS autonomous_state (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS autonomous_facts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fact TEXT NOT NULL,
+    source TEXT,
+    confidence REAL DEFAULT 1.0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+// ====== RECOVERY EXECUTIONS ======
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS recovery_executions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id TEXT,
+    status TEXT DEFAULT 'pending',
+    dry_run INTEGER DEFAULT 0,
+    log TEXT DEFAULT '',
+    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    completed_at DATETIME
+  );
+`);
+
 console.log('Database migrations completed.');
 db.close();
 process.exit(0);

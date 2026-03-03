@@ -1,5 +1,7 @@
 import db from '@/lib/db';
 import { z } from 'zod';
+import fs from 'fs';
+import path from 'path';
 
 export interface AutonomousLog {
     id: number;
@@ -43,8 +45,6 @@ export function logAutonomousEvent(log: Omit<AutonomousLog, 'id' | 'created_at'>
 
         // --- File Logging (User Request) ---
         // Append to current daily log file: data/logs/YYYY-MM-DD-thoughts.md
-        const fs = require('fs');
-        const path = require('path');
         const logDir = path.join(process.cwd(), 'data', 'logs');
         if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 

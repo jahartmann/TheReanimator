@@ -1,7 +1,7 @@
 import db from '@/lib/db';
 
 export async function sendTelegramMessage(message: string): Promise<boolean> {
-    const settings = db.prepare('SELECT key, value FROM settings WHERE key LIKE "telegram_%"').all() as { key: string, value: string }[];
+    const settings = db.prepare("SELECT key, value FROM settings WHERE key LIKE 'telegram_%'").all() as { key: string, value: string }[];
     const config = settings.reduce((acc, curr) => ({ ...acc, [curr.key]: curr.value }), {}) as any;
 
     if (!config.telegram_bot_token || !config.telegram_chat_id) {
@@ -38,7 +38,7 @@ export async function sendTelegramMessage(message: string): Promise<boolean> {
 }
 
 export async function getTelegramUpdates(offset: number = 0): Promise<any[]> {
-    const settings = db.prepare('SELECT key, value FROM settings WHERE key LIKE "telegram_%"').all() as { key: string, value: string }[];
+    const settings = db.prepare("SELECT key, value FROM settings WHERE key LIKE 'telegram_%'").all() as { key: string, value: string }[];
     const config = settings.reduce((acc, curr) => ({ ...acc, [curr.key]: curr.value }), {}) as any;
 
     if (!config.telegram_bot_token) return [];
