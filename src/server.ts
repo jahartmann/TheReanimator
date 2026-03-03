@@ -636,7 +636,7 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: Response) => {
 if (isProd && fs.existsSync(DIST)) {
   app.use(express.static(DIST));
   // SPA fallback — serve index.html for all non-API routes
-  app.get('*', (req: Request, res: Response) => {
+  app.get('*path', (req: Request, res: Response) => {
     if (req.path.startsWith('/api/') || req.path.startsWith('/ws/')) {
       res.status(404).json({ error: 'Not found' });
       return;
