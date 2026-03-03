@@ -110,7 +110,7 @@ export default async function ServerDetailPage({
                     </TabsList>
 
                     <TabsContent value="overview">
-                        <ServerOverview server={server} info={info} />
+                        <ServerOverview server={server} info={info} vms={vms} />
                     </TabsContent>
 
                     <TabsContent value="vms">

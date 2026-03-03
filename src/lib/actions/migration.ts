@@ -2,9 +2,11 @@
 
 import db from '@/lib/db';
 import { createSSHClient } from '@/lib/ssh';
+import { withSSH } from '@/lib/ssh-pool';
 import { getVMs, migrateVM, MigrationOptions } from './vm';
 import { getCurrentUser } from '@/lib/actions/userAuth';
 import { logAudit } from '@/lib/audit-log';
+import { generateUUIDMapping, applyUUIDMapping } from '@/lib/disaster-recovery/merge-engine';
 
 export interface MigrationStep {
     type: 'config' | 'vm' | 'lxc' | 'finalize';
@@ -299,6 +301,20 @@ async function executeMigrationTask(taskId: number, vms: any[], options: { stora
 
             log(`Migrating ${vm.name} (${vm.vmid})...`);
 
+            // Pre-migration snapshot (QEMU only, best-effort)
+            if (vm.type === 'qemu' && source) {
+                const snapshotName = `pre-migration-${Date.now()}`;
+                try {
+                    log(`Creating pre-migration snapshot "${snapshotName}" for VM ${vm.vmid}...`);
+                    await withSSH(source, async (ssh) => {
+                        await ssh.exec(`qm snapshot ${vm.vmid} ${snapshotName} --description "Auto-snapshot before migration"`);
+                    });
+                    log(`Pre-migration snapshot created: ${snapshotName}`);
+                } catch (snapErr: any) {
+                    log(`Warning: Pre-migration snapshot failed (non-blocking): ${snapErr.message}`);
+                }
+            }
+
             // Execute VM Migration
             // Passing undefined signals "auto-detect" to migrateVM logic
             // Use per-VM Override if available, otherwise global option
@@ -330,6 +346,26 @@ async function executeMigrationTask(taskId: number, vms: any[], options: { stora
                     ? (res.message.length > 100 ? res.message.substring(0, 100) + '...' : res.message)
                     : 'OK';
                 log(`Success: ${summary}`);
+
+                // Post-migration health check on target
+                if (target) {
+                    try {
+                        const cmd = vm.type === 'qemu' ? 'qm' : 'pct';
+                        const checkVmid = vm.targetVmid || vm.vmid;
+                        await withSSH(target, async (ssh) => {
+                            const configOutput = await ssh.exec(`${cmd} config ${checkVmid}`);
+                            if (!configOutput || configOutput.trim().length < 10) {
+                                log(`Warning: Post-migration health check - VM ${checkVmid} config on target is empty or very short, migration may have issues`);
+                            } else {
+                                log(`Health check: VM ${checkVmid} config on target OK (${configOutput.trim().split('\n').length} lines)`);
+                            }
+                            const statusOutput = await ssh.exec(`${cmd} status ${checkVmid}`);
+                            log(`Health check: VM ${checkVmid} status on target: ${statusOutput.trim()}`);
+                        });
+                    } catch (healthErr: any) {
+                        log(`Warning: Post-migration health check failed: ${healthErr.message}`);
+                    }
+                }
 
                 // Delete source VM if option enabled - with verification
                 if (options.deleteSource && options.sourceServerId) {
@@ -415,7 +451,41 @@ async function executeMigrationTask(taskId: number, vms: any[], options: { stora
         if (steps[currentStepIndex]) {
             steps[currentStepIndex].status = 'running';
             db.prepare('UPDATE migration_tasks SET steps_json = ?, current_step = ? WHERE id = ?').run(JSON.stringify(steps), currentStepIndex + 1, taskId);
-            // Cleanup logic if needed
+
+            // Cross-cluster UUID mapping (best-effort)
+            const isCrossCluster = source && target && source.ssh_host !== target.ssh_host;
+            if (isCrossCluster && target) {
+                try {
+                    log('Cross-cluster migration detected - checking UUID mappings on target...');
+                    await withSSH(target, async (ssh) => {
+                        const fstabContent = await ssh.exec('cat /etc/fstab 2>/dev/null').catch(() => '');
+                        const blkidOutput = await ssh.exec('blkid 2>/dev/null').catch(() => '');
+
+                        if (fstabContent && blkidOutput) {
+                            const mappings = generateUUIDMapping(fstabContent, blkidOutput);
+                            if (mappings.length > 0) {
+                                const highConfidence = mappings.filter(m => m.confidence === 'high');
+                                log(`Found ${mappings.length} UUID mapping(s) (${highConfidence.length} high-confidence)`);
+
+                                // Only auto-apply high-confidence mappings
+                                if (highConfidence.length > 0) {
+                                    const updatedFstab = applyUUIDMapping(fstabContent, highConfidence);
+                                    await ssh.exec(`cp /etc/fstab /etc/fstab.pre-migration-backup`);
+                                    await ssh.exec(`cat > /etc/fstab << 'FSTAB_EOF'\n${updatedFstab}\nFSTAB_EOF`);
+                                    log(`Applied ${highConfidence.length} high-confidence UUID mapping(s) to /etc/fstab (backup: /etc/fstab.pre-migration-backup)`);
+                                } else {
+                                    log('No high-confidence UUID mappings found - skipping auto-apply');
+                                }
+                            } else {
+                                log('No UUID changes detected on target');
+                            }
+                        }
+                    });
+                } catch (uuidErr: any) {
+                    log(`Warning: UUID mapping failed (non-blocking): ${uuidErr.message}`);
+                }
+            }
+
             steps[currentStepIndex].status = 'completed';
             db.prepare('UPDATE migration_tasks SET steps_json = ?, progress = ? WHERE id = ?').run(JSON.stringify(steps), steps.length, taskId);
         }

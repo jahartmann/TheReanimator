@@ -126,6 +126,7 @@ export function ConsoleClient({ serverId, vmid, vmInfo }: ConsoleClientProps) {
                             serverId={serverId}
                             vmid={vmid}
                             vmType={vmInfo.type}
+                            nodeName={vmInfo.node}
                             onConnect={handleConnect}
                             onDisconnect={handleDisconnect}
                             onCtrlAltDelRef={ctrlAltDelRef}

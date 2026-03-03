@@ -1,13 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { getConsoleAccess } from '@/lib/actions/console';
 import { Loader2 } from 'lucide-react';
 
 interface VncConsoleProps {
     serverId: number;
     vmid: number;
     vmType: 'qemu' | 'lxc';
+    nodeName: string;
     onConnect?: () => void;
     onDisconnect?: () => void;
     onCtrlAltDelRef?: React.MutableRefObject<(() => void) | null>;
@@ -57,27 +57,30 @@ async function loadRFB(): Promise<any> {
     throw new Error('Failed to load VNC library (noVNC). Check browser console for details.');
 }
 
-export function VncConsole({ serverId, vmid, vmType, onConnect, onDisconnect, onCtrlAltDelRef }: VncConsoleProps) {
+const MAX_RETRIES = 3;
+const BACKOFF_DELAYS = [1000, 2000, 4000];
+
+export function VncConsole({ serverId, vmid, vmType, nodeName, onConnect, onDisconnect, onCtrlAltDelRef }: VncConsoleProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const rfbRef = useRef<any>(null);
+    const retryCountRef = useRef(0);
+    const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [status, setStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting');
     const [error, setError] = useState<string | null>(null);
+    const [retryInfo, setRetryInfo] = useState<string | null>(null);
 
     const connect = useCallback(async () => {
         if (!containerRef.current) return;
         setStatus('connecting');
         setError(null);
+        setRetryInfo(retryCountRef.current > 0 ? `Retry ${retryCountRef.current}/${MAX_RETRIES}...` : null);
 
         try {
-            // Step 1: Get VNC session token from server action
-            const { sessionToken, wsPort } = await getConsoleAccess(serverId, vmid, vmType, 'vnc');
-
-            // Step 2: Build WebSocket URL to our proxy
+            // Build WebSocket URL — same host/port, /ws/vnc/ path
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsHost = window.location.hostname;
-            const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/console?token=${sessionToken}`;
+            const wsUrl = `${wsProtocol}//${location.host}/ws/vnc/${serverId}-${vmid}?type=${vmType}&node=${nodeName}`;
 
-            // Step 3: Load noVNC RFB class
+            // Load noVNC RFB class
             const RFB = await loadRFB();
 
             // Clean up previous connection
@@ -89,7 +92,7 @@ export function VncConsole({ serverId, vmid, vmType, onConnect, onDisconnect, on
             // Clear container
             containerRef.current.innerHTML = '';
 
-            // Step 4: Create noVNC connection
+            // Create noVNC connection
             const rfb = new RFB(containerRef.current, wsUrl, {
                 wsProtocols: ['binary'],
             });
@@ -99,6 +102,8 @@ export function VncConsole({ serverId, vmid, vmType, onConnect, onDisconnect, on
             rfb.clipViewport = false;
 
             rfb.addEventListener('connect', () => {
+                retryCountRef.current = 0;
+                setRetryInfo(null);
                 setStatus('connected');
                 onConnect?.();
             });
@@ -107,7 +112,16 @@ export function VncConsole({ serverId, vmid, vmType, onConnect, onDisconnect, on
                 setStatus('disconnected');
                 onDisconnect?.();
                 if (e.detail?.clean === false) {
-                    setError('Connection lost unexpectedly');
+                    // Auto-retry on unexpected disconnect
+                    if (retryCountRef.current < MAX_RETRIES) {
+                        const delay = BACKOFF_DELAYS[retryCountRef.current] || 4000;
+                        retryCountRef.current++;
+                        setRetryInfo(`Connection lost. Retrying in ${delay / 1000}s... (${retryCountRef.current}/${MAX_RETRIES})`);
+                        retryTimerRef.current = setTimeout(() => connect(), delay);
+                    } else {
+                        setError('Connection lost after multiple retries');
+                        setRetryInfo(null);
+                    }
                 }
             });
 
@@ -125,15 +139,26 @@ export function VncConsole({ serverId, vmid, vmType, onConnect, onDisconnect, on
 
         } catch (err) {
             console.error('[VNC] Connection error:', err);
-            setStatus('error');
-            setError(err instanceof Error ? err.message : 'Failed to connect');
-            onDisconnect?.();
+            // Auto-retry on connection error
+            if (retryCountRef.current < MAX_RETRIES) {
+                const delay = BACKOFF_DELAYS[retryCountRef.current] || 4000;
+                retryCountRef.current++;
+                setRetryInfo(`Failed to connect. Retrying in ${delay / 1000}s... (${retryCountRef.current}/${MAX_RETRIES})`);
+                setStatus('connecting');
+                retryTimerRef.current = setTimeout(() => connect(), delay);
+            } else {
+                setStatus('error');
+                setError(err instanceof Error ? err.message : 'Failed to connect');
+                setRetryInfo(null);
+                onDisconnect?.();
+            }
         }
-    }, [serverId, vmid, vmType, onConnect, onDisconnect, onCtrlAltDelRef]);
+    }, [serverId, vmid, vmType, nodeName, onConnect, onDisconnect, onCtrlAltDelRef]);
 
     useEffect(() => {
         connect();
         return () => {
+            if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
             if (rfbRef.current) {
                 try { rfbRef.current.disconnect(); } catch { /* ignore */ }
                 rfbRef.current = null;
@@ -142,6 +167,8 @@ export function VncConsole({ serverId, vmid, vmType, onConnect, onDisconnect, on
     }, [connect]);
 
     const reconnect = useCallback(() => {
+        if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+        retryCountRef.current = 0;
         if (rfbRef.current) {
             try { rfbRef.current.disconnect(); } catch { /* ignore */ }
             rfbRef.current = null;
@@ -155,7 +182,9 @@ export function VncConsole({ serverId, vmid, vmType, onConnect, onDisconnect, on
                 <div className="absolute inset-0 flex items-center justify-center bg-background/80 z-10">
                     <div className="flex flex-col items-center gap-2">
                         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                        <span className="text-sm text-muted-foreground">Connecting to VNC...</span>
+                        <span className="text-sm text-muted-foreground">
+                            {retryInfo || 'Connecting to VNC...'}
+                        </span>
                     </div>
                 </div>
             )}

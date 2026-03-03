@@ -12,12 +12,23 @@ import { initializeDefaultReflexes } from '@/lib/agent/reflexes';
 import { runDueChecks } from '@/lib/monitoring/scheduler';
 import { sendDailyDigest } from '@/lib/monitoring/digest';
 import { sendTaskNotification } from '@/lib/monitoring/notification-manager';
+import { shouldSendNotification, resetCooldown } from '@/lib/notification-cooldown';
+import { broadcastMessage } from '@/lib/agent/telegram';
 
 // Global singleton to prevent multiple schedulers in dev
 const globalForScheduler = global as unknown as { schedulerInitialized: boolean | undefined };
 
 let scheduledTasks: any[] = [];
 let intervalHandles: ReturnType<typeof setInterval>[] = [];
+
+// Failure tracking for debounced offline detection
+const failureCounts = new Map<number, number>();
+const OFFLINE_THRESHOLD = 3; // Mark offline only after 3 consecutive failures
+
+function isAuthError(error: unknown): boolean {
+    const msg = String(error).toLowerCase();
+    return msg.includes('authentication') || msg.includes('auth') || msg.includes('permission denied') || msg.includes('publickey');
+}
 if (globalForScheduler.schedulerInitialized) {
     // If reloaded, we might need to clear old tasks if we could access them.
     // But since we can't easily access the *previous* module's variables,
@@ -281,9 +292,14 @@ async function refreshNodeStats() {
 
             console.log(`[Node Stats] ${server.name}: CPU=${cpu.toFixed(1)}%, RAM=${ram.toFixed(1)}%`);
 
-            // Send notification if status changed from offline to online
-            if (prevStatus === 'offline') {
+            // Reset failure counter on success
+            failureCounts.set(server.id, 0);
+
+            // Send notification if status changed from offline/auth_error to online
+            if (prevStatus === 'offline' || prevStatus === 'auth_error') {
                 console.log(`[Node Stats] ${server.name} ist wieder online!`);
+                resetCooldown(`server-${server.id}-offline`);
+                resetCooldown(`server-${server.id}-auth_error`);
                 sendTaskNotification({
                     taskId: `server-${server.id}-online`,
                     taskType: 'server_status',
@@ -294,55 +310,73 @@ async function refreshNodeStats() {
             }
 
         } catch (e) {
-            // Mark as offline in cache
-            db.prepare(`
-                INSERT INTO node_stats (server_id, status, last_updated)
-                VALUES (?, 'offline', datetime('now'))
-                ON CONFLICT(server_id) DO UPDATE SET
-                    status = 'offline',
-                    last_updated = datetime('now')
-            `).run(server.id);
+            // Increment failure counter
+            const failures = (failureCounts.get(server.id) || 0) + 1;
+            failureCounts.set(server.id, failures);
 
-            console.error(`[Node Stats] ${server.name}: Failed - ${e}`);
+            const authErr = isAuthError(e);
+            const statusToSet = authErr ? 'auth_error' : 'offline';
 
-            // Journal: Server offline
-            logJournalEntry({
-                event_type: 'alert',
-                source: 'scheduler',
-                summary: `Server ${server.name} nicht erreichbar`,
-                details: String(e),
-                severity: prevStatus === 'online' ? 'critical' : 'warning',
-            });
+            // Only mark offline after reaching threshold (debounce transient failures)
+            if (failures >= OFFLINE_THRESHOLD || authErr) {
+                db.prepare(`
+                    INSERT INTO node_stats (server_id, status, last_updated)
+                    VALUES (?, ?, datetime('now'))
+                    ON CONFLICT(server_id) DO UPDATE SET
+                        status = excluded.status,
+                        last_updated = datetime('now')
+                `).run(server.id, statusToSet);
+            }
 
-            // Send notification if status changed from online to offline
-            if (prevStatus === 'online' || prevStatus === null) {
-                console.log(`[Node Stats] ⚠️ ${server.name} ist OFFLINE!`);
-                sendTaskNotification({
-                    taskId: `server-${server.id}-offline`,
-                    taskType: 'server_status',
-                    description: `Server ${server.name} ist offline`,
-                    event: 'task_failed',
-                    error: String(e),
-                    serverId: server.id,
-                }).catch(() => { });
+            const suffix = failures < OFFLINE_THRESHOLD ? ` (failure ${failures}/${OFFLINE_THRESHOLD})` : '';
+            console.error(`[Node Stats] ${server.name}: Failed${suffix} - ${e}`);
 
-                // Emit sense event for reflex system (failover integration)
-                try {
-                    const { emitSenseEvent } = await import('@/lib/agent/senses/event-bus');
-                    emitSenseEvent({
-                        type: 'infrastructure_change',
-                        source: `server:${server.id}`,
-                        data: { eventType: 'node_offline', serverId: server.id, serverName: server.name },
-                        severity: 'critical',
-                        timestamp: new Date(),
-                    });
-                } catch { /* event-bus optional */ }
+            // Only log journal + send notification after threshold reached
+            if (failures >= OFFLINE_THRESHOLD) {
+                // Journal: Server offline/auth_error
+                logJournalEntry({
+                    event_type: 'alert',
+                    source: 'scheduler',
+                    summary: authErr
+                        ? `Server ${server.name} Authentifizierungsfehler`
+                        : `Server ${server.name} nicht erreichbar`,
+                    details: String(e),
+                    severity: prevStatus === 'online' ? 'critical' : 'warning',
+                });
 
-                // Brain: Learn about server going offline
-                try {
-                    const { learnFromInfraChange } = await import('@/lib/agent/memory/active-learning');
-                    learnFromInfraChange(server.name, [`Server ging offline: ${String(e).slice(0, 200)}`]);
-                } catch { /* active-learning optional */ }
+                // Send notification only on actual status change (not on first startup), with cooldown
+                const cooldownKey = `server-${server.id}-${authErr ? 'auth_error' : 'offline'}`;
+                if (prevStatus === 'online' || shouldSendNotification(cooldownKey)) {
+                    console.log(`[Node Stats] ⚠️ ${server.name} ist ${authErr ? 'AUTH_ERROR' : 'OFFLINE'}!`);
+                    sendTaskNotification({
+                        taskId: `server-${server.id}-${authErr ? 'auth-error' : 'offline'}`,
+                        taskType: authErr ? 'server_auth_error' : 'server_status',
+                        description: authErr
+                            ? `Server ${server.name}: Authentication Error — check SSH credentials`
+                            : `Server ${server.name} ist offline`,
+                        event: 'task_failed',
+                        error: String(e),
+                        serverId: server.id,
+                    }).catch(() => { });
+
+                    // Emit sense event for reflex system (failover integration)
+                    try {
+                        const { emitSenseEvent } = await import('@/lib/agent/senses/event-bus');
+                        emitSenseEvent({
+                            type: 'infrastructure_change',
+                            source: `server:${server.id}`,
+                            data: { eventType: 'node_offline', serverId: server.id, serverName: server.name },
+                            severity: 'critical',
+                            timestamp: new Date(),
+                        });
+                    } catch { /* event-bus optional */ }
+
+                    // Brain: Learn about server going offline
+                    try {
+                        const { learnFromInfraChange } = await import('@/lib/agent/memory/active-learning');
+                        learnFromInfraChange(server.name, [`Server ging offline: ${String(e).slice(0, 200)}`]);
+                    } catch { /* active-learning optional */ }
+                }
             }
         }
     }
@@ -375,6 +409,47 @@ function initMonitoringTicker() {
     }, 60000)); // Every 60 seconds
 }
 
+// Daily alert summary — collects last 24h journal alerts, groups by server + type, broadcasts via Telegram
+async function sendDailyAlertSummary() {
+    try {
+        const alerts = db.prepare(`
+            SELECT summary, severity, source, created_at
+            FROM journal
+            WHERE event_type = 'alert'
+              AND created_at >= datetime('now', '-24 hours')
+            ORDER BY created_at DESC
+        `).all() as { summary: string; severity: string; source: string; created_at: string }[];
+
+        if (alerts.length === 0) return; // Nothing to report
+
+        // Group by severity
+        const critical = alerts.filter(a => a.severity === 'critical');
+        const warnings = alerts.filter(a => a.severity === 'warning');
+
+        const lines: string[] = ['--- Daily Alert Summary (24h) ---', ''];
+        if (critical.length > 0) {
+            lines.push(`CRITICAL (${critical.length}):`);
+            // Deduplicate by summary
+            const unique = [...new Set(critical.map(a => a.summary))];
+            unique.forEach(s => lines.push(`  - ${s}`));
+            lines.push('');
+        }
+        if (warnings.length > 0) {
+            lines.push(`WARNING (${warnings.length}):`);
+            const unique = [...new Set(warnings.map(a => a.summary))];
+            unique.forEach(s => lines.push(`  - ${s}`));
+            lines.push('');
+        }
+
+        lines.push(`Total: ${alerts.length} alert(s) in the last 24 hours.`);
+
+        await broadcastMessage(lines.join('\n'));
+        console.log(`[Scheduler] Daily alert summary sent: ${alerts.length} alerts`);
+    } catch (e) {
+        console.error('[Scheduler] Daily alert summary failed:', e);
+    }
+}
+
 // Daily digest at 8:00 AM
 function initDailyDigest() {
     console.log('[Scheduler] Starting Daily Digest (8:00 AM)...');
@@ -382,6 +457,8 @@ function initDailyDigest() {
         console.log('[Scheduler] Sending daily monitoring digest...');
         try {
             await sendDailyDigest();
+            // Also send alert summary alongside the digest
+            await sendDailyAlertSummary();
         } catch (e) {
             console.error('[Digest] Failed:', e);
         }

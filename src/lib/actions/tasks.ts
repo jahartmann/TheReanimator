@@ -146,6 +146,126 @@ export async function getAllTasks(
     };
 }
 
+// ── Job Management (Scheduled Jobs CRUD) ───────────────────────────────────
+
+export interface JobItem {
+    id: number;
+    name: string;
+    job_type: string;
+    source_server_id: number;
+    target_server_id?: number;
+    schedule: string;
+    enabled: number;
+    created_at: string;
+    options?: string;
+    server_name?: string;
+    last_run?: string;
+    last_status?: string;
+}
+
+export async function getJobs(): Promise<JobItem[]> {
+    const rows = db.prepare(`
+        SELECT j.*, s.name as server_name,
+            (SELECT h.start_time FROM history h WHERE h.job_id = j.id ORDER BY h.start_time DESC LIMIT 1) as last_run,
+            (SELECT h.status FROM history h WHERE h.job_id = j.id ORDER BY h.start_time DESC LIMIT 1) as last_status
+        FROM jobs j
+        LEFT JOIN servers s ON j.source_server_id = s.id
+        ORDER BY j.created_at DESC
+    `).all() as JobItem[];
+    return rows;
+}
+
+export async function createJob(data: {
+    name: string;
+    job_type: string;
+    source_server_id: number;
+    schedule: string;
+    options?: string;
+}): Promise<{ success: boolean; id?: number; error?: string }> {
+    try {
+        const result = db.prepare(
+            'INSERT INTO jobs (name, job_type, source_server_id, schedule, enabled) VALUES (?, ?, ?, ?, 1) RETURNING id'
+        ).get(data.name, data.job_type, data.source_server_id, data.schedule) as { id: number };
+        if (data.options) {
+            db.prepare('UPDATE jobs SET options = ? WHERE id = ?').run(data.options, result.id);
+        }
+        return { success: true, id: result.id };
+    } catch (e) {
+        return { success: false, error: String(e) };
+    }
+}
+
+export async function updateJob(id: number, data: {
+    name?: string;
+    job_type?: string;
+    source_server_id?: number;
+    schedule?: string;
+    options?: string;
+}): Promise<{ success: boolean; error?: string }> {
+    try {
+        const sets: string[] = [];
+        const vals: any[] = [];
+        if (data.name !== undefined) { sets.push('name = ?'); vals.push(data.name); }
+        if (data.job_type !== undefined) { sets.push('job_type = ?'); vals.push(data.job_type); }
+        if (data.source_server_id !== undefined) { sets.push('source_server_id = ?'); vals.push(data.source_server_id); }
+        if (data.schedule !== undefined) { sets.push('schedule = ?'); vals.push(data.schedule); }
+        if (data.options !== undefined) { sets.push('options = ?'); vals.push(data.options); }
+        if (sets.length === 0) return { success: true };
+        vals.push(id);
+        db.prepare(`UPDATE jobs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: String(e) };
+    }
+}
+
+export async function deleteJob(id: number): Promise<{ success: boolean; error?: string }> {
+    try {
+        db.prepare('DELETE FROM history WHERE job_id = ?').run(id);
+        db.prepare('DELETE FROM jobs WHERE id = ?').run(id);
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: String(e) };
+    }
+}
+
+export async function toggleJob(id: number, enabled: boolean): Promise<{ success: boolean; error?: string }> {
+    try {
+        db.prepare('UPDATE jobs SET enabled = ? WHERE id = ?').run(enabled ? 1 : 0, id);
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: String(e) };
+    }
+}
+
+export async function getJobHistory(jobId: number, limit: number = 20): Promise<{
+    id: number;
+    status: string;
+    start_time: string;
+    end_time?: string;
+    log?: string;
+}[]> {
+    return db.prepare(
+        'SELECT id, status, start_time, end_time, log FROM history WHERE job_id = ? ORDER BY start_time DESC LIMIT ?'
+    ).all(jobId, limit) as any[];
+}
+
+export async function runJobNow(id: number): Promise<{ success: boolean; error?: string }> {
+    try {
+        const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(id) as any;
+        if (!job) return { success: false, error: 'Job not found' };
+        const { runJob } = await import('@/lib/scheduler');
+        runJob(job).catch(e => console.error(`[Manual Run] Job ${job.name} failed:`, e));
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: String(e) };
+    }
+}
+
+export async function getServersForDropdown(): Promise<{ id: number; name: string }[]> {
+    return db.prepare('SELECT id, name FROM servers ORDER BY name').all() as any[];
+}
+
 export async function cancelTask(id: string): Promise<{ success: boolean; message?: string }> {
     const [source, rawIdStr] = id.split('-');
     const rawId = parseInt(rawIdStr);

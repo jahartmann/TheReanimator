@@ -9,6 +9,8 @@ import { getIdentityPrompt } from './identity';
 import { parseToolCalls } from './parser';
 import { determineTurnLimit, logReasoning } from './reasoning';
 import { loadActiveTools, getActiveToolDefinitions } from './dynamic-tools/registry';
+import { createProvider, type LLMProvider } from './providers';
+import { classifyToolCalls } from './sub-agents/base-agent';
 
 // Migrate existing .md brain files on first load
 let brainMigrated = false;
@@ -168,57 +170,32 @@ export async function* chatWithAgentGenerator(
     const allTools = { ...tools, ...customToolDefs };
 
     const MAX_TURNS = determineTurnLimit(message, history);
-    const baseUrl = settings.url.replace(/\/$/, '');
+
+    // Create LLM provider (supports Ollama, Anthropic, OpenAI)
+    let provider: LLMProvider;
+    try {
+        provider = createProvider({
+            url: settings.url,
+            model: settings.model,
+        });
+    } catch (providerError: any) {
+        yield { type: 'error', content: `Provider-Fehler: ${providerError.message}` };
+        return;
+    }
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
         yield { type: 'status', content: turn === 0 ? 'Denke nach...' : 'Verarbeite Ergebnisse...' };
 
-        // Call Ollama (Streamed)
-        const response = await fetch(`${baseUrl}/api/chat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: settings.model,
-                messages,
-                stream: true
-            })
-        });
-
-        if (!response.ok || !response.body) {
-            yield { type: 'error', content: 'Ollama API Fehler' };
-            break;
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
         let fullContent = '';
 
         try {
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                const chunk = decoder.decode(value, { stream: true });
-                const lines = (buffer + chunk).split('\n');
-                buffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    if (!line.trim()) continue;
-                    try {
-                        const json = JSON.parse(line);
-                        if (json.message?.content) {
-                            const token = json.message.content;
-                            fullContent += token;
-                            yield { type: 'text', content: token };
-                        }
-                    } catch (e) {
-                        // ignore malformed
-                    }
-                }
+            for await (const token of provider.chat(messages)) {
+                fullContent += token;
+                yield { type: 'text', content: token };
             }
-        } finally {
-            reader.releaseLock();
+        } catch (llmError: any) {
+            yield { type: 'error', content: `${provider.name} API Fehler: ${llmError.message}` };
+            break;
         }
 
         // Check for Tool Calls using robust parser (supports multiple calls)
@@ -228,11 +205,13 @@ export async function* chatWithAgentGenerator(
             messages.push({ role: 'assistant', content: fullContent });
 
             const toolResults: string[] = [];
-            for (const call of toolCalls) {
-                yield { type: 'status', content: `Führe Tool aus: ${call.toolName}...` };
-                yield { type: 'tool_start', tool: call.toolName, args: call.args };
 
-                // Log reasoning
+            // Classify tools for parallel vs sequential execution
+            const { independent, dependent } = classifyToolCalls(toolCalls);
+
+            // Helper to execute a single tool and collect results
+            const executeTool = async (call: typeof toolCalls[0]): Promise<{ events: StreamEvent[]; result: string }> => {
+                const events: StreamEvent[] = [];
                 logReasoning(currentSessionId, {
                     turn,
                     thought: `Tool aufgerufen: ${call.toolName} `,
@@ -243,11 +222,8 @@ export async function* chatWithAgentGenerator(
                     const toolDef = (allTools as any)[call.toolName];
                     if (toolDef) {
                         const result = await toolDef.execute(call.args);
-                        yield { type: 'tool_end', tool: call.toolName, result };
+                        events.push({ type: 'tool_end', tool: call.toolName, result });
                         saveChatMessage(currentSessionId, 'tool', JSON.stringify(result), call.toolName);
-                        toolResults.push(`[TOOL RESULT: ${call.toolName}]\n${JSON.stringify(result)} `);
-
-                        // Log tool execution to journal
                         logJournalEntry({
                             event_type: 'action_taken',
                             source: 'chat',
@@ -255,15 +231,13 @@ export async function* chatWithAgentGenerator(
                             details: `Args: ${JSON.stringify(call.args)} \nResult: ${JSON.stringify(result).slice(0, 500)} `,
                             severity: 'info',
                         });
+                        return { events, result: `[TOOL RESULT: ${call.toolName}]\n${JSON.stringify(result)} ` };
                     } else {
-                        yield { type: 'error', content: `Tool ${call.toolName} nicht gefunden.` };
-                        toolResults.push(`[SYSTEM ERROR] Tool ${call.toolName} not found`);
+                        events.push({ type: 'error', content: `Tool ${call.toolName} nicht gefunden.` });
+                        return { events, result: `[SYSTEM ERROR] Tool ${call.toolName} not found` };
                     }
                 } catch (e: any) {
-                    yield { type: 'error', content: `Fehler bei ${call.toolName}: ${e.message} ` };
-                    toolResults.push(`[TOOL ERROR: ${call.toolName}] ${e.message} `);
-
-                    // Log error to journal
+                    events.push({ type: 'error', content: `Fehler bei ${call.toolName}: ${e.message} ` });
                     logJournalEntry({
                         event_type: 'alert',
                         source: 'chat',
@@ -271,7 +245,40 @@ export async function* chatWithAgentGenerator(
                         details: e.message,
                         severity: 'warning',
                     });
+                    return { events, result: `[TOOL ERROR: ${call.toolName}] ${e.message} ` };
                 }
+            };
+
+            // Run independent tools in parallel
+            if (independent.length > 0) {
+                if (independent.length > 1) {
+                    yield { type: 'status', content: `Führe ${independent.length} Tools parallel aus...` };
+                }
+                for (const call of independent) {
+                    yield { type: 'tool_start', tool: call.toolName, args: call.args };
+                }
+
+                const parallelResults = await Promise.allSettled(
+                    independent.map(call => executeTool(call))
+                );
+
+                for (const settled of parallelResults) {
+                    if (settled.status === 'fulfilled') {
+                        for (const ev of settled.value.events) yield ev;
+                        toolResults.push(settled.value.result);
+                    } else {
+                        toolResults.push(`[TOOL ERROR] ${settled.reason}`);
+                    }
+                }
+            }
+
+            // Run dependent/stateful tools sequentially
+            for (const call of dependent) {
+                yield { type: 'status', content: `Führe Tool aus: ${call.toolName}...` };
+                yield { type: 'tool_start', tool: call.toolName, args: call.args };
+                const res = await executeTool(call);
+                for (const ev of res.events) yield ev;
+                toolResults.push(res.result);
             }
 
             messages.push({ role: 'user', content: toolResults.join('\n\n') });

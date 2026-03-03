@@ -4,6 +4,7 @@ import { getAISettings } from '@/lib/actions/ai';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { LayoutDashboard, Server, FolderCog, ArrowRightLeft, Tag as TagIcon, HardDrive, Users, Terminal, Activity, ListTodo, Calendar, TrendingUp, Disc, Sparkles, Wrench, HeartPulse, ShieldCheck, Shield, Monitor } from 'lucide-react';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { getCurrentUser, logout, User as UserType } from '@/lib/actions/userAuth';
 import { APP_VERSION, IS_BETA } from '@/lib/constants';
 import { UserNav } from './UserNav';
@@ -88,7 +89,7 @@ export function Sidebar() {
     };
 
     return (
-        <div className="flex flex-col w-64 h-[100dvh] fixed left-0 top-0 z-50 bg-sidebar/80 backdrop-blur-2xl border-r border-sidebar-border shadow-[5px_0_30px_-5px_oklch(0_0_0/0.3)]">
+        <div className="flex flex-col w-64 h-[100dvh] fixed left-0 top-0 z-50 bg-sidebar border-r border-sidebar-border shadow-sm dark:bg-sidebar/90 dark:backdrop-blur-sm dark:shadow-[5px_0_20px_-5px_oklch(0_0_0/0.2)]">
             <div className="p-6 pb-4">
                 {/* Header Area */}
                 <div className="flex items-center gap-3 mb-1">
@@ -175,8 +176,10 @@ export function Sidebar() {
 
                 <div className="mt-4 px-2 flex items-center justify-between text-xs text-sidebar-foreground/40 hover:text-sidebar-foreground/80 transition-colors">
                     <span className="font-mono">v{APP_VERSION}</span>
-
-                    <LanguageSwitcher />
+                    <div className="flex items-center gap-2">
+                        <ThemeToggle />
+                        <LanguageSwitcher />
+                    </div>
                 </div>
             </div>
         </div>

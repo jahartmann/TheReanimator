@@ -27,13 +27,14 @@ export async function register() {
             // Custom tools are optional
         }
 
-        // Initialize Console WebSocket Proxy
-        try {
-            const { startConsoleProxy } = await import('@/lib/console-proxy');
-            startConsoleProxy(3001);
-        } catch (e) {
-            console.error('[Startup] Failed to start console proxy:', e);
-        }
+        // Console WebSocket Proxy — disabled (now handled by server.js)
+        // To use the standalone proxy as fallback, uncomment:
+        // try {
+        //     const { startConsoleProxy } = await import('@/lib/console-proxy');
+        //     startConsoleProxy(3001);
+        // } catch (e) {
+        //     console.error('[Startup] Failed to start console proxy:', e);
+        // }
 
         // Graceful shutdown: destroy SSH pool on process termination
         const shutdownHandler = async () => {

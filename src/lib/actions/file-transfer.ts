@@ -2,7 +2,8 @@
 
 import db from '@/lib/db';
 import { ProxmoxClient } from '@/lib/proxmox';
-import { createSSHClient } from '@/lib/ssh';
+import { withSSH } from '@/lib/ssh-pool';
+import { nodeNameCache } from '@/lib/cache';
 import { determineNodeName } from './vm';
 import { ensureApiToken } from './console';
 
@@ -32,13 +33,12 @@ async function getServerContext(serverId: number, needsApi: boolean = false) {
     const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId) as any;
     if (!server) throw new Error('Server not found');
 
-    const ssh = createSSHClient(server);
-    let node: string;
-    try {
-        await ssh.connect();
-        node = await determineNodeName(ssh);
-    } finally {
-        try { await ssh.disconnect(); } catch { /* ignore */ }
+    // Resolve node name with cache (5 min TTL)
+    const cacheKey = `node-${serverId}`;
+    let node = nodeNameCache.get(cacheKey);
+    if (!node) {
+        node = await withSSH(server, async (ssh) => determineNodeName(ssh));
+        nodeNameCache.set(cacheKey, node, 300_000);
     }
 
     let client: ProxmoxClient | null = null;
@@ -94,16 +94,10 @@ export async function listRemoteFiles(
         return parseLsOutput(result.stdout);
     } else {
         const { server } = await getServerContext(serverId);
-        const ssh = createSSHClient(server);
-        try {
-            await ssh.connect();
-            const output = await ssh.exec(
-                `pct exec ${id} -- ls -la --time-style=long-iso "${safePath}"`
-            );
-            return parseLsOutput(output);
-        } finally {
-            try { await ssh.disconnect(); } catch { /* ignore */ }
-        }
+        const output = await withSSH(server, async (ssh) =>
+            ssh.exec(`pct exec ${id} -- ls -la --time-style=long-iso "${safePath}"`)
+        );
+        return parseLsOutput(output);
     }
 }
 
@@ -129,9 +123,14 @@ export async function downloadFileFromVM(
         };
     } else {
         const { server } = await getServerContext(serverId);
-        const ssh = createSSHClient(server);
-        try {
-            await ssh.connect();
+        return await withSSH(server, async (ssh) => {
+            // Check file size before base64 encoding (max 50MB)
+            const sizeOutput = await ssh.exec(`pct exec ${id} -- stat -c%s "${safePath}"`);
+            const fileSize = parseInt(sizeOutput.trim(), 10);
+            if (fileSize > 50 * 1024 * 1024) {
+                throw new Error(`File too large (${Math.round(fileSize / 1024 / 1024)}MB). Use the streaming download route for files over 50MB.`);
+            }
+
             const output = await ssh.exec(
                 `pct exec ${id} -- base64 -w0 "${safePath}"`,
                 60000
@@ -142,9 +141,7 @@ export async function downloadFileFromVM(
                 filename,
                 size: Math.ceil(content.length * 3 / 4),
             };
-        } finally {
-            try { await ssh.disconnect(); } catch { /* ignore */ }
-        }
+        });
     }
 }
 
@@ -170,18 +167,14 @@ export async function uploadFileToVM(
             return { success: true, message: `File uploaded to ${fullPath}` };
         } else {
             const { server } = await getServerContext(serverId);
-            const ssh = createSSHClient(server);
-            try {
-                await ssh.connect();
+            await withSSH(server, async (ssh) => {
                 // Use heredoc to safely pass base64 content without shell injection
                 await ssh.exec(
                     `cat <<'REANIMATOR_EOF' | base64 -d | pct push ${id} - "${fullPath}"\n${content}\nREANIMATOR_EOF`,
                     60000
                 );
-                return { success: true, message: `File uploaded to ${fullPath}` };
-            } finally {
-                try { await ssh.disconnect(); } catch { /* ignore */ }
-            }
+            });
+            return { success: true, message: `File uploaded to ${fullPath}` };
         }
     } catch (err) {
         return {
@@ -209,13 +202,9 @@ export async function createRemoteDir(
             if (result.exitcode !== 0) throw new Error(result.stderr);
         } else {
             const { server } = await getServerContext(serverId);
-            const ssh = createSSHClient(server);
-            try {
-                await ssh.connect();
+            await withSSH(server, async (ssh) => {
                 await ssh.exec(`pct exec ${id} -- mkdir -p "${safePath}"`);
-            } finally {
-                try { await ssh.disconnect(); } catch { /* ignore */ }
-            }
+            });
         }
         return { success: true, message: `Directory created: ${safePath}` };
     } catch (err) {
@@ -249,13 +238,9 @@ export async function deleteRemoteFile(
             if (result.exitcode !== 0) throw new Error(result.stderr);
         } else {
             const { server } = await getServerContext(serverId);
-            const ssh = createSSHClient(server);
-            try {
-                await ssh.connect();
+            await withSSH(server, async (ssh) => {
                 await ssh.exec(`pct exec ${id} -- rm -rf "${safePath}"`);
-            } finally {
-                try { await ssh.disconnect(); } catch { /* ignore */ }
-            }
+            });
         }
         return { success: true, message: `Deleted: ${safePath}` };
     } catch (err) {

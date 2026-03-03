@@ -16,3 +16,6 @@ export type { RecoveryPlan, RecoveryPhase, RecoveryStep, RecoveryScenario, PostR
 
 export { generateUUIDMapping, applyUUIDMapping, mergeHosts, parsePveConfig, updateStoragePaths, applyMergeResolutions } from './merge-engine';
 export type { UUIDMapping, MergeConflict, PveConfigSection, HostsEntry } from './merge-engine';
+
+export { executeRecoveryPlan, getRecoveryExecution, listRecoveryExecutions } from './executor';
+export type { ExecutionOptions, ExecutionEvent, ExecutionResult, StepResult, PhaseResult } from './executor';

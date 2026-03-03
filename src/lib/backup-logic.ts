@@ -267,6 +267,37 @@ export async function performFullBackup(serverId: number, server: Server) {
             const tSuccess = await getTranslations({ locale: await getServerLocale(), namespace: 'backupLogic' });
             const successMsg = tSuccess('backupSuccess', { files: totalFiles, size: formatBytes(totalSize) });
 
+            // Integrity check: compare expected vs extracted paths
+            try {
+                const extractedPaths: string[] = [];
+                for (const vp of validPaths) {
+                    const localExtracted = path.join(destPath, vp.replace(/^\//, ''));
+                    if (fs.existsSync(localExtracted)) {
+                        extractedPaths.push(vp);
+                    }
+                }
+                const matchPct = validPaths.length > 0
+                    ? (extractedPaths.length / validPaths.length) * 100
+                    : 100;
+
+                console.log(`[BackupLogic] Integrity: ${extractedPaths.length}/${validPaths.length} paths extracted (${matchPct.toFixed(0)}%)`);
+
+                if (matchPct < 80) {
+                    db.prepare('UPDATE config_backups SET status = ?, notes = ? WHERE id = ?')
+                        .run('incomplete', `Integrity ${matchPct.toFixed(0)}%: missing ${validPaths.filter(p => !extractedPaths.includes(p)).join(', ')}`, result.lastInsertRowid);
+                    console.warn(`[BackupLogic] Backup marked incomplete — only ${matchPct.toFixed(0)}% paths matched`);
+                }
+            } catch (integrityErr) {
+                console.error('[BackupLogic] Integrity check error:', integrityErr);
+            }
+
+            // Enforce retention policy
+            try {
+                await enforceRetentionPolicy(serverId);
+            } catch (retentionErr) {
+                console.error('[BackupLogic] Retention policy error:', retentionErr);
+            }
+
             // Notification
             try {
                 const { broadcastMessage } = await import('@/lib/agent/telegram');
@@ -294,6 +325,43 @@ export async function performFullBackup(serverId: number, server: Server) {
             await broadcastMessage(errMsg);
         } catch { }
         throw err;
+    }
+}
+
+/**
+ * Delete old backups beyond the retention limit for a given server.
+ */
+export async function enforceRetentionPolicy(serverId: number, maxBackups?: number): Promise<void> {
+    const limit = maxBackups ?? (() => {
+        const row = db.prepare("SELECT value FROM settings WHERE key = 'backup_retention_count'").get() as { value: string } | undefined;
+        return row ? parseInt(row.value, 10) || 10 : 10;
+    })();
+
+    const backups = db.prepare(
+        'SELECT id, backup_path FROM config_backups WHERE server_id = ? ORDER BY backup_date DESC'
+    ).all(serverId) as { id: number; backup_path: string }[];
+
+    if (backups.length <= limit) {
+        console.log(`[BackupLogic] Retention: ${backups.length}/${limit} backups for server ${serverId} — nothing to clean`);
+        return;
+    }
+
+    const toDelete = backups.slice(limit);
+    console.log(`[BackupLogic] Retention: removing ${toDelete.length} old backup(s) for server ${serverId}`);
+
+    for (const backup of toDelete) {
+        // Remove files from disk
+        try {
+            if (backup.backup_path && fs.existsSync(backup.backup_path)) {
+                fs.rmSync(backup.backup_path, { recursive: true, force: true });
+            }
+        } catch (e) {
+            console.error(`[BackupLogic] Failed to delete backup dir ${backup.backup_path}:`, e);
+        }
+        // Remove DB record
+        db.prepare('DELETE FROM config_files WHERE backup_id = ?').run(backup.id);
+        db.prepare('DELETE FROM config_backups WHERE id = ?').run(backup.id);
+        console.log(`[BackupLogic] Retention: deleted backup #${backup.id} (${backup.backup_path})`);
     }
 }
 
@@ -331,4 +399,28 @@ export async function restoreFileToRemote(serverId: number, backupId: number, re
         await ssh.uploadFile(localPath, remotePath);
         return { success: true, message: t('fileRestored', { path: remotePath }) };
     });
+}
+
+/**
+ * Restore multiple files from a backup in batch.
+ */
+export async function batchRestoreFiles(
+    serverId: number,
+    backupId: number,
+    paths: string[]
+): Promise<{ total: number; success: number; failed: number; errors: string[] }> {
+    const result = { total: paths.length, success: 0, failed: 0, errors: [] as string[] };
+
+    for (const filePath of paths) {
+        try {
+            await restoreFileToRemote(serverId, backupId, filePath);
+            result.success++;
+        } catch (err) {
+            result.failed++;
+            result.errors.push(`${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+
+    console.log(`[BackupLogic] Batch restore: ${result.success}/${result.total} succeeded, ${result.failed} failed`);
+    return result;
 }

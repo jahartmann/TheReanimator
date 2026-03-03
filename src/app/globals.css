@@ -5,84 +5,118 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* Midnight Aurora - Refined Organic & High Contrast */
+  /* ═══ Light Theme — Professional Clean ═══ */
 
-  /* Base - Deep Midnight (Darker, subtler) */
-  --background: oklch(0.12 0.02 260);
-  /* Near black with faint blue hint */
-  --foreground: oklch(0.98 0 0);
+  /* Base */
+  --background: oklch(0.985 0.002 260);
+  --foreground: oklch(0.15 0.01 260);
 
-  /* Surface - Midnight Glass (slightly lighter than bg) */
-  --card: oklch(0.16 0.03 260);
-  --card-foreground: oklch(0.98 0 0);
+  /* Surface */
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.15 0.01 260);
 
-  --popover: oklch(0.16 0.03 260);
-  --popover-foreground: oklch(0.98 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.15 0.01 260);
 
-  /* Primary - Electric Indigo (Friendly & Vibrant) */
-  --primary: oklch(0.65 0.20 280);
-  /* Indigo/Purple */
+  /* Primary — Indigo */
+  --primary: oklch(0.55 0.20 280);
   --primary-foreground: oklch(1 0 0);
-  /* White Text */
 
-  /* Secondary - Soft Blue */
-  --secondary: oklch(0.30 0.10 250);
-  --secondary-foreground: oklch(0.98 0 0);
+  /* Secondary */
+  --secondary: oklch(0.95 0.01 260);
+  --secondary-foreground: oklch(0.25 0.02 260);
 
-  /* Muted - Cool Grey */
-  --muted: oklch(0.25 0.05 260);
-  --muted-foreground: oklch(0.70 0.05 260);
+  /* Muted */
+  --muted: oklch(0.95 0.005 260);
+  --muted-foreground: oklch(0.45 0.02 260);
 
-  /* Accent - Hover State */
-  --accent: oklch(0.30 0.10 280);
-  /* Indig-tinted grey */
-  --accent-foreground: oklch(1 0 0);
+  /* Accent */
+  --accent: oklch(0.93 0.02 280);
+  --accent-foreground: oklch(0.20 0.05 280);
 
   /* Destructive */
-  --destructive: oklch(0.60 0.18 25);
+  --destructive: oklch(0.55 0.20 25);
   --destructive-foreground: oklch(1 0 0);
 
-  /* Borders - Subtle but Visible */
-  --border: oklch(0.30 0.05 260);
-  --input: oklch(0.25 0.05 260);
-  --ring: oklch(0.65 0.20 280);
+  /* Borders */
+  --border: oklch(0.88 0.01 260);
+  --input: oklch(0.90 0.01 260);
+  --ring: oklch(0.55 0.20 280);
 
   --radius: 0.75rem;
-  /* Rounded aesthetic */
 
-  /* Charts - Aurora Borealis */
-  --chart-1: oklch(0.65 0.20 280);
-  /* Indigo */
-  --chart-2: oklch(0.70 0.15 180);
-  /* Teal */
-  --chart-3: oklch(0.75 0.15 320);
-  /* Pink */
-  --chart-4: oklch(0.80 0.15 80);
-  /* Amber */
-  --chart-5: oklch(0.60 0.20 300);
-  /* Purple */
+  /* Charts */
+  --chart-1: oklch(0.55 0.20 280);
+  --chart-2: oklch(0.60 0.15 180);
+  --chart-3: oklch(0.60 0.15 320);
+  --chart-4: oklch(0.65 0.15 80);
+  --chart-5: oklch(0.50 0.20 300);
 
-  /* Sidebar - Deep Glass */
-  --sidebar: oklch(0.12 0.05 260 / 0.9);
-  --sidebar-foreground: oklch(0.95 0 0);
-  --sidebar-primary: oklch(0.65 0.20 280);
-  /* Indigo Active Bg */
+  /* Sidebar */
+  --sidebar: oklch(0.97 0.005 260);
+  --sidebar-foreground: oklch(0.20 0.01 260);
+  --sidebar-primary: oklch(0.55 0.20 280);
   --sidebar-primary-foreground: oklch(1 0 0);
-  /* WHITE text on Active */
-  --sidebar-accent: oklch(0.25 0.05 260);
-  --sidebar-accent-foreground: oklch(0.98 0 0);
-  --sidebar-border: oklch(0.25 0.05 260);
-  --sidebar-ring: oklch(0.65 0.20 280);
-
-  /* Fonts - Reset to Sans/Mono default mapping, Font Family handled in layout.tsx */
-  /* We will remove the explicit variable override here and let Tailwind use the class names */
+  --sidebar-accent: oklch(0.93 0.01 260);
+  --sidebar-accent-foreground: oklch(0.20 0.02 260);
+  --sidebar-border: oklch(0.90 0.005 260);
+  --sidebar-ring: oklch(0.55 0.20 280);
 }
 
-/* Force Dark Mode Palette even if system requests light, 
-   but provide mapped variables just in case user forces it.
-   Ideally, we just use the dark variables for everything to maintain aesthetic. */
+/* ═══ Dark Theme — Refined Midnight ═══ */
 .dark {
-  /* Same as :root because this design is dark-first */
+  /* Base — Deep Midnight */
+  --background: oklch(0.12 0.02 260);
+  --foreground: oklch(0.95 0 0);
+
+  /* Surface */
+  --card: oklch(0.16 0.02 260);
+  --card-foreground: oklch(0.95 0 0);
+
+  --popover: oklch(0.16 0.02 260);
+  --popover-foreground: oklch(0.95 0 0);
+
+  /* Primary — Indigo */
+  --primary: oklch(0.65 0.20 280);
+  --primary-foreground: oklch(1 0 0);
+
+  /* Secondary */
+  --secondary: oklch(0.25 0.06 260);
+  --secondary-foreground: oklch(0.92 0 0);
+
+  /* Muted */
+  --muted: oklch(0.22 0.03 260);
+  --muted-foreground: oklch(0.65 0.03 260);
+
+  /* Accent */
+  --accent: oklch(0.25 0.08 280);
+  --accent-foreground: oklch(0.95 0 0);
+
+  /* Destructive */
+  --destructive: oklch(0.58 0.18 25);
+  --destructive-foreground: oklch(1 0 0);
+
+  /* Borders — more visible than before */
+  --border: oklch(0.28 0.03 260);
+  --input: oklch(0.22 0.03 260);
+  --ring: oklch(0.65 0.20 280);
+
+  /* Charts */
+  --chart-1: oklch(0.65 0.20 280);
+  --chart-2: oklch(0.70 0.15 180);
+  --chart-3: oklch(0.70 0.15 320);
+  --chart-4: oklch(0.75 0.15 80);
+  --chart-5: oklch(0.60 0.20 300);
+
+  /* Sidebar */
+  --sidebar: oklch(0.10 0.02 260);
+  --sidebar-foreground: oklch(0.92 0 0);
+  --sidebar-primary: oklch(0.65 0.20 280);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.22 0.03 260);
+  --sidebar-accent-foreground: oklch(0.92 0 0);
+  --sidebar-border: oklch(0.22 0.03 260);
+  --sidebar-ring: oklch(0.65 0.20 280);
 }
 
 @theme inline {
@@ -135,10 +169,13 @@
 
   body {
     @apply bg-background text-foreground tracking-normal font-sans;
-    /* Midnight Aurora - Subtle Atmosphere */
+  }
+
+  /* Dark-only subtle gradient atmosphere */
+  .dark body {
     background-image:
-      radial-gradient(at 0% 0%, oklch(0.20 0.10 260 / 0.3) 0px, transparent 50%),
-      radial-gradient(at 100% 100%, oklch(0.20 0.10 280 / 0.2) 0px, transparent 50%);
+      radial-gradient(at 0% 0%, oklch(0.18 0.08 260 / 0.2) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, oklch(0.18 0.08 280 / 0.15) 0px, transparent 50%);
   }
 
   h1,
