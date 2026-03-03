@@ -3,7 +3,7 @@
 import { getAISettings } from '@/lib/actions/ai';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { LayoutDashboard, Server, FolderCog, ArrowRightLeft, Tag as TagIcon, HardDrive, Users, Terminal, Activity, ListTodo, Calendar, TrendingUp, Disc, Sparkles, Wrench, HeartPulse, ShieldCheck, Shield, Monitor } from 'lucide-react';
+import { LayoutDashboard, Server, FolderCog, ArrowRightLeft, Tag as TagIcon, HardDrive, Users, Terminal, Activity, ListTodo, Calendar, TrendingUp, Disc, Sparkles, Wrench, HeartPulse, ShieldCheck, Shield, Monitor, Network, Disc2, Bell, KeyRound, Send } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { getCurrentUser, logout, User as UserType } from '@/lib/actions/userAuth';
 import { APP_VERSION, IS_BETA } from '@/lib/constants';
@@ -11,6 +11,7 @@ import { UserNav } from './UserNav';
 import { useTranslations, useLocale } from 'next-intl';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { Link } from '@/i18n/routing';
+import { NotificationBell } from '@/components/NotificationBell';
 
 // Define groups
 const mainNav = [
@@ -30,9 +31,10 @@ const toolsNav = [
 
 const systemNav = [
     { key: 'storage', href: '/storage', icon: HardDrive },
+    { key: 'network', href: '/network', icon: Network },
     { key: 'configs', href: '/configs', icon: FolderCog },
+    { key: 'isoSync', href: '/iso-sync', icon: Disc2 },
     { key: 'disasterRecovery', href: '/disaster-recovery', icon: ShieldCheck },
-    { key: 'jobs', href: '/jobs', icon: Calendar },
     { key: 'tasks', href: '/tasks', icon: ListTodo },
 ];
 
@@ -43,6 +45,8 @@ const agentToolsNav = [
 
 const adminNavItems = [
     { key: 'bulkCommands', href: '/tools/bulk-command', icon: Terminal },
+    { key: 'serverTrust', href: '/server-trust', icon: KeyRound },
+    { key: 'telegramTrust', href: '/telegram-trust', icon: Send },
     { key: 'users', href: '/users', icon: Users },
     { key: 'auditLog', href: '/audit', icon: Shield },
 ];
@@ -177,6 +181,7 @@ export function Sidebar() {
                 <div className="mt-4 px-2 flex items-center justify-between text-xs text-sidebar-foreground/40 hover:text-sidebar-foreground/80 transition-colors">
                     <span className="font-mono">v{APP_VERSION}</span>
                     <div className="flex items-center gap-2">
+                        <NotificationBell />
                         <ThemeToggle />
                         <LanguageSwitcher />
                     </div>

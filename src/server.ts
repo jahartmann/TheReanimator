@@ -20,6 +20,11 @@ import { randomBytes } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { Client as SshClient } from 'ssh2';
 import { getDb } from './lib/db.js';
+import { setupRoutes as setupConfigRoutes } from './routes/r-configs.js';
+import { setupRoutes as setupMigrationRoutes } from './routes/r-migrations.js';
+import { setupRoutes as setupNotificationRoutes } from './routes/r-notifications.js';
+import { setupRoutes as setupInfraRoutes } from './routes/r-infra.js';
+import { setupRoutes as setupDrRoutes } from './routes/r-dr.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -123,6 +128,13 @@ if (!isProd) {
   });
 }
 
+// ─── Modular route modules (registered first so they override old inline routes) ─
+setupConfigRoutes(app, requireAuth);
+setupMigrationRoutes(app, requireAuth);
+setupNotificationRoutes(app, requireAuth);
+setupInfraRoutes(app, requireAuth);
+setupDrRoutes(app, requireAuth);
+
 // ─── Auth routes ─────────────────────────────────────────────────────────────
 
 app.post('/api/auth/login', async (req: Request, res: Response) => {
@@ -172,7 +184,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       httpOnly: true,
       secure: false,
       sameSite: 'lax' as const,
-      maxAge: SESSION_DURATION_HOURS * 60 * 60,
+      maxAge: SESSION_DURATION_HOURS * 60 * 60 * 1000, // milliseconds
       path: '/',
     };
 

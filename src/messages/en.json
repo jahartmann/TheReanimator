@@ -52,7 +52,11 @@
     "organs": "Agent Status",
     "disasterRecovery": "Disaster Recovery",
     "auditLog": "Audit Log",
-    "console": "Console"
+    "console": "Console",
+    "network": "Network",
+    "isoSync": "ISO Sync",
+    "serverTrust": "Server Trust",
+    "telegramTrust": "Telegram Bot"
   },
   "consolePage": {
     "title": "Console",

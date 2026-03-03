@@ -51,7 +51,11 @@
     "agentTools": "Outils de l'Agent",
     "organs": "État de l'Agent",
     "auditLog": "Journal d'Audit",
-    "console": "Console"
+    "console": "Console",
+    "network": "Réseau",
+    "isoSync": "ISO Sync",
+    "serverTrust": "Confiance Serveur",
+    "telegramTrust": "Bot Telegram"
   },
   "consolePage": {
     "title": "Console",

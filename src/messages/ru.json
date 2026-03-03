@@ -51,7 +51,11 @@
     "agentTools": "Инструменты Агента",
     "organs": "Статус Агента",
     "auditLog": "Журнал аудита",
-    "console": "Консоль"
+    "console": "Консоль",
+    "network": "Сеть",
+    "isoSync": "ISO Синхронизация",
+    "serverTrust": "Доверие к серверам",
+    "telegramTrust": "Telegram Бот"
   },
   "consolePage": {
     "title": "Консоль",

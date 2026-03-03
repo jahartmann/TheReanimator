@@ -40,8 +40,13 @@ export async function consolidateSession(sessionId: number): Promise<number> {
     let savedCount = 0;
 
     for (const insight of insights) {
-        // Check for duplicates using search
-        const duplicates = await searchBrain(insight.title, 3);
+        // Check for duplicates using search — guard against embedding/FTS failures
+        let duplicates: Awaited<ReturnType<typeof searchBrain>> = [];
+        try {
+            duplicates = await searchBrain(insight.title, 3);
+        } catch {
+            // searchBrain failure is non-fatal; proceed without duplicate check
+        }
         const isDuplicate = duplicates.some(d =>
             d.entry.key === insight.key ||
             (d.rank < -5 && d.entry.title.toLowerCase() === insight.title.toLowerCase())

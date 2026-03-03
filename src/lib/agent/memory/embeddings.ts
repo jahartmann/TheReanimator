@@ -6,6 +6,10 @@
 import db from '@/lib/db';
 import type { BrainEntry } from './brain';
 
+// Track whether the embedding service is currently reachable.
+// Logs the first failure, then stays silent until the service recovers.
+let embeddingServiceDown = false;
+
 /**
  * Generate embedding vector for text using remote Ollama API.
  */
@@ -34,15 +38,31 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
         });
 
         if (!response.ok) {
-            console.error('[Embeddings] API error:', response.statusText);
+            if (!embeddingServiceDown) {
+                embeddingServiceDown = true;
+                console.warn(`[Embeddings] API error (${response.status} ${response.statusText}) — further errors suppressed until service recovers`);
+            }
             return null;
         }
 
         const data = await response.json();
+        // Service is reachable — reset down flag so future failures are logged again
+        if (embeddingServiceDown) {
+            embeddingServiceDown = false;
+            console.log('[Embeddings] Service recovered');
+        }
         return data.embedding || null;
-    } catch (error) {
-        console.error('[Embeddings] Generation failed:', error);
-        return null; // Graceful degradation
+    } catch (error: any) {
+        const isConnRefused = error?.code === 'ECONNREFUSED' || error?.cause?.code === 'ECONNREFUSED';
+        if (!embeddingServiceDown) {
+            embeddingServiceDown = true;
+            if (isConnRefused) {
+                console.warn('[Embeddings] Ollama unreachable (ECONNREFUSED) — embedding generation disabled until service is back');
+            } else {
+                console.warn('[Embeddings] Generation failed:', error?.message ?? error, '— further errors suppressed until service recovers');
+            }
+        }
+        return null; // Graceful degradation — never throw
     }
 }
 
@@ -179,16 +199,25 @@ export async function processEmbeddingQueue(batchSize: number = 10): Promise<{
             db.prepare('UPDATE embedding_queue SET status = ? WHERE id = ?').run('done', entry.queue_id);
             processed++;
         } else {
-            // Mark as failed
-            db.prepare('UPDATE embedding_queue SET status = ? WHERE id = ?').run('failed', entry.queue_id);
+            // Reset back to pending so the entry is retried next time.
+            // If the service is down we stop processing further entries to avoid
+            // flooding the queue with permanent failures.
+            db.prepare('UPDATE embedding_queue SET status = ? WHERE id = ?').run('pending', entry.queue_id);
             failed++;
+
+            if (embeddingServiceDown) {
+                // Service is unreachable — no point continuing with remaining entries
+                break;
+            }
         }
 
         // Small delay to avoid overwhelming the Ollama API
         await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    console.log(`[Embeddings] Processed ${processed}, failed ${failed}`);
+    if (processed > 0 || failed > 0) {
+        console.log(`[Embeddings] Processed ${processed}, failed ${failed}${embeddingServiceDown ? ' (service down — will retry later)' : ''}`);
+    }
     return { processed, failed };
 }
 

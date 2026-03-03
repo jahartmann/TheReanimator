@@ -59,7 +59,13 @@ const OrgansPage = React.lazy(() => import('./pages/Organs'));
 const ServerNewPage = React.lazy(() => import('./pages/ServerNew'));
 const ServerDetailPage = React.lazy(() => import('./pages/ServerDetail'));
 
-// Newly implemented pages
+// Newly implemented + additional pages
+const NotificationsPage = React.lazy(() => import('./pages/Notifications'));
+const TelegramTrustPage = React.lazy(() => import('./pages/TelegramTrust'));
+const ServerTrustPage = React.lazy(() => import('./pages/ServerTrust'));
+const NetworkOverviewPage = React.lazy(() => import('./pages/NetworkOverview'));
+const ISOSyncPage = React.lazy(() => import('./pages/ISOSync'));
+
 const MigrationsPage = React.lazy(() => import('./pages/Migrations'));
 const MigrationNewPage = React.lazy(() => import('./pages/MigrationNew'));
 const MigrationDetailPage = React.lazy(() => import('./pages/MigrationDetail'));
@@ -254,6 +260,11 @@ function AppRoutes() {
         <Route path="/organs" element={<OrgansPage />} />
         <Route path="/console" element={<ConsolePage />} />
         <Route path="/disaster-recovery" element={<DisasterRecoveryPage />} />
+        <Route path="/notifications" element={<NotificationsPage />} />
+        <Route path="/telegram-trust" element={<TelegramTrustPage />} />
+        <Route path="/server-trust" element={<ServerTrustPage />} />
+        <Route path="/network" element={<NetworkOverviewPage />} />
+        <Route path="/iso-sync" element={<ISOSyncPage />} />
         <Route path="/jobs" element={<Navigate to="/tasks" replace />} />
       </Route>
 
