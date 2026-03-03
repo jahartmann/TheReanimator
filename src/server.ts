@@ -412,13 +412,115 @@ app.get('/api/tags', requireAuth, (req: AuthRequest, res: Response) => {
   }
 });
 
+app.post('/api/tags', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    const { name, color } = req.body;
+    if (!name || !color) { res.status(400).json({ error: 'name and color required' }); return; }
+    const result = db.prepare('INSERT INTO tags (name, color) VALUES (?, ?)').run(name, color.replace('#', ''));
+    res.json({ success: true, id: result.lastInsertRowid });
+  } catch (err: any) {
+    if (err.message?.includes('UNIQUE')) { res.status(400).json({ error: 'Tag name already exists' }); return; }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/tags/:id', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    db.prepare('DELETE FROM tags WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Jobs routes ──────────────────────────────────────────────────────────────
 
 app.get('/api/jobs', requireAuth, (req: AuthRequest, res: Response) => {
   try {
     const db = getDb();
-    const jobs = db.prepare('SELECT * FROM jobs ORDER BY created_at DESC').all();
+    const jobs = db.prepare(`
+      SELECT j.*, s.name as source_server_name, t.name as target_server_name
+      FROM jobs j
+      LEFT JOIN servers s ON j.source_server_id = s.id
+      LEFT JOIN servers t ON j.target_server_id = t.id
+      ORDER BY j.created_at DESC
+    `).all();
     res.json(jobs);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/jobs', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    const { name, job_type, source_server_id, target_server_id, schedule, enabled } = req.body;
+    if (!name || !source_server_id || !schedule) { res.status(400).json({ error: 'name, source_server_id, schedule required' }); return; }
+    const result = db.prepare(`
+      INSERT INTO jobs (name, job_type, source_server_id, target_server_id, schedule, enabled)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(name, job_type || 'backup', source_server_id, target_server_id || null, schedule, enabled !== false ? 1 : 0);
+    res.json({ success: true, id: result.lastInsertRowid });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/jobs/:id', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    const { name, job_type, schedule, enabled, source_server_id, target_server_id } = req.body;
+    const updates: string[] = [];
+    const values: any[] = [];
+    if (name !== undefined) { updates.push('name=?'); values.push(name); }
+    if (job_type !== undefined) { updates.push('job_type=?'); values.push(job_type); }
+    if (schedule !== undefined) { updates.push('schedule=?'); values.push(schedule); }
+    if (enabled !== undefined) { updates.push('enabled=?'); values.push(enabled ? 1 : 0); }
+    if (source_server_id !== undefined) { updates.push('source_server_id=?'); values.push(source_server_id); }
+    if (target_server_id !== undefined) { updates.push('target_server_id=?'); values.push(target_server_id); }
+    if (updates.length) {
+      values.push(req.params.id);
+      db.prepare(`UPDATE jobs SET ${updates.join(',')} WHERE id=?`).run(...values);
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/jobs/:id', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    db.prepare('DELETE FROM history WHERE job_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM jobs WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/jobs/:id/run', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(req.params.id) as any;
+    if (!job) { res.status(404).json({ error: 'Job not found' }); return; }
+    // Insert a history entry as 'running'
+    const histResult = db.prepare(`
+      INSERT INTO history (job_id, status, start_time, log) VALUES (?, 'running', datetime('now'), 'Manual run triggered')
+    `).run(job.id);
+    // Fire-and-forget: try to run backup logic
+    (async () => {
+      try {
+        const { runConfigBackup } = await import('./lib/actions/backup.js');
+        await runConfigBackup(job.source_server_id);
+        db.prepare("UPDATE history SET status='success', end_time=datetime('now') WHERE id=?").run(histResult.lastInsertRowid);
+      } catch (e: any) {
+        db.prepare("UPDATE history SET status='failed', end_time=datetime('now'), log=? WHERE id=?").run(e.message, histResult.lastInsertRowid);
+      }
+    })().catch(console.error);
+    res.json({ success: true, message: 'Job started' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -431,7 +533,7 @@ app.get('/api/jobs/history', requireAuth, (req: AuthRequest, res: Response) => {
     const history = db.prepare(`
       SELECT h.*, j.name as job_name FROM history h
       LEFT JOIN jobs j ON h.job_id = j.id
-      ORDER BY h.started_at DESC LIMIT ?
+      ORDER BY h.start_time DESC LIMIT ?
     `).all(limit);
     res.json(history);
   } catch (err: any) {
@@ -530,13 +632,112 @@ app.get('/api/config-backups', requireAuth, (req: AuthRequest, res: Response) =>
   }
 });
 
+// Alias: /api/configs → /api/config-backups
+app.get('/api/configs', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    const backups = db.prepare(`
+      SELECT cb.*, s.name as server_name
+      FROM config_backups cb JOIN servers s ON cb.server_id = s.id
+      ORDER BY cb.backup_date DESC LIMIT 100
+    `).all();
+    res.json(backups);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/configs/:id', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    const backup = db.prepare(`
+      SELECT cb.*, s.name as server_name
+      FROM config_backups cb JOIN servers s ON cb.server_id = s.id
+      WHERE cb.id = ?
+    `).get(req.params.id) as any;
+    if (!backup) { res.status(404).json({ error: 'Not found' }); return; }
+    const files = db.prepare('SELECT * FROM config_files WHERE backup_id = ? ORDER BY file_path').all(req.params.id);
+    res.json({ backup, files });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/configs/backup/:serverId', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { runConfigBackup } = await import('./lib/actions/backup.js');
+    runConfigBackup(parseInt(req.params.serverId)).catch(console.error);
+    res.json({ success: true, message: 'Backup started' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/configs/:id', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    db.prepare('DELETE FROM config_files WHERE backup_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM config_backups WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/config-backups/:id', requireAuth, (req: AuthRequest, res: Response) => {
   try {
     const db = getDb();
     const backup = db.prepare('SELECT * FROM config_backups WHERE id = ?').get(req.params.id);
-    const files = db.prepare('SELECT * FROM config_files WHERE backup_id = ? ORDER BY path').all(req.params.id);
+    const files = db.prepare('SELECT * FROM config_files WHERE backup_id = ? ORDER BY file_path').all(req.params.id);
     if (!backup) { res.status(404).json({ error: 'Not found' }); return; }
     res.json({ backup, files });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Organs / Autonomous logs route ──────────────────────────────────────────
+
+app.get('/api/organs', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    const limit = parseInt((req.query.limit as string) || '100');
+    // Fetch autonomous logs as organ activity
+    let logs: any[] = [];
+    try {
+      logs = db.prepare(`
+        SELECT * FROM autonomous_logs ORDER BY created_at DESC LIMIT ?
+      `).all(limit) as any[];
+    } catch { /* table may not exist yet */ }
+    // Also fetch autonomous state for organ status
+    let state: Record<string, string> = {};
+    try {
+      const rows = db.prepare('SELECT key, value FROM autonomous_state').all() as any[];
+      rows.forEach((r: any) => { state[r.key] = r.value; });
+    } catch { /* table may not exist yet */ }
+    // Fetch scheduler job next runs as organ health
+    const jobs = db.prepare('SELECT * FROM jobs WHERE enabled = 1 ORDER BY next_run ASC LIMIT 20').all() as any[];
+    res.json({ logs, state, jobs });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Server full details (VMs + stats) ───────────────────────────────────────
+
+app.get('/api/servers/:id/full', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    const server = db.prepare('SELECT id, name, type, url, ssh_host, ssh_port, ssh_user, group_name, status, last_check FROM servers WHERE id = ?').get(req.params.id) as any;
+    if (!server) { res.status(404).json({ error: 'Not found' }); return; }
+    const vms = db.prepare('SELECT * FROM vms WHERE server_id = ? ORDER BY vmid').all(req.params.id);
+    let stats: any = null;
+    try { stats = db.prepare('SELECT * FROM node_stats WHERE server_id = ?').get(req.params.id) || null; } catch { /* node_stats may not exist */ }
+    const recentBackups = db.prepare(`
+      SELECT id, backup_date, file_count, total_size, status FROM config_backups
+      WHERE server_id = ? ORDER BY backup_date DESC LIMIT 5
+    `).all(req.params.id);
+    res.json({ server, vms, stats, recentBackups });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -628,6 +829,243 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: Response) => {
     res.write(`0:${JSON.stringify(msg)}\n`);
   } finally {
     res.end();
+  }
+});
+
+// ─── Migrations routes ────────────────────────────────────────────────────────
+
+app.get('/api/migrations', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    const rows = db.prepare(`
+      SELECT mt.*,
+        s.name as source_server_name,
+        t.name as target_server_name
+      FROM migration_tasks mt
+      LEFT JOIN servers s ON mt.source_server_id = s.id
+      LEFT JOIN servers t ON mt.target_server_id = t.id
+      ORDER BY mt.created_at DESC
+    `).all();
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/migrations/:id', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    const row = db.prepare(`
+      SELECT mt.*,
+        s.name as source_server_name,
+        t.name as target_server_name
+      FROM migration_tasks mt
+      LEFT JOIN servers s ON mt.source_server_id = s.id
+      LEFT JOIN servers t ON mt.target_server_id = t.id
+      WHERE mt.id = ?
+    `).get(req.params.id);
+    if (!row) { res.status(404).json({ error: 'Not found' }); return; }
+    res.json(row);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/migrations', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    const { source_server_id, target_server_id, target_storage, target_bridge } = req.body;
+    if (!source_server_id || !target_server_id || !target_storage || !target_bridge) {
+      res.status(400).json({ error: 'source_server_id, target_server_id, target_storage, target_bridge required' });
+      return;
+    }
+    const result = db.prepare(`
+      INSERT INTO migration_tasks (source_server_id, target_server_id, target_storage, target_bridge, status, progress, total_steps, log)
+      VALUES (?, ?, ?, ?, 'pending', 0, 0, '')
+    `).run(source_server_id, target_server_id, target_storage, target_bridge);
+    res.json({ success: true, id: result.lastInsertRowid });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/migrations/:id', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    db.prepare(`UPDATE migration_tasks SET status = 'cancelled' WHERE id = ? AND status IN ('pending', 'running')`).run(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Backups (background_tasks) routes ───────────────────────────────────────
+
+app.get('/api/backups', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    let rows: any[] = [];
+    try {
+      rows = db.prepare(`
+        SELECT bt.*,
+          s.name as source_server_name
+        FROM background_tasks bt
+        LEFT JOIN servers s ON bt.source_server_id = s.id
+        ORDER BY bt.created_at DESC
+        LIMIT 200
+      `).all() as any[];
+    } catch {
+      // background_tasks table may not exist yet
+      rows = [];
+    }
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/backups/:id', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    let row: any = null;
+    try {
+      row = db.prepare(`
+        SELECT bt.*,
+          s.name as source_server_name
+        FROM background_tasks bt
+        LEFT JOIN servers s ON bt.source_server_id = s.id
+        WHERE bt.id = ?
+      `).get(req.params.id);
+    } catch {
+      // background_tasks table may not exist
+    }
+    if (!row) { res.status(404).json({ error: 'Not found' }); return; }
+    res.json(row);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Storage route ────────────────────────────────────────────────────────────
+
+app.get('/api/storage', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    let rows: any[] = [];
+    try {
+      rows = db.prepare(`
+        SELECT ns.*,
+          s.name as server_name,
+          s.type as server_type
+        FROM node_stats ns
+        JOIN servers s ON ns.server_id = s.id
+        ORDER BY s.name
+      `).all() as any[];
+    } catch {
+      rows = [];
+    }
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── History route ────────────────────────────────────────────────────────────
+
+app.get('/api/history', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    const limit = parseInt((req.query.limit as string) || '100');
+    const rows = db.prepare(`
+      SELECT h.*, j.name as job_name
+      FROM history h
+      LEFT JOIN jobs j ON h.job_id = j.id
+      ORDER BY h.start_time DESC
+      LIMIT ?
+    `).all(limit);
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Library (provisioning profiles) routes ───────────────────────────────────
+
+app.get('/api/library', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    const profiles = db.prepare('SELECT * FROM provisioning_profiles ORDER BY name').all() as any[];
+    const stepsAll = db.prepare('SELECT * FROM provisioning_steps ORDER BY step_order').all() as any[];
+    const result = profiles.map((p: any) => ({
+      ...p,
+      steps: stepsAll.filter((s: any) => s.profile_id === p.id),
+    }));
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/library/:id', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    const profile = db.prepare('SELECT * FROM provisioning_profiles WHERE id = ?').get(req.params.id) as any;
+    if (!profile) { res.status(404).json({ error: 'Not found' }); return; }
+    const steps = db.prepare('SELECT * FROM provisioning_steps WHERE profile_id = ? ORDER BY step_order').all(req.params.id);
+    res.json({ ...profile, steps });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Recovery executions route ────────────────────────────────────────────────
+
+app.get('/api/recovery-executions', requireAuth, (req: AuthRequest, res: Response) => {
+  try {
+    const db = getDb();
+    let rows: any[] = [];
+    try {
+      rows = db.prepare('SELECT * FROM recovery_executions ORDER BY started_at DESC LIMIT 50').all() as any[];
+    } catch {
+      rows = [];
+    }
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Bulk SSH command ─────────────────────────────────────────────────────────
+
+app.post('/api/bulk-command', requireAuth, async (req: AuthRequest, res: Response) => {
+  const { serverIds, command } = req.body;
+  if (!Array.isArray(serverIds) || serverIds.length === 0 || !command) {
+    res.status(400).json({ error: 'serverIds array and command required' });
+    return;
+  }
+
+  try {
+    const db = getDb();
+    const { withSSH } = await import('./lib/ssh-pool.js');
+
+    const results = await Promise.allSettled(
+      serverIds.map(async (id: number) => {
+        const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(id) as any;
+        if (!server) throw new Error(`Server ${id} not found`);
+        const output = await withSSH(server, (ssh: any) => ssh.exec(command));
+        return { serverId: id, serverName: server.name, output: String(output ?? ''), success: true };
+      })
+    );
+
+    res.json(
+      results.map((r, idx) =>
+        r.status === 'fulfilled'
+          ? r.value
+          : { serverId: serverIds[idx], serverName: `Server #${serverIds[idx]}`, output: '', success: false, error: (r as PromiseRejectedResult).reason?.message ?? 'Unknown error' }
+      )
+    );
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 

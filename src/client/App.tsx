@@ -5,7 +5,7 @@
  */
 
 import React, { Suspense, useState, useEffect, createContext, useContext } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { apiCall } from './hooks/useApi';
 
 // ─── Auth context ─────────────────────────────────────────────────────────────
@@ -51,16 +51,29 @@ const MonitoringPage = React.lazy(() => import('./pages/Monitoring'));
 const UsersPage = React.lazy(() => import('./pages/Users'));
 const AuditPage = React.lazy(() => import('./pages/Audit'));
 
-// Placeholder for pages not yet migrated
-function PlaceholderPage({ name }: { name: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center space-y-4">
-      <div className="text-4xl">🚧</div>
-      <h2 className="text-xl font-semibold">{name}</h2>
-      <p className="text-muted-foreground text-sm">This page is being migrated from Next.js.</p>
-    </div>
-  );
-}
+const ConfigsPage = React.lazy(() => import('./pages/Configs'));
+const ConfigDetailPage = React.lazy(() => import('./pages/ConfigDetail'));
+const TagsPage = React.lazy(() => import('./pages/Tags'));
+const TasksPage = React.lazy(() => import('./pages/Tasks'));
+const OrgansPage = React.lazy(() => import('./pages/Organs'));
+const ServerNewPage = React.lazy(() => import('./pages/ServerNew'));
+const ServerDetailPage = React.lazy(() => import('./pages/ServerDetail'));
+
+// Newly implemented pages
+const MigrationsPage = React.lazy(() => import('./pages/Migrations'));
+const MigrationNewPage = React.lazy(() => import('./pages/MigrationNew'));
+const MigrationDetailPage = React.lazy(() => import('./pages/MigrationDetail'));
+const BackupsPage = React.lazy(() => import('./pages/Backups'));
+const BackupDetailPage = React.lazy(() => import('./pages/BackupDetail'));
+const ConsolePage = React.lazy(() => import('./pages/Console'));
+const ConsoleTerminalPage = React.lazy(() => import('./pages/ConsoleTerminal'));
+const ToolsPage = React.lazy(() => import('./pages/Tools'));
+const BulkCommandPage = React.lazy(() => import('./pages/BulkCommand'));
+const StoragePage = React.lazy(() => import('./pages/Storage'));
+const DisasterRecoveryPage = React.lazy(() => import('./pages/DisasterRecovery'));
+const OptimizerPage = React.lazy(() => import('./pages/Optimizer'));
+const HistoryPage = React.lazy(() => import('./pages/History'));
+const LibraryPage = React.lazy(() => import('./pages/Library'));
 
 // ─── Page spinner ─────────────────────────────────────────────────────────────
 
@@ -169,6 +182,29 @@ function RequireAuth() {
   return <AppLayout />;
 }
 
+// Auth guard without sidebar layout (for full-screen pages like terminal)
+function RequireAuthBare() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background" />}>
+      <Outlet />
+    </Suspense>
+  );
+}
+
 // ─── App routes ───────────────────────────────────────────────────────────────
 
 function AppRoutes() {
@@ -184,37 +220,41 @@ function AppRoutes() {
         }
       />
 
+      {/* Full-screen protected routes (no sidebar) */}
+      <Route element={<RequireAuthBare />}>
+        <Route path="/servers/:id/console/:vmid" element={<ConsoleTerminalPage />} />
+      </Route>
+
       {/* Protected routes */}
       <Route element={<RequireAuth />}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/servers" element={<ServersPage />} />
-        <Route path="/servers/new" element={<PlaceholderPage name="Add Server" />} />
-        <Route path="/servers/:id" element={<PlaceholderPage name="Server Details" />} />
-        <Route path="/servers/:id/console/:vmid" element={<PlaceholderPage name="Console" />} />
+        <Route path="/servers/new" element={<ServerNewPage />} />
+        <Route path="/servers/:id" element={<ServerDetailPage />} />
         <Route path="/monitoring" element={<MonitoringPage />} />
         <Route path="/agent" element={<AgentPage />} />
-        <Route path="/backups" element={<PlaceholderPage name="Backups" />} />
-        <Route path="/backups/:id" element={<PlaceholderPage name="Backup Details" />} />
-        <Route path="/configs" element={<PlaceholderPage name="Config Backups" />} />
-        <Route path="/configs/:id" element={<PlaceholderPage name="Config Backup Details" />} />
-        <Route path="/migrations" element={<PlaceholderPage name="Migrations" />} />
-        <Route path="/migrations/new" element={<PlaceholderPage name="New Migration" />} />
-        <Route path="/migrations/:id" element={<PlaceholderPage name="Migration Details" />} />
+        <Route path="/backups" element={<BackupsPage />} />
+        <Route path="/backups/:id" element={<BackupDetailPage />} />
+        <Route path="/configs" element={<ConfigsPage />} />
+        <Route path="/configs/:id" element={<ConfigDetailPage />} />
+        <Route path="/migrations" element={<MigrationsPage />} />
+        <Route path="/migrations/new" element={<MigrationNewPage />} />
+        <Route path="/migrations/:id" element={<MigrationDetailPage />} />
         <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/tasks" element={<PlaceholderPage name="Tasks" />} />
-        <Route path="/tools" element={<PlaceholderPage name="Agent Tools" />} />
-        <Route path="/tools/bulk-command" element={<PlaceholderPage name="Bulk Command" />} />
+        <Route path="/tasks" element={<TasksPage />} />
+        <Route path="/tools" element={<ToolsPage />} />
+        <Route path="/tools/bulk-command" element={<BulkCommandPage />} />
         <Route path="/users" element={<UsersPage />} />
-        <Route path="/optimizer" element={<PlaceholderPage name="Optimizer" />} />
-        <Route path="/tags" element={<PlaceholderPage name="Tags" />} />
-        <Route path="/storage" element={<PlaceholderPage name="Storage" />} />
-        <Route path="/history" element={<PlaceholderPage name="History" />} />
+        <Route path="/optimizer" element={<OptimizerPage />} />
+        <Route path="/tags" element={<TagsPage />} />
+        <Route path="/storage" element={<StoragePage />} />
+        <Route path="/history" element={<HistoryPage />} />
         <Route path="/audit" element={<AuditPage />} />
-        <Route path="/library" element={<PlaceholderPage name="Library" />} />
-        <Route path="/organs" element={<PlaceholderPage name="Organs (Agent Health)" />} />
-        <Route path="/console" element={<PlaceholderPage name="Console Overview" />} />
-        <Route path="/disaster-recovery" element={<PlaceholderPage name="Disaster Recovery" />} />
-        <Route path="/jobs" element={<PlaceholderPage name="Jobs" />} />
+        <Route path="/library" element={<LibraryPage />} />
+        <Route path="/organs" element={<OrgansPage />} />
+        <Route path="/console" element={<ConsolePage />} />
+        <Route path="/disaster-recovery" element={<DisasterRecoveryPage />} />
+        <Route path="/jobs" element={<Navigate to="/tasks" replace />} />
       </Route>
 
       {/* Catch-all */}
