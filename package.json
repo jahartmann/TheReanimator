@@ -5,7 +5,7 @@
   "scripts": {
     "migrate": "node scripts/migrate.js",
     "dev": "npm run migrate && node server.js",
-    "build": "npm run migrate && next build",
+    "build": "npm run migrate && NODE_OPTIONS='--max-old-space-size=1536' next build",
     "start": "npm run migrate && node server.js",
     "guardian": "npx tsx scripts/guardian.ts",
     "lint": "eslint"
