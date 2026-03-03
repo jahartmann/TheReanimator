@@ -2,7 +2,7 @@ console.log('[System] Instrumentation file loaded');
 
 export async function register() {
     console.log('[System] Registering instrumentation hook...');
-    if (process.env.NEXT_RUNTIME === 'nodejs' && process.env.NEXT_PHASE !== 'phase-production-build') {
+    if (process.env.NEXT_RUNTIME === 'nodejs' && process.env.REANIMATOR_SERVER === '1') {
         const { initScheduler } = await import('@/lib/scheduler');
         initScheduler();
 

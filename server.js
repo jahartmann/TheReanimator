@@ -15,6 +15,10 @@ const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || '0.0.0.0';
 const port = parseInt(process.env.PORT || '3000', 10);
 
+// Signal to instrumentation.ts that we are running as a live server, not a build.
+// This env var is inherited by all Next.js worker processes spawned from here.
+process.env.REANIMATOR_SERVER = '1';
+
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
