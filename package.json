@@ -7,7 +7,7 @@
     "migrate": "node scripts/migrate.js",
     "dev": "npm run migrate && concurrently \"vite\" \"tsx watch src/server.ts\"",
     "build": "npm run migrate && vite build",
-    "start": "npm run migrate && node --import tsx/esm src/server.ts",
+    "start": "npm run migrate && NODE_ENV=production node --import tsx/esm src/server.ts",
     "guardian": "npx tsx scripts/guardian.ts",
     "lint": "eslint"
   },
