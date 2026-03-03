@@ -22,7 +22,7 @@ class SSHConnectionPool {
     private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
     constructor() {
-        this.startCleanup();
+        // Cleanup timer starts lazily on first acquire() — not at import time
     }
 
     private startCleanup() {
@@ -40,6 +40,7 @@ class SSHConnectionPool {
         ssh_key?: string;
         url?: string;
     }): Promise<SSHClient> {
+        this.startCleanup(); // Start timer on first actual use, not at import time
         // Build a temporary client just to get the pool key
         const tempClient = createSSHClient(server);
         const key = tempClient.getPoolKey();
