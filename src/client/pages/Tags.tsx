@@ -41,20 +41,21 @@ export default function TagsPage() {
   const { data: tags, loading, error, refetch } = useApi<TagItem[]>('/api/tags');
   const { mutate } = useApiMutation();
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState(PRESET_COLORS[0]);
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  async function handleDelete(id: number, name: string) {
-    if (!confirm(`Delete tag "${name}"?`)) return;
+  async function handleDelete(id: number) {
     setDeletingId(id);
+    setPendingDelete(null);
     try {
       await mutate(`/api/tags/${id}`, undefined, 'DELETE');
       refetch();
-    } catch (e: any) {
-      alert(`Failed to delete: ${e.message}`);
+    } catch {
+      // ignore
     } finally {
       setDeletingId(null);
     }
@@ -199,36 +200,6 @@ export default function TagsPage() {
           </Card>
         )}
 
-        {/* Tags grid */}
-        {tags && tags.length > 0 && (
-          <Card className="border-muted/60">
-            <CardContent className="p-4">
-              <div className="flex flex-wrap gap-3">
-                {tags.map((tag) => (
-                  <div
-                    key={tag.id}
-                    className="flex items-center gap-2 rounded-full border px-3 py-1.5 bg-background hover:bg-muted/30 transition-colors group"
-                    style={{ borderColor: `#${tag.color}33` }}
-                  >
-                    <div
-                      className="w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: `#${tag.color}` }}
-                    />
-                    <span className="text-sm font-medium">{tag.name}</span>
-                    <button
-                      onClick={() => handleDelete(tag.id, tag.name)}
-                      disabled={deletingId === tag.id}
-                      className="ml-1 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
         {/* Tags table */}
         {tags && tags.length > 0 && (
           <Card className="border-muted/60">
@@ -250,15 +221,40 @@ export default function TagsPage() {
                       <span className="text-sm font-medium">{tag.name}</span>
                       <code className="text-[10px] text-muted-foreground">#{tag.color}</code>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                      disabled={deletingId === tag.id}
-                      onClick={() => handleDelete(tag.id, tag.name)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      {pendingDelete === tag.id ? (
+                        <>
+                          <span className="text-xs text-muted-foreground">Confirm delete?</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => setPendingDelete(null)}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            className="h-7 text-xs"
+                            disabled={deletingId === tag.id}
+                            onClick={() => handleDelete(tag.id)}
+                          >
+                            Delete
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                          disabled={deletingId === tag.id}
+                          onClick={() => setPendingDelete(tag.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

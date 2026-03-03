@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { useApi, useApiMutation } from '../hooks/useApi';
+import { toast } from 'sonner';
 import {
   Clock, Play, Trash2, RefreshCw, Plus, ToggleLeft, ToggleRight, ChevronDown,
 } from 'lucide-react';
@@ -61,7 +62,7 @@ const CRON_PRESETS = [
 function formatDate(dateString: string | null): string {
   if (!dateString) return 'Never';
   try {
-    return new Intl.DateTimeFormat('de', {
+    return new Intl.DateTimeFormat(undefined, {
       day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
     }).format(new Date(dateString));
   } catch {
@@ -208,6 +209,7 @@ export default function TasksPage() {
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [runningId, setRunningId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   async function handleToggle(job: Job) {
     setTogglingId(job.id);
@@ -215,7 +217,7 @@ export default function TasksPage() {
       await mutate(`/api/jobs/${job.id}`, { enabled: !job.enabled }, 'PUT');
       refetch();
     } catch (e: any) {
-      alert(`Failed: ${e.message}`);
+      toast.error(`Failed: ${e.message}`);
     } finally {
       setTogglingId(null);
     }
@@ -225,21 +227,23 @@ export default function TasksPage() {
     setRunningId(id);
     try {
       await mutate(`/api/jobs/${id}/run`);
-      setTimeout(() => { refetch(); setRunningId(null); }, 1500);
+      toast.success('Job triggered');
+      setTimeout(() => { refetch(); setRunningId(null); }, 2000);
     } catch (e: any) {
-      alert(`Failed: ${e.message}`);
+      toast.error(`Failed: ${e.message}`);
       setRunningId(null);
     }
   }
 
-  async function handleDelete(id: number, name: string) {
-    if (!confirm(`Delete job "${name}"?`)) return;
+  async function handleDelete(id: number) {
+    setConfirmDeleteId(null);
     setDeletingId(id);
     try {
       await mutate(`/api/jobs/${id}`, undefined, 'DELETE');
+      toast.success('Job deleted');
       refetch();
     } catch (e: any) {
-      alert(`Failed: ${e.message}`);
+      toast.error(`Failed: ${e.message}`);
     } finally {
       setDeletingId(null);
     }
@@ -342,36 +346,46 @@ export default function TasksPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        title={job.enabled ? 'Disable' : 'Enable'}
-                        disabled={togglingId === job.id}
-                        onClick={() => handleToggle(job)}
-                      >
-                        {job.enabled
-                          ? <ToggleRight className="h-4 w-4 text-green-500" />
-                          : <ToggleLeft className="h-4 w-4 text-muted-foreground" />}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={runningId === job.id}
-                        onClick={() => handleRun(job.id)}
-                      >
-                        <Play className={`h-3.5 w-3.5 mr-1 ${runningId === job.id ? 'animate-pulse' : ''}`} />
-                        Run
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                        disabled={deletingId === job.id}
-                        onClick={() => handleDelete(job.id, job.name)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      {confirmDeleteId === job.id ? (
+                        <>
+                          <span className="text-xs text-destructive">Delete?</span>
+                          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setConfirmDeleteId(null)}>Cancel</Button>
+                          <Button variant="destructive" size="sm" className="h-7 text-xs" onClick={() => handleDelete(job.id)} disabled={deletingId === job.id}>Delete</Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            title={job.enabled ? 'Disable' : 'Enable'}
+                            disabled={togglingId === job.id}
+                            onClick={() => handleToggle(job)}
+                          >
+                            {job.enabled
+                              ? <ToggleRight className="h-4 w-4 text-green-500" />
+                              : <ToggleLeft className="h-4 w-4 text-muted-foreground" />}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={runningId === job.id}
+                            onClick={() => handleRun(job.id)}
+                          >
+                            <Play className={`h-3.5 w-3.5 mr-1 ${runningId === job.id ? 'animate-pulse' : ''}`} />
+                            Run
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                            disabled={deletingId === job.id}
+                            onClick={() => setConfirmDeleteId(job.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </CardContent>

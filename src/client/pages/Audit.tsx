@@ -46,7 +46,7 @@ function categoryColor(category: string): string {
 
 function formatDate(ts: string): string {
   try {
-    return new Intl.DateTimeFormat('de', { dateStyle: 'short', timeStyle: 'medium' }).format(new Date(ts));
+    return new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'medium' }).format(new Date(ts));
   } catch {
     return ts;
   }

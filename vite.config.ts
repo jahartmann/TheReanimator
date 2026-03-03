@@ -20,6 +20,7 @@ export default defineConfig({
       { find: 'next/link',            replacement: path.resolve(__dirname, './src/compat/link.tsx') },
       { find: 'next/cache',           replacement: path.resolve(__dirname, './src/compat/cache.ts') },
       { find: 'next/image',           replacement: path.resolve(__dirname, './src/compat/image.ts') },
+      { find: 'next/headers',         replacement: path.resolve(__dirname, './src/compat/headers.ts') },
       { find: 'next-themes',          replacement: path.resolve(__dirname, './src/compat/next-themes.ts') },
 
       // ─── @/* specific aliases (must be before the general '@' alias) ───────

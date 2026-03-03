@@ -27,7 +27,7 @@ interface HistoryEntry {
 function formatDate(d: string | null): string {
   if (!d) return '—';
   try {
-    return new Intl.DateTimeFormat('de', {
+    return new Intl.DateTimeFormat(undefined, {
       day: '2-digit', month: 'short', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
     }).format(new Date(d));

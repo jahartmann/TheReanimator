@@ -373,6 +373,7 @@ function PlansSection({ servers, onExecutionStarted }: { servers: Server[]; onEx
   const [deleteTarget, setDeleteTarget] = useState<RecoveryPlan | null>(null);
   const [executing, setExecuting] = useState<number | null>(null);
   const [execError, setExecError] = useState<string | null>(null);
+  const [confirmExec, setConfirmExec] = useState<string | null>(null);
 
   const openCreate = () => { setEditPlan(null); setModalOpen(true); };
   const openEdit = (p: RecoveryPlan) => { setEditPlan(p); setModalOpen(true); };
@@ -510,21 +511,42 @@ function PlansSection({ servers, onExecutionStarted }: { servers: Server[]; onEx
                     <FlaskConical className="h-3 w-3 mr-1" />
                     Dry Run
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 px-2 text-xs text-green-600 border-green-200 hover:bg-green-50 dark:text-green-400 dark:border-green-800 dark:hover:bg-green-900/20"
-                    disabled={executing === plan.id}
-                    onClick={() => handleExecute(plan, false)}
-                    title="Execute recovery plan"
-                  >
-                    {executing === plan.id ? (
-                      <RefreshCw className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <Play className="h-3 w-3 mr-1" />
-                    )}
-                    Execute
-                  </Button>
+                  {confirmExec === String(plan.id) ? (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => setConfirmExec(null)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="h-7 px-2 text-xs bg-green-600 hover:bg-green-700 text-white"
+                        disabled={executing === plan.id}
+                        onClick={() => { setConfirmExec(null); handleExecute(plan, false); }}
+                      >
+                        Confirm Execute
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-xs text-green-600 border-green-200 hover:bg-green-50 dark:text-green-400 dark:border-green-800 dark:hover:bg-green-900/20"
+                      disabled={executing === plan.id}
+                      onClick={() => setConfirmExec(String(plan.id))}
+                      title="Execute recovery plan"
+                    >
+                      {executing === plan.id ? (
+                        <RefreshCw className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Play className="h-3 w-3 mr-1" />
+                      )}
+                      Execute
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"
@@ -805,7 +827,7 @@ function HistorySection({ refresh }: { refresh: number }) {
   // Re-fetch when parent tells us there's a new execution
   React.useEffect(() => {
     if (refresh > 0) refetch();
-  }, [refresh]);
+  }, [refresh, refetch]);
 
   return (
     <div>

@@ -1,6 +1,35 @@
 import { z } from 'zod';
 import { createSSHClient } from '@/lib/ssh';
-import { getServerByIdOrName } from './shared';
+import { getServerByIdOrName, shellEscape } from './shared';
+
+// Paths that are never allowed for file writes
+const BLOCKED_WRITE_PATHS = [
+    '/etc/passwd', '/etc/shadow', '/etc/sudoers', '/etc/gshadow', '/etc/master.passwd',
+    '/boot/', '/usr/lib/', '/usr/bin/', '/usr/sbin/', '/sbin/', '/bin/',
+    '/lib/', '/lib64/', '/proc/', '/sys/', '/dev/',
+];
+
+// Paths that are allowed for file writes
+const ALLOWED_WRITE_PREFIXES = [
+    '/tmp/', '/home/', '/opt/', '/var/', '/root/', '/srv/', '/usr/local/',
+];
+
+function isWritePathAllowed(filePath: string): boolean {
+    const normalized = filePath.replace(/\/+/g, '/');
+    // Block system-critical paths
+    for (const blocked of BLOCKED_WRITE_PATHS) {
+        if (normalized === blocked || normalized.startsWith(blocked)) {
+            return false;
+        }
+    }
+    // Only allow known safe prefixes
+    for (const allowed of ALLOWED_WRITE_PREFIXES) {
+        if (normalized.startsWith(allowed)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 export const fileTools = {
 
@@ -18,7 +47,7 @@ export const fileTools = {
 
                 const client = createSSHClient(server);
                 await client.connect();
-                const content = await client.exec(`head -n ${maxLines} "${filePath}"`);
+                const content = await client.exec(`head -n ${maxLines} ${shellEscape(filePath)}`);
                 await client.disconnect();
 
                 return { success: true, server: server.name, filePath, content, lines: content.split('\n').length };
@@ -29,19 +58,17 @@ export const fileTools = {
     },
 
     writeFile: {
-        description: 'Write content to file on remote server. REQUIRES user confirmation.',
+        description: 'Write content to file on remote server. Only allowed in safe paths (/tmp, /home, /opt, /var, /root, /srv, /usr/local).',
         parameters: z.object({
             serverId: z.number().describe('Server ID'),
             filePath: z.string().describe('Absolute file path'),
             content: z.string().describe('File content'),
-            confirmed: z.boolean().describe('User confirmed?'),
         }),
-        execute: async ({ serverId, filePath, content, confirmed }: { serverId: number, filePath: string, content: string, confirmed: boolean }) => {
-            if (!confirmed) {
+        execute: async ({ serverId, filePath, content }: { serverId: number, filePath: string, content: string }) => {
+            if (!isWritePathAllowed(filePath)) {
                 return {
-                    success: false, requiresConfirmation: true,
-                    message: `Write to ${filePath} on server ${serverId}?`,
-                    warning: 'File operations can modify system state.'
+                    success: false,
+                    error: `Write to "${filePath}" is blocked. Only writes to /tmp/, /home/, /opt/, /var/, /root/, /srv/, /usr/local/ are allowed.`
                 };
             }
 
@@ -52,7 +79,7 @@ export const fileTools = {
                 const client = createSSHClient(server);
                 await client.connect();
                 const escapedContent = content.replace(/'/g, "'\\''");
-                await client.exec(`cat > "${filePath}" << 'EOF'\n${escapedContent}\nEOF`);
+                await client.exec(`cat > ${shellEscape(filePath)} << 'EOF'\n${escapedContent}\nEOF`);
                 await client.disconnect();
 
                 return { success: true, server: server.name, filePath, bytesWritten: content.length };
@@ -76,7 +103,7 @@ export const fileTools = {
 
                 const client = createSSHClient(server);
                 await client.connect();
-                const cmd = showHidden ? `ls -lah "${dirPath}"` : `ls -lh "${dirPath}"`;
+                const cmd = showHidden ? `ls -lah ${shellEscape(dirPath)}` : `ls -lh ${shellEscape(dirPath)}`;
                 const output = await client.exec(cmd);
                 await client.disconnect();
 
@@ -102,7 +129,7 @@ export const fileTools = {
 
                 const client = createSSHClient(server);
                 await client.connect();
-                const output = await client.exec(`find "${searchPath}" -maxdepth ${maxDepth} -name "${pattern}" -type f 2>/dev/null | head -50`);
+                const output = await client.exec(`find ${shellEscape(searchPath)} -maxdepth ${maxDepth} -name ${shellEscape(pattern)} -type f 2>/dev/null | head -50`);
                 await client.disconnect();
 
                 const files = output.trim().split('\n').filter(f => f);
@@ -129,7 +156,7 @@ export const fileTools = {
                 const client = createSSHClient(server);
                 await client.connect();
                 const fileGlob = filePattern || '*';
-                const output = await client.exec(`grep -r "${pattern}" "${searchPath}/${fileGlob}" 2>/dev/null | head -20`);
+                const output = await client.exec(`grep -r ${shellEscape(pattern)} ${shellEscape(searchPath + '/' + fileGlob)} 2>/dev/null | head -20`);
                 await client.disconnect();
 
                 return { success: true, server: server.name, searchPath, pattern, matches: output || 'No matches found.' };
@@ -165,7 +192,7 @@ export const fileTools = {
                 await client.connect();
 
                 if (action === 'list') {
-                    const output = await client.exec(`ls -la "${normalized}" 2>/dev/null`);
+                    const output = await client.exec(`ls -la ${shellEscape(normalized)} 2>/dev/null`);
                     await client.disconnect();
 
                     const lines = output.trim().split('\n').filter(l => l && !l.startsWith('total'));
@@ -184,7 +211,7 @@ export const fileTools = {
                 }
 
                 if (action === 'mkdir') {
-                    await client.exec(`mkdir -p "${normalized}"`);
+                    await client.exec(`mkdir -p ${shellEscape(normalized)}`);
                     await client.disconnect();
                     return { success: true, server: server.name, message: `Directory created: ${normalized}` };
                 }
@@ -198,7 +225,7 @@ export const fileTools = {
                             warning: 'This will permanently delete the file/directory.',
                         };
                     }
-                    await client.exec(`rm -rf "${normalized}"`);
+                    await client.exec(`rm -rf ${shellEscape(normalized)}`);
                     await client.disconnect();
                     return { success: true, server: server.name, message: `Deleted: ${normalized}` };
                 }

@@ -5,8 +5,9 @@
  */
 
 import React, { Suspense, useState, useEffect, createContext, useContext } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { apiCall } from './hooks/useApi';
+import { Toaster } from '@/components/ui/sonner';
 
 // ─── Auth context ─────────────────────────────────────────────────────────────
 
@@ -164,6 +165,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
 
 function RequireAuth() {
   const { user, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -178,8 +180,8 @@ function RequireAuth() {
   }
 
   // Force password change after first login
-  if (user.force_password_change && !window.location.pathname.includes('/login')) {
-    return <Navigate to="/login" replace />;
+  if (user.force_password_change && !location.pathname.includes('/login')) {
+    return <Navigate to="/login?force_change=true" replace />;
   }
 
   return <AppLayout />;
@@ -278,6 +280,7 @@ export default function App() {
       <AuthProvider>
         <AppRoutes />
       </AuthProvider>
+      <Toaster richColors position="top-right" />
     </BrowserRouter>
   );
 }

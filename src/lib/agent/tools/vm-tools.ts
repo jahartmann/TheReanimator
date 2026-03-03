@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import db from '@/lib/db';
 import { createSSHClient } from '@/lib/ssh';
-import { getServerByIdOrName, findVM, getVMStatus } from './shared';
+import { getServerByIdOrName, findVM, getVMStatus, shellEscape } from './shared';
 import { getVMs } from '@/lib/actions/vm';
 
 export const vmTools = {
@@ -192,13 +192,13 @@ export const vmTools = {
                     }
                 }
 
-                let cmd = `qm create ${vmid} --name "${name}" --cores ${cores} --memory ${memory} --ostype ${ostype}`;
-                cmd += ` --net0 virtio,bridge=${net}`;
+                let cmd = `qm create ${vmid} --name ${shellEscape(name)} --cores ${cores} --memory ${memory} --ostype ${shellEscape(ostype)}`;
+                cmd += ` --net0 virtio,bridge=${shellEscape(net)}`;
                 cmd += ` --scsihw virtio-scsi-single`;
-                cmd += ` --scsi0 ${storage}:${disk}`;
+                cmd += ` --scsi0 ${shellEscape(storage + ':' + disk)}`;
 
                 if (iso) {
-                    cmd += ` --cdrom ${iso}`;
+                    cmd += ` --cdrom ${shellEscape(iso)}`;
                 }
 
                 const createOutput = await client.exec(cmd, 60000);

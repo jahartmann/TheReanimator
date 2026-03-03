@@ -17,9 +17,15 @@ const BLACKLISTED_PATTERNS = [
     /process\.env/,
     // Dangerous globals
     /eval\s*\(/,
+    /\(0,\s*eval\)/,          // indirect eval: (0, eval)(...)
     /Function\s*\(/,
     /global\./,
     /globalThis\./,
+    /globalThis\[/,           // bracket notation access: globalThis["eval"]
+    // Dynamic imports
+    /import\s*\(/,            // dynamic import: await import('fs')
+    // Template literal bypasses
+    /`[^`]*\$\{[^}]*\b(eval|Function|require|import)\b[^}]*\}[^`]*`/,
     // Network without explicit approval
     /require\s*\(\s*['"]net['"]\s*\)/,
     /require\s*\(\s*['"]dgram['"]\s*\)/,

@@ -20,6 +20,7 @@ function initDb(): Database.Database {
 
   _db.pragma('journal_mode = WAL');
   _db.pragma('busy_timeout = 3000');
+  _db.pragma('foreign_keys = ON');
 
   // Migrations
   try {

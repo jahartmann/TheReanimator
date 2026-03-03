@@ -3,7 +3,10 @@
  */
 
 // Map of "server-{id}-{alertType}" -> last notification timestamp
-const notificationCooldowns = new Map<string, number>();
+// Survive HMR reloads by persisting on globalThis
+const globalForCooldown = globalThis as unknown as { notificationCooldowns?: Map<string, number> };
+const notificationCooldowns = globalForCooldown.notificationCooldowns ?? new Map<string, number>();
+globalForCooldown.notificationCooldowns = notificationCooldowns;
 const COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
 
 /**

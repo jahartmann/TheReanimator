@@ -233,21 +233,36 @@ export async function performFullBackup(serverId: number, server: Server) {
                 const cmd = `tar -czf - ${validPaths.join(' ')} 2>/dev/null`;
 
                 await ssh.streamCommand(cmd, writeStream);
-                writeStream.end();
+                await new Promise<void>((resolve, reject) => {
+                    writeStream.on('finish', resolve);
+                    writeStream.on('error', reject);
+                    writeStream.end();
+                });
 
                 // 5. Extract locally for file browser access
                 console.log('[BackupLogic] Extracting archive locally for File Browser (excluding symlinks)...');
-                await tar.x({
-                    file: tarFile,
-                    cwd: destPath,
-                    preservePaths: true,
-                    filter: (path, entry) => {
-                        const type = (entry as any).type;
-                        return type !== 'SymbolicLink' && type !== 'Link';
-                    }
-                });
+                try {
+                    await tar.x({
+                        file: tarFile,
+                        cwd: destPath,
+                        preservePaths: true,
+                        filter: (path, entry) => {
+                            const type = (entry as any).type;
+                            return type !== 'SymbolicLink' && type !== 'Link';
+                        }
+                    });
+                } catch (tarErr) {
+                    console.error('[BackupLogic] TAR extraction failed:', tarErr);
+                    // Mark backup as incomplete in the DB later (after insert)
+                    // Clean up the tar file
+                    try { fs.unlinkSync(tarFile); } catch { }
+                    // Store a flag so we can mark as incomplete after DB insert
+                    (server as any)._tarFailed = true;
+                }
 
-                fs.unlinkSync(tarFile);
+                if (fs.existsSync(tarFile)) {
+                    fs.unlinkSync(tarFile);
+                }
             }
 
             // 6. Metadata
@@ -262,7 +277,13 @@ export async function performFullBackup(serverId: number, server: Server) {
             const result = db.prepare(`
                 INSERT INTO config_backups (server_id, backup_path, file_count, total_size, status)
                 VALUES (?, ?, ?, ?, ?)
-            `).run(serverId, destPath, totalFiles, totalSize, 'complete');
+            `).run(serverId, destPath, totalFiles, totalSize, (server as any)._tarFailed ? 'incomplete' : 'complete');
+
+            // If tar extraction failed, mark as incomplete with a note
+            if ((server as any)._tarFailed) {
+                db.prepare('UPDATE config_backups SET notes = ? WHERE id = ?')
+                    .run('TAR extraction failed — raw backup data may be missing', result.lastInsertRowid);
+            }
 
             const tSuccess = await getTranslations({ locale: await getServerLocale(), namespace: 'backupLogic' });
             const successMsg = tSuccess('backupSuccess', { files: totalFiles, size: formatBytes(totalSize) });

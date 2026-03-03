@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { useApi, apiCall } from '../hooks/useApi';
+import { toast } from 'sonner';
 import {
   ShieldCheck, ShieldOff, ScanLine, Plus, Trash2, RefreshCw, Info,
   AlertCircle, CheckCircle2, Server, Lock,
@@ -96,8 +97,11 @@ export default function ServerTrustPage() {
         method: 'PUT',
         body: JSON.stringify({ status: 'revoked' }),
       });
+      toast.success('Trust revoked');
       refetchEntries();
-    } catch { /* ignore */ } finally {
+    } catch (err: any) {
+      toast.error(err.message || 'Operation failed');
+    } finally {
       setBusyId(null);
     }
   }
@@ -109,19 +113,24 @@ export default function ServerTrustPage() {
         method: 'PUT',
         body: JSON.stringify({ status: 'trusted' }),
       });
+      toast.success('Trust restored');
       refetchEntries();
-    } catch { /* ignore */ } finally {
+    } catch (err: any) {
+      toast.error(err.message || 'Operation failed');
+    } finally {
       setBusyId(null);
     }
   }
 
   async function handleDelete(id: number, serverName: string) {
-    if (!confirm(`Remove trust entry for "${serverName}"?`)) return;
     setBusyId(id);
     try {
       await apiCall(`/api/server-trust/${id}`, { method: 'DELETE' });
+      toast.success('Trust entry removed');
       refetchEntries();
-    } catch { /* ignore */ } finally {
+    } catch (err: any) {
+      toast.error(err.message || 'Operation failed');
+    } finally {
       setBusyId(null);
     }
   }
@@ -148,13 +157,16 @@ export default function ServerTrustPage() {
         method: 'PUT',
         body: JSON.stringify({ fingerprint: newFingerprint }),
       });
+      toast.success('Fingerprint updated');
       setScanResults((prev) => {
         const next = { ...prev };
         delete next[entryId];
         return next;
       });
       refetchEntries();
-    } catch { /* ignore */ } finally {
+    } catch (err: any) {
+      toast.error(err.message || 'Operation failed');
+    } finally {
       setBusyId(null);
     }
   }

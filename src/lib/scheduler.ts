@@ -130,16 +130,14 @@ function checkOneTimeJobs() {
             if (!isNaN(scheduledTime.getTime()) && scheduledTime <= now) {
                 console.log(`[Scheduler] One-Time Job Due: ${job.name} (Scheduled: ${job.schedule})`);
 
+                // Immediately disable to prevent duplicate execution if runJob takes >60s
+                db.prepare('UPDATE jobs SET enabled = 0 WHERE id = ?').run(job.id);
+
                 // Execute Job
                 runJob(job).then(() => {
-                    // Disable after run (don't delete, to keep history linked)
-                    console.log(`[Scheduler] Disabling completed one-time job: ${job.name}`);
-                    db.prepare('UPDATE jobs SET enabled = 0 WHERE id = ?').run(job.id);
+                    console.log(`[Scheduler] Completed one-time job: ${job.name}`);
                 }).catch(e => {
                     console.error(`[Scheduler] One-Time Job Failed: ${job.name}`, e);
-                    // Disable even if failed? Or retry?
-                    // For now, disable to prevent infinite retry loop on error
-                    db.prepare('UPDATE jobs SET enabled = 0 WHERE id = ?').run(job.id);
                 });
             }
         });
@@ -231,14 +229,14 @@ async function refreshNodeStats() {
 
     const servers = db.prepare('SELECT id, name FROM servers').all() as { id: number, name: string }[];
 
-    for (const server of servers) {
+    await Promise.allSettled(servers.map(async (server) => {
         // Get previous status
         const prevStats = db.prepare('SELECT status FROM node_stats WHERE server_id = ?').get(server.id) as { status?: string } | undefined;
         const prevStatus = prevStats?.status || null;
 
         try {
             const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(server.id) as any;
-            if (!srv || srv.type !== 'pve') continue;
+            if (!srv || srv.type !== 'pve') return;
 
             const { ProxmoxClient } = await import('@/lib/proxmox');
             const client = new ProxmoxClient({
@@ -379,7 +377,7 @@ async function refreshNodeStats() {
                 }
             }
         }
-    }
+    }));
 
     console.log('[Node Stats] Refresh complete.');
 }
@@ -414,7 +412,7 @@ async function sendDailyAlertSummary() {
     try {
         const alerts = db.prepare(`
             SELECT summary, severity, source, created_at
-            FROM journal
+            FROM daily_journal
             WHERE event_type = 'alert'
               AND created_at >= datetime('now', '-24 hours')
             ORDER BY created_at DESC

@@ -34,7 +34,7 @@ interface DashboardStats {
 
 function formatDate(dateString: string): string {
   try {
-    return new Intl.DateTimeFormat('de', {
+    return new Intl.DateTimeFormat(undefined, {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
     }).format(new Date(dateString));
   } catch {
@@ -44,9 +44,7 @@ function formatDate(dateString: string): string {
 
 // ─── Monitoring panel placeholder ─────────────────────────────────────────────
 
-function MonitoringPanelInline() {
-  const { data, loading, error } = useApi<{ stats: any[]; vms: any[] }>('/api/monitoring');
-
+function MonitoringPanelInline({ data, loading, error }: { data: { stats: any[]; vms: any[] } | null; loading: boolean; error: string | null }) {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-32">
@@ -95,9 +93,7 @@ function MonitoringPanelInline() {
 
 // ─── Storage panel placeholder ────────────────────────────────────────────────
 
-function StoragePanelInline() {
-  const { data, loading } = useApi<{ stats: any[] }>('/api/monitoring');
-
+function StoragePanelInline({ data, loading }: { data: { stats: any[] } | null; loading: boolean }) {
   if (loading) return <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto mt-8" />;
 
   const stats = data?.stats || [];
@@ -154,6 +150,7 @@ function GlobalScanButton() {
 export default function DashboardPage() {
   const { t } = useTranslation('dashboard');
   const { data, loading, error, refetch } = useApi<DashboardStats>('/api/dashboard');
+  const { data: monitoringData, loading: monitoringLoading, error: monitoringError } = useApi<{ stats: any[]; vms: any[] }>('/api/monitoring');
 
   const servers = data?.servers ?? 0;
   const jobs = data?.jobs ?? 0;
@@ -244,11 +241,11 @@ export default function DashboardPage() {
 
               <TabsContent value="health" className="mt-0">
                 <Card className="border-none shadow-none bg-transparent">
-                  <MonitoringPanelInline />
+                  <MonitoringPanelInline data={monitoringData} loading={monitoringLoading} error={monitoringError} />
                 </Card>
               </TabsContent>
               <TabsContent value="storage" className="mt-0">
-                <StoragePanelInline />
+                <StoragePanelInline data={monitoringData} loading={monitoringLoading} />
               </TabsContent>
             </Tabs>
           </div>

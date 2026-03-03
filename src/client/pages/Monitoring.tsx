@@ -4,7 +4,8 @@
  * recharts trend chart, network traffic, and VM counts.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { usePolling } from '../hooks/useApi';
 import {
   Activity, Cpu, HardDrive, MemoryStick, Server, Network,
@@ -92,11 +93,12 @@ interface TrendPoint {
 function TrendChart({
   history,
   serverNames,
+  metric,
 }: {
   history: TrendPoint[];
   serverNames: string[];
+  metric: 'cpu' | 'ram';
 }) {
-  // Generate consistent colors for lines
   const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#3b82f6', '#ec4899', '#14b8a6'];
 
   return (
@@ -114,12 +116,13 @@ function TrendChart({
           }}
           formatter={(v: number) => [`${v.toFixed(1)}%`]}
         />
-        <Legend wrapperStyle={{ fontSize: 11 }} />
+        <Legend wrapperStyle={{ fontSize: 11 }} formatter={(value) => value.replace(`_${metric}`, '')} />
         {serverNames.map((name, i) => (
           <Line
             key={name}
             type="monotone"
-            dataKey={name}
+            dataKey={`${name}_${metric}`}
+            name={`${name}_${metric}`}
             stroke={COLORS[i % COLORS.length]}
             strokeWidth={2}
             dot={false}
@@ -136,7 +139,7 @@ function TrendChart({
 function NodeCard({ stat, vmsByServer }: { stat: NodeStat; vmsByServer: Record<number, any[]> }) {
   const vms = vmsByServer[stat.server_id] || [];
   const runningVms = vms.filter((v) => v.status === 'running').length;
-  const isOnline = stat.status === 'online' || stat.status === 'online';
+  const isOnline = stat.status === 'online';
 
   return (
     <Card className={`transition-colors ${!isOnline ? 'border-red-500/30 bg-red-500/5' : 'border-muted/60'}`}>
@@ -144,7 +147,9 @@ function NodeCard({ stat, vmsByServer }: { stat: NodeStat; vmsByServer: Record<n
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className={`h-2 w-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-            <CardTitle className="text-sm">{stat.server_name}</CardTitle>
+            <Link to={`/servers/${stat.server_id}`} className="hover:text-primary transition-colors">
+              <CardTitle className="text-sm">{stat.server_name}</CardTitle>
+            </Link>
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="text-[10px]">{stat.server_type?.toUpperCase()}</Badge>
@@ -236,24 +241,9 @@ function NodeCard({ stat, vmsByServer }: { stat: NodeStat; vmsByServer: Record<n
   );
 }
 
-// ─── History buffer ───────────────────────────────────────────────────────────
+// ─── History buffer constant ──────────────────────────────────────────────────
 
 const MAX_HISTORY = 20;
-const history: TrendPoint[] = [];
-
-function appendHistory(stats: NodeStat[]) {
-  if (stats.length === 0) return;
-  const point: TrendPoint = {
-    time: new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-  };
-  for (const s of stats) {
-    if (s.status === 'online') {
-      point[s.server_name] = parseFloat((s.cpu ?? 0).toFixed(1));
-    }
-  }
-  history.push(point);
-  if (history.length > MAX_HISTORY) history.shift();
-}
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
@@ -262,26 +252,26 @@ type ChartMetric = 'cpu' | 'ram';
 export default function MonitoringPage() {
   const { data, loading, error, refetch } = usePolling<MonitoringData>('/api/monitoring', 15000);
   const [chartMetric, setChartMetric] = useState<ChartMetric>('cpu');
+  const historyRef = useRef<TrendPoint[]>([]);
+  const [historyVersion, setHistoryVersion] = useState(0);
 
   const stats = data?.stats ?? [];
   const vms = data?.vms ?? [];
 
-  // Append to history whenever we get new data
-  useMemo(() => {
-    if (stats.length > 0) {
-      const point: TrendPoint = {
-        time: new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      };
-      for (const s of stats) {
-        if (s.status === 'online') {
-          point[s.server_name] = chartMetric === 'cpu'
-            ? parseFloat((s.cpu ?? 0).toFixed(1))
-            : parseFloat((s.ram ?? 0).toFixed(1));
-        }
+  useEffect(() => {
+    if (stats.length === 0) return;
+    const point: TrendPoint = {
+      time: new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    };
+    for (const s of stats) {
+      if (s.status === 'online') {
+        point[`${s.server_name}_cpu`] = parseFloat((s.cpu ?? 0).toFixed(1));
+        point[`${s.server_name}_ram`] = parseFloat((s.ram ?? 0).toFixed(1));
       }
-      history.push(point);
-      if (history.length > MAX_HISTORY) history.shift();
     }
+    historyRef.current.push(point);
+    if (historyRef.current.length > MAX_HISTORY) historyRef.current.shift();
+    setHistoryVersion((v) => v + 1);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
@@ -336,8 +326,8 @@ export default function MonitoringPage() {
       {stats.length > 0 && (
         <div className={`flex items-center gap-3 p-3 rounded-lg border text-sm ${
           allOk
-            ? 'bg-green-50 border-green-200 text-green-800'
-            : 'bg-amber-50 border-amber-200 text-amber-800'
+            ? 'bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800 text-green-800 dark:text-green-300'
+            : 'bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300'
         }`}>
           {allOk
             ? <CheckCircle2 className="h-4 w-4 shrink-0" />
@@ -410,13 +400,13 @@ export default function MonitoringPage() {
       </div>
 
       {/* Trend chart */}
-      {history.length >= 2 && serverNames.length > 0 && (
+      {historyVersion > 0 && historyRef.current.length >= 2 && serverNames.length > 0 && (
         <Card className="border-muted/60">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                <CardTitle className="text-sm font-medium">Trend (last {history.length} polls)</CardTitle>
+                <CardTitle className="text-sm font-medium">Trend (last {historyRef.current.length} polls)</CardTitle>
               </div>
               <div className="flex gap-1">
                 <Button
@@ -439,7 +429,7 @@ export default function MonitoringPage() {
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <TrendChart history={history} serverNames={serverNames} />
+            <TrendChart history={[...historyRef.current]} serverNames={serverNames} metric={chartMetric} />
           </CardContent>
         </Card>
       )}

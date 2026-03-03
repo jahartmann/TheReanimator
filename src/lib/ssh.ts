@@ -144,7 +144,7 @@ export class SSHClient {
     // Reconnect helper
     async reconnect(): Promise<void> {
         this._alive = false;
-        try { this.client.end(); } catch { }
+        try { this.client.destroy(); } catch { }
         this.client = new Client();
         this._trackLifecycle();
         await this.connect();

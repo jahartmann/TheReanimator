@@ -11,6 +11,7 @@ import { Server, Plus, Trash2, ExternalLink, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
 
 interface ServerItem {
   id: number;
@@ -29,6 +30,7 @@ export default function ServersPage() {
   const { data: servers, loading, error, refetch } = useApi<ServerItem[]>('/api/servers');
   const { mutate, loading: deleting } = useApiMutation();
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   const grouped = React.useMemo(() => {
     if (!servers) return {};
@@ -41,14 +43,15 @@ export default function ServersPage() {
     return groups;
   }, [servers]);
 
-  async function handleDelete(id: number, name: string) {
-    if (!confirm(`Delete server "${name}"? This cannot be undone.`)) return;
+  async function handleDelete(id: number) {
+    setConfirmDeleteId(null);
     setDeletingId(id);
     try {
       await mutate(`/api/servers/${id}`, undefined, 'DELETE');
+      toast.success('Server removed');
       refetch();
     } catch (e: any) {
-      alert(`Failed to delete: ${e.message}`);
+      toast.error(`Failed to delete: ${e.message}`);
     } finally {
       setDeletingId(null);
     }
@@ -119,7 +122,12 @@ export default function ServersPage() {
                           <Server className="h-4 w-4 text-primary" />
                         </div>
                         <div>
-                          <CardTitle className="text-sm">{server.name}</CardTitle>
+                          <div className="flex items-center gap-1.5">
+                            <CardTitle className="text-sm">{server.name}</CardTitle>
+                            {server.status && (
+                              <span className={`inline-block w-2 h-2 rounded-full ${server.status === 'online' ? 'bg-green-500' : 'bg-red-500'}`} />
+                            )}
+                          </div>
                           <p className="text-xs text-muted-foreground mt-0.5">{server.ssh_host}:{server.ssh_port}</p>
                         </div>
                       </div>
@@ -130,23 +138,44 @@ export default function ServersPage() {
                   </CardHeader>
                   <CardContent className="pt-0">
                     <p className="text-xs text-muted-foreground truncate mb-3">{server.url}</p>
-                    <div className="flex items-center gap-2">
-                      <Link to={`/servers/${server.id}`} className="flex-1">
-                        <Button variant="outline" size="sm" className="w-full">
-                          <ExternalLink className="mr-2 h-3.5 w-3.5" />
-                          Details
+                    {confirmDeleteId === server.id ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-destructive flex-1">Delete &ldquo;{server.name}&rdquo;?</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setConfirmDeleteId(null)}
+                        >
+                          Cancel
                         </Button>
-                      </Link>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => handleDelete(server.id, server.name)}
-                        disabled={deletingId === server.id}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleDelete(server.id)}
+                          disabled={deletingId === server.id}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <Link to={`/servers/${server.id}`} className="flex-1">
+                          <Button variant="outline" size="sm" className="w-full">
+                            <ExternalLink className="mr-2 h-3.5 w-3.5" />
+                            Details
+                          </Button>
+                        </Link>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => setConfirmDeleteId(server.id)}
+                          disabled={deletingId === server.id}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               ))}

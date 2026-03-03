@@ -77,6 +77,8 @@ export function useApi<T>(url: string, options?: RequestInit): ApiState<T> {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const fetchCountRef = useRef(0);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   const fetchData = useCallback(async () => {
     if (!url) {
@@ -89,7 +91,7 @@ export function useApi<T>(url: string, options?: RequestInit): ApiState<T> {
     setError(null);
 
     try {
-      const result = await apiCall<T>(url, options || {});
+      const result = await apiCall<T>(url, optionsRef.current || {});
       // Only update state if this is still the latest fetch
       if (fetchId === fetchCountRef.current) {
         setData(result);
@@ -156,38 +158,43 @@ export function useApiMutation<TData = any, TBody = any>() {
 
 // ─── usePolling hook ─────────────────────────────────────────────────────────
 // Polls an endpoint at a given interval. Useful for live stats.
+// When `enabled` is false, fetches once on mount/url-change but skips the interval.
 
-export function usePolling<T>(url: string, intervalMs: number = 5000): ApiState<T> {
+export function usePolling<T>(url: string, intervalMs: number = 5000, enabled: boolean = true): ApiState<T> {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const activeRef = useRef(true);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (signal?: AbortSignal) => {
     try {
       const result = await apiCall<T>(url);
-      if (activeRef.current) {
+      if (!signal?.aborted) {
         setData(result);
         setLoading(false);
         setError(null);
       }
     } catch (err: any) {
-      if (activeRef.current && err.message !== 'Unauthorized') {
+      if (!signal?.aborted && err.message !== 'Unauthorized') {
         setError(err.message);
         setLoading(false);
       }
     }
   }, [url]);
 
+  const refetch = useCallback(() => { fetchData(); }, [fetchData]);
+
   useEffect(() => {
-    activeRef.current = true;
-    fetchData();
-    const timer = setInterval(fetchData, intervalMs);
+    const controller = new AbortController();
+    fetchData(controller.signal);
+    if (!enabled || intervalMs <= 0) {
+      return () => { controller.abort(); };
+    }
+    const timer = setInterval(() => fetchData(controller.signal), intervalMs);
     return () => {
-      activeRef.current = false;
+      controller.abort();
       clearInterval(timer);
     };
-  }, [fetchData, intervalMs]);
+  }, [fetchData, intervalMs, enabled]);
 
-  return { data, loading, error, refetch: fetchData };
+  return { data, loading, error, refetch };
 }

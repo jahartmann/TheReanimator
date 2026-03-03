@@ -274,13 +274,12 @@ export const infraTools = {
     },
 
     executeSSHCommand: {
-        description: 'Execute ANY command on a server. Requires implicit confirmation for non-read-only ops. Supports "runScript:name".',
+        description: 'Execute a command on a server. Only whitelisted safe commands run automatically; unsafe commands are rejected. Supports "runScript:name".',
         parameters: z.object({
             serverId: z.number().describe('Server ID'),
             command: z.string().describe('Command to execute OR "runScript:script_name"'),
-            confirmed: z.boolean().describe('Set to true if user requested this specific operation'),
         }),
-        execute: async ({ serverId, command, confirmed }: { serverId: number, command: string, confirmed: boolean }) => {
+        execute: async ({ serverId, command }: { serverId: number, command: string }) => {
             try {
                 const lower = command.toLowerCase();
                 const blocked = BLOCKED_COMMANDS.find(b => lower.includes(b));
@@ -310,8 +309,11 @@ export const infraTools = {
                     return { success: true, server: server.name, script: scriptName, output: output.trim() || '(no output)' };
                 }
 
-                if (!isCommandSafe(command) && !confirmed) {
-                    return { success: false, error: 'Potentially unsafe command requires confirmation. Set confirmed=true if user explicitly asked for this.' };
+                if (!isCommandSafe(command)) {
+                    return {
+                        success: false, requiresConfirmation: true, command,
+                        message: 'Command requires user confirmation. This command is not in the safe whitelist and cannot be executed automatically.'
+                    };
                 }
 
                 const server = getServerByIdOrName(serverId);
@@ -330,18 +332,39 @@ export const infraTools = {
     },
 
     runLocalCommand: {
-        description: 'Execute SAFE command on the LOCAL Reanimator host instance.',
+        description: 'Execute SAFE read-only command on the LOCAL Reanimator host. Only whitelisted commands allowed.',
         parameters: z.object({
-            command: z.string().describe('Command to run locally'),
+            command: z.string().describe('Command to run locally (only: df, free, uptime, date, hostname, uname, ps aux, systemctl status, docker ps, docker stats)'),
         }),
         execute: async ({ command }: { command: string }) => {
             try {
-                if (!isCommandSafe(command)) {
-                    return { success: false, error: `Local command denied. "${command}" is not safe/read-only.` };
+                const LOCAL_WHITELIST = [
+                    'df', 'free', 'uptime', 'date', 'hostname', 'uname',
+                    'ps aux', 'systemctl status', 'docker ps', 'docker stats',
+                ];
+
+                const trimmed = command.trim();
+
+                // Check if the command starts with a whitelisted prefix
+                const isAllowed = LOCAL_WHITELIST.some(prefix => {
+                    const lower = trimmed.toLowerCase();
+                    return lower === prefix || lower.startsWith(prefix + ' ') || lower.startsWith(prefix + '\t');
+                });
+
+                if (!isAllowed) {
+                    return {
+                        success: false,
+                        error: `Local command denied. Only these commands are allowed: ${LOCAL_WHITELIST.join(', ')}`
+                    };
                 }
 
-                const { stdout, stderr } = await execAsync(command, { timeout: 10000 });
-                return { success: true, host: 'localhost', command, output: (stdout + stderr).trim() || '(no output)' };
+                // Additional safety: reject any shell metacharacters in local commands
+                if (/[;|&$`><(){}]/.test(trimmed)) {
+                    return { success: false, error: 'Local command denied. Shell metacharacters (;|&$`><) are not allowed.' };
+                }
+
+                const { stdout, stderr } = await execAsync(trimmed, { timeout: 10000 });
+                return { success: true, host: 'localhost', command: trimmed, output: (stdout + stderr).trim() || '(no output)' };
             } catch (e: any) {
                 return { success: false, error: e.message };
             }

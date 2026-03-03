@@ -249,8 +249,8 @@ export function setupRoutes(
       const serverId = parseInt(req.params.serverId, 10);
       if (isNaN(serverId)) { res.status(400).json({ error: 'Invalid serverId' }); return; }
 
-      const { runConfigBackup } = await import('../lib/actions/backup.js');
-      runConfigBackup(serverId).catch((err: Error) => {
+      const { createConfigBackup } = await import('../lib/actions/configBackup.js');
+      createConfigBackup(serverId).catch((err: Error) => {
         console.error(`[r-configs] Background backup failed for server ${serverId}:`, err.message);
       });
 

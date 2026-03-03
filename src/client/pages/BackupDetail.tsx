@@ -2,7 +2,7 @@
  * Backup Detail page - shows full log and details for a single background task.
  */
 
-import React, { useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { usePolling } from '../hooks/useApi';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
@@ -34,7 +34,7 @@ interface BackupTask {
 function formatDate(d: string | null): string {
   if (!d) return '—';
   try {
-    return new Intl.DateTimeFormat('de', {
+    return new Intl.DateTimeFormat(undefined, {
       day: '2-digit', month: 'short', year: 'numeric',
       hour: '2-digit', minute: '2-digit', second: '2-digit',
     }).format(new Date(d));
@@ -65,11 +65,20 @@ export default function BackupDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const logRef = useRef<HTMLPreElement>(null);
+  const [isTerminal, setIsTerminal] = useState(false);
 
   const { data, loading, error, refetch } = usePolling<BackupTask>(
-    `/api/backups/${id}`,
-    3000
+    id ? `/api/backups/${id}` : '',
+    3000,
+    !isTerminal
   );
+
+  // Stop polling once a terminal state is reached
+  useEffect(() => {
+    if (data && ['completed', 'failed', 'cancelled'].includes(data.status)) {
+      setIsTerminal(true);
+    }
+  }, [data]);
 
   useEffect(() => {
     if (logRef.current) {

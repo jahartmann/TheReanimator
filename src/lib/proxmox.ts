@@ -26,6 +26,7 @@ export class ProxmoxClient {
     private config: ProxmoxConfig;
     private ticket: string | null = null;
     private csrfToken: string | null = null;
+    private ticketTime: number | null = null;
     private agent: Agent;
 
     constructor(config: ProxmoxConfig) {
@@ -56,15 +57,20 @@ export class ProxmoxClient {
     // Custom fetch that uses undici with SSL verification
     private async secureFetch(url: string, options: RequestInit = {}): Promise<Response> {
         console.log(`[Proxmox] Fetching: ${url}`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
         try {
             const response = await undiciFetch(url, {
                 ...options,
+                signal: controller.signal as any,
                 dispatcher: this.agent
             } as any);
             return response as unknown as Response;
         } catch (error) {
             console.error('[Proxmox] Fetch error:', error);
             throw error;
+        } finally {
+            clearTimeout(timeoutId);
         }
     }
 
@@ -80,6 +86,12 @@ export class ProxmoxClient {
             headers['Authorization'] = `${prefix}=${this.config.token}`;
         } else {
             if (!this.ticket) await this.authenticate();
+            // Re-authenticate if ticket is about to expire (~1h55m, before 2h expiry)
+            if (this.ticketTime && Date.now() - this.ticketTime > 7000000) {
+                this.ticket = null;
+                this.csrfToken = null;
+                await this.authenticate();
+            }
             if (this.ticket) {
                 // PVEAuthCookie vs PBSAuthCookie
                 const cookieName = this.config.type === 'pve' ? 'PVEAuthCookie' : 'PBSAuthCookie';
@@ -120,6 +132,7 @@ export class ProxmoxClient {
             const data = await res.json() as { data: { ticket: string; CSRFPreventionToken: string } };
             this.ticket = data.data.ticket;
             this.csrfToken = data.data.CSRFPreventionToken;
+            this.ticketTime = Date.now();
             console.log('[Proxmox] Authentication successful!');
         } catch (e) {
             console.error('[Proxmox] Auth Error:', e);
@@ -754,7 +767,7 @@ export class ProxmoxClient {
         // Poll for result
         const start = Date.now();
         while (Date.now() - start < timeoutMs) {
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => setTimeout(r, 2000)); // 2s between polls
             const statusRes = await this.secureFetch(
                 `${this.config.url}/api2/json/nodes/${node}/qemu/${vmid}/agent/exec-status?pid=${pid}`,
                 { headers }

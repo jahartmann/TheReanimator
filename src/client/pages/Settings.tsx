@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 // ─── Telegram trusted users card ──────────────────────────────────────────────
 
@@ -148,8 +149,12 @@ export default function SettingsPage() {
   const { t } = useTranslation('settings');
   const { data, loading, refetch } = useApi<Record<string, string>>('/api/settings');
   const [form, setForm] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
-  const [saveMsg, setSaveMsg] = useState('');
+  const [savingAI, setSavingAI] = useState(false);
+  const [savingSMTP, setSavingSMTP] = useState(false);
+  const [savingTelegram, setSavingTelegram] = useState(false);
+  const [aiMsg, setAiMsg] = useState('');
+  const [smtpMsg, setSmtpMsg] = useState('');
+  const [telegramMsg, setTelegramMsg] = useState('');
 
   useEffect(() => {
     if (data) setForm(data);
@@ -159,18 +164,18 @@ export default function SettingsPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
-  async function handleSave(keys: string[]) {
+  async function saveSection(keys: string[], setMsg: (m: string) => void, setSaving: (v: boolean) => void) {
     setSaving(true);
-    setSaveMsg('');
+    setMsg('');
     try {
       const payload: Record<string, string> = {};
       for (const k of keys) payload[k] = form[k] ?? '';
       await apiCall('/api/settings', { method: 'PUT', body: JSON.stringify(payload) });
-      setSaveMsg('Saved!');
-      setTimeout(() => setSaveMsg(''), 3000);
+      setMsg('Saved!');
+      setTimeout(() => setMsg(''), 3000);
       refetch();
     } catch (e: any) {
-      setSaveMsg(`Error: ${e.message}`);
+      setMsg(`Error: ${e.message}`);
     } finally {
       setSaving(false);
     }
@@ -186,12 +191,6 @@ export default function SettingsPage() {
         <h1 className="text-2xl font-bold tracking-tight">{t('title', 'Settings')}</h1>
         <p className="text-sm text-muted-foreground">{t('subtitle', 'Configure Reanimator')}</p>
       </div>
-
-      {saveMsg && (
-        <div className={`p-3 rounded-lg text-sm ${saveMsg.startsWith('Error') ? 'bg-destructive/10 text-destructive' : 'bg-green-500/10 text-green-600'}`}>
-          {saveMsg}
-        </div>
-      )}
 
       <Tabs defaultValue="ai">
         <TabsList>
@@ -209,7 +208,16 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label>Provider</Label>
-                <Input value={form.ai_provider || ''} onChange={(e) => set('ai_provider', e.target.value)} placeholder="ollama" />
+                <Select value={form.ai_provider || 'ollama'} onValueChange={(v) => set('ai_provider', v)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select provider..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ollama">Ollama (local)</SelectItem>
+                    <SelectItem value="openai">OpenAI</SelectItem>
+                    <SelectItem value="anthropic">Anthropic</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label>Ollama URL</Label>
@@ -227,10 +235,15 @@ export default function SettingsPage() {
                 <Label>Anthropic API Key</Label>
                 <Input type="password" value={form.anthropic_key || ''} onChange={(e) => set('anthropic_key', e.target.value)} placeholder="sk-ant-..." />
               </div>
-              <Button onClick={() => handleSave(['ai_provider', 'ai_url', 'ai_model', 'openai_key', 'anthropic_key'])} disabled={saving}>
-                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                Save AI Settings
-              </Button>
+              <div className="flex items-center gap-3">
+                <Button onClick={() => saveSection(['ai_provider', 'ai_url', 'ai_model', 'openai_key', 'anthropic_key'], setAiMsg, setSavingAI)} disabled={savingAI}>
+                  {savingAI ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Save AI Settings
+                </Button>
+                {aiMsg && (
+                  <span className={`text-sm ${aiMsg.startsWith('Error') ? 'text-destructive' : 'text-green-600'}`}>{aiMsg}</span>
+                )}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -268,10 +281,15 @@ export default function SettingsPage() {
                 <Label>Notification Email</Label>
                 <Input value={form.notification_email || ''} onChange={(e) => set('notification_email', e.target.value)} placeholder="admin@example.com" />
               </div>
-              <Button onClick={() => handleSave(['smtp_host', 'smtp_port', 'smtp_user', 'smtp_password', 'smtp_from', 'notification_email'])} disabled={saving}>
-                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                Save SMTP Settings
-              </Button>
+              <div className="flex items-center gap-3">
+                <Button onClick={() => saveSection(['smtp_host', 'smtp_port', 'smtp_user', 'smtp_password', 'smtp_from', 'notification_email'], setSmtpMsg, setSavingSMTP)} disabled={savingSMTP}>
+                  {savingSMTP ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Save SMTP Settings
+                </Button>
+                {smtpMsg && (
+                  <span className={`text-sm ${smtpMsg.startsWith('Error') ? 'text-destructive' : 'text-green-600'}`}>{smtpMsg}</span>
+                )}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -291,10 +309,15 @@ export default function SettingsPage() {
                 <Label>Allowed Chat ID</Label>
                 <Input value={form.telegram_chat_id || ''} onChange={(e) => set('telegram_chat_id', e.target.value)} placeholder="-100123456789" />
               </div>
-              <Button onClick={() => handleSave(['telegram_token', 'telegram_chat_id'])} disabled={saving}>
-                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                Save Telegram Settings
-              </Button>
+              <div className="flex items-center gap-3">
+                <Button onClick={() => saveSection(['telegram_token', 'telegram_chat_id'], setTelegramMsg, setSavingTelegram)} disabled={savingTelegram}>
+                  {savingTelegram ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Save Telegram Settings
+                </Button>
+                {telegramMsg && (
+                  <span className={`text-sm ${telegramMsg.startsWith('Error') ? 'text-destructive' : 'text-green-600'}`}>{telegramMsg}</span>
+                )}
+              </div>
             </CardContent>
           </Card>
 

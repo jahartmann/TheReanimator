@@ -7,7 +7,7 @@
  * - Completion summary with step results
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { usePolling, apiCall } from '../hooks/useApi';
 import {
@@ -159,12 +159,20 @@ export default function MigrationDetailPage() {
   const [cancelling, setCancelling] = React.useState(false);
   const [cancelError, setCancelError] = React.useState<string | null>(null);
 
-  // Poll — 2s refresh while active (we re-render when data changes, so switching
-  // interval based on status would require a separate hook; 2s is acceptable here)
+  // Poll — 2s refresh while active; stops automatically on terminal state
+  const [isTerminal, setIsTerminal] = useState(false);
   const { data, loading, error, refetch } = usePolling<MigrationDetail>(
-    `/api/migrations/${id}`,
-    2000
+    id ? `/api/migrations/${id}` : '',
+    2000,
+    !isTerminal
   );
+
+  // Mark terminal once a final state is reached so the interval is dropped
+  useEffect(() => {
+    if (data && ['completed', 'failed', 'cancelled'].includes(data.status ?? '')) {
+      setIsTerminal(true);
+    }
+  }, [data]);
 
   // Auto-scroll log on new content
   useEffect(() => {

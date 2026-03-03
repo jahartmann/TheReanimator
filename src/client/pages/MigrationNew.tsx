@@ -216,6 +216,14 @@ export default function MigrationNewPage() {
       .finally(() => setVMsLoading(false));
   }, [sourceId]);
 
+  // ── Reset storages/bridges when target server changes ─────────────────────
+  useEffect(() => {
+    setStorages([]);
+    setBridges([]);
+    setTargetStorage('');
+    setTargetBridge('');
+  }, [targetId]);
+
   // ── Load storages + bridges when target changes (Step 3 entry) ────────────
   async function loadTargetResources() {
     if (!targetId) return;
@@ -234,6 +242,14 @@ export default function MigrationNewPage() {
       .finally(() => setBridgesLoading(false));
   }
 
+  // ── Reload target resources when entering step 3 or when targetId changes ─
+  useEffect(() => {
+    if (step === 3 && targetId) {
+      loadTargetResources();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, targetId]);
+
   // ── VM selection helpers ──────────────────────────────────────────────────
   function toggleVM(vmid: number) {
     setSelectedVmids((prev) => {
@@ -249,7 +265,6 @@ export default function MigrationNewPage() {
 
   // ── Navigation ────────────────────────────────────────────────────────────
   function goNext() {
-    if (step === 2) loadTargetResources();
     setStep((s) => Math.min(s + 1, TOTAL_STEPS));
   }
 

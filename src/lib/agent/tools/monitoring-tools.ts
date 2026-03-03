@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import db from '@/lib/db';
 import { createSSHClient } from '@/lib/ssh';
-import { getServerByIdOrName } from './shared';
+import { getServerByIdOrName, shellEscape } from './shared';
 import { getServerInfo, getServerHealth } from '@/lib/actions/monitoring';
 import { scanHost, scanAllVMs } from '@/lib/actions/scan';
 import { runNetworkAnalysis } from '@/lib/actions/network_analysis';
@@ -150,8 +150,8 @@ export const monitoringTools = {
 
                 const client = createSSHClient(server);
                 await client.connect();
-                const serviceFlag = service ? `-u ${service}` : '';
-                const output = await client.exec(`journalctl ${serviceFlag} -p ${priority} -n ${lines} --no-pager`);
+                const serviceFlag = service ? `-u ${shellEscape(service)}` : '';
+                const output = await client.exec(`journalctl ${serviceFlag} -p ${shellEscape(priority)} -n ${lines} --no-pager`);
                 await client.disconnect();
 
                 return { success: true, server: server.name, service: service || 'all', priority, logs: output };
@@ -175,7 +175,7 @@ export const monitoringTools = {
                 const client = createSSHClient(server);
                 await client.connect();
                 const cmd = device
-                    ? `smartctl -H ${device} 2>/dev/null || echo "SMART not available"`
+                    ? `smartctl -H ${shellEscape(device)} 2>/dev/null || echo "SMART not available"`
                     : `lsblk -d -o NAME,SIZE,TYPE,MOUNTPOINT 2>/dev/null || echo "lsblk not available"`;
                 const output = await client.exec(cmd);
                 await client.disconnect();
@@ -226,7 +226,7 @@ export const monitoringTools = {
 
                 const client = createSSHClient(server);
                 await client.connect();
-                const output = await client.exec(`du -h --max-depth=${depth} "${path}" 2>/dev/null | sort -hr | head -20`);
+                const output = await client.exec(`du -h --max-depth=${depth} ${shellEscape(path)} 2>/dev/null | sort -hr | head -20`);
                 await client.disconnect();
 
                 return { success: true, server: server.name, path, depth, usage: output };

@@ -47,24 +47,14 @@ export async function compileToolCode(code: string): Promise<CompilationResult> 
             safetyIssues: safety.issues,
         };
     } catch (esbuildError: any) {
-        // Fallback: if esbuild is not available, try simple validation
-        try {
-            // Basic syntax check - try to parse as a function
-            new Function(code);
-            return {
-                success: true,
-                compiledCode: code, // Use as-is (assume JS)
-                safetyLevel: safety.level,
-                safetyIssues: safety.issues,
-            };
-        } catch (syntaxError: any) {
-            return {
-                success: false,
-                safetyLevel: safety.level,
-                safetyIssues: safety.issues,
-                error: `Kompilierungsfehler: ${syntaxError.message}`,
-            };
-        }
+        // esbuild is required for safe compilation of custom tools.
+        // Do NOT fall back to new Function(code) as it bypasses the sandbox.
+        return {
+            success: false,
+            safetyLevel: safety.level,
+            safetyIssues: safety.issues,
+            error: 'esbuild is required for custom tool compilation. Install it with: npm install esbuild',
+        };
     }
 }
 

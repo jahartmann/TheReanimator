@@ -87,7 +87,7 @@ interface NetworkData {
 function formatDate(dateString: string | null): string {
   if (!dateString) return 'Never';
   try {
-    return new Intl.DateTimeFormat('de', {
+    return new Intl.DateTimeFormat(undefined, {
       day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
     }).format(new Date(dateString));
   } catch {
@@ -152,6 +152,7 @@ export default function ServerDetailPage() {
   const { mutate } = useApiMutation();
   const [backingUp, setBackingUp] = React.useState(false);
   const [scanning, setScanning] = React.useState(false);
+  const [backupError, setBackupError] = React.useState<string | null>(null);
 
   const server = data?.server;
   const vms = data?.vms ?? [];
@@ -163,11 +164,14 @@ export default function ServerDetailPage() {
 
   async function handleBackup() {
     setBackingUp(true);
+    setBackupError(null);
     try {
       await mutate(`/api/configs/backup/${id}`);
-      setTimeout(() => { refetch(); setBackingUp(false); }, 2000);
+      await new Promise(r => setTimeout(r, 2000));
+      refetch();
     } catch (e: any) {
-      alert(`Failed: ${e.message}`);
+      setBackupError(e.message);
+    } finally {
       setBackingUp(false);
     }
   }
@@ -175,9 +179,12 @@ export default function ServerDetailPage() {
   async function handleScan() {
     setScanning(true);
     try {
-      await mutate('/api/scan');
-      setTimeout(() => { refetch(); setScanning(false); }, 3000);
+      await mutate(`/api/scan/${id}`);
+      await new Promise(r => setTimeout(r, 3000));
+      refetch();
     } catch {
+      // ignore
+    } finally {
       setScanning(false);
     }
   }
@@ -233,6 +240,12 @@ export default function ServerDetailPage() {
             </Button>
           </div>
         </div>
+
+        {backupError && (
+          <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
+            Backup failed: {backupError}
+          </div>
+        )}
 
         {error && (
           <div className="p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">

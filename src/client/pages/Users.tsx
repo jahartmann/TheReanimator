@@ -12,9 +12,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
+import { toast } from 'sonner';
 
 interface UserItem {
   id: number;
@@ -30,7 +32,7 @@ interface UserItem {
 function formatDate(dateString: string | null): string {
   if (!dateString) return 'Never';
   try {
-    return new Intl.DateTimeFormat('de', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(dateString));
+    return new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(new Date(dateString));
   } catch {
     return dateString;
   }
@@ -44,6 +46,7 @@ export default function UsersPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -61,14 +64,15 @@ export default function UsersPage() {
     }
   }
 
-  async function handleDelete(id: number, username: string) {
-    if (!confirm(`Delete user "${username}"?`)) return;
+  async function handleDelete(id: number) {
+    setConfirmDeleteId(null);
     setDeletingId(id);
     try {
       await apiCall(`/api/users/${id}`, { method: 'DELETE' });
+      toast.success('User deleted');
       refetch();
     } catch (e: any) {
-      alert(`Failed: ${e.message}`);
+      toast.error(`Failed: ${e.message}`);
     } finally {
       setDeletingId(null);
     }
@@ -82,7 +86,7 @@ export default function UsersPage() {
       });
       refetch();
     } catch (e: any) {
-      alert(`Failed: ${e.message}`);
+      toast.error(`Failed: ${e.message}`);
     }
   }
 
@@ -94,7 +98,7 @@ export default function UsersPage() {
       });
       refetch();
     } catch (e: any) {
-      alert(`Failed: ${e.message}`);
+      toast.error(`Failed: ${e.message}`);
     }
   }
 
@@ -151,35 +155,43 @@ export default function UsersPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 text-xs"
-                    onClick={() => handleToggleAdmin(user)}
-                    title={user.is_admin ? 'Remove admin' : 'Make admin'}
-                  >
-                    <Shield className={`h-3.5 w-3.5 ${user.is_admin ? 'text-primary' : 'text-muted-foreground'}`} />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 text-xs"
-                    onClick={() => handleToggleActive(user)}
-                    title={user.is_active ? 'Deactivate' : 'Activate'}
-                  >
-                    {user.is_active ? <Check className="h-3.5 w-3.5 text-green-500" /> : <X className="h-3.5 w-3.5 text-red-500" />}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                    onClick={() => handleDelete(user.id, user.username)}
-                    disabled={deletingId === user.id}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
+                {confirmDeleteId === user.id ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-destructive">Delete &ldquo;{user.username}&rdquo;?</span>
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setConfirmDeleteId(null)}>Cancel</Button>
+                    <Button variant="destructive" size="sm" className="h-7 text-xs" onClick={() => handleDelete(user.id)} disabled={deletingId === user.id}>Delete</Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => handleToggleAdmin(user)}
+                      title={user.is_admin ? 'Remove admin' : 'Make admin'}
+                    >
+                      <Shield className={`h-3.5 w-3.5 ${user.is_admin ? 'text-primary' : 'text-muted-foreground'}`} />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => handleToggleActive(user)}
+                      title={user.is_active ? 'Deactivate' : 'Activate'}
+                    >
+                      {user.is_active ? <Check className="h-3.5 w-3.5 text-green-500" /> : <X className="h-3.5 w-3.5 text-red-500" />}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                      onClick={() => setConfirmDeleteId(user.id)}
+                      disabled={deletingId === user.id}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -223,12 +235,10 @@ export default function UsersPage() {
               />
             </div>
             <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
+              <Checkbox
                 id="is_admin"
                 checked={createForm.is_admin}
-                onChange={(e) => setCreateForm((f) => ({ ...f, is_admin: e.target.checked }))}
-                className="h-4 w-4"
+                onCheckedChange={(v) => setCreateForm((f) => ({ ...f, is_admin: !!v }))}
               />
               <Label htmlFor="is_admin">Administrator</Label>
             </div>

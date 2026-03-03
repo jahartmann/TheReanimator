@@ -2,73 +2,77 @@ import db from '@/lib/db';
 import { getVMs } from '@/lib/actions/vm';
 import { withSSH } from '@/lib/ssh-pool';
 
+/** Escape a string for safe use as a shell argument (single-quote wrapping). */
+export function shellEscape(arg: string): string {
+    return "'" + arg.replace(/'/g, "'\\''") + "'";
+}
+
 // BLOCKED commands - these require explicit confirmation
 export const BLOCKED_COMMANDS = [
     'reboot', 'shutdown', 'poweroff', 'halt', 'init', 'telinit',
     'rm -rf', 'rm -r', 'rmdir', // destructive deletes
     'dd ', 'mkfs', 'fdisk', 'parted', 'sfdisk', 'wipefs', // disk operations
     ':(){:|:&};:', // fork bomb
+    'curl.*|', 'wget.*|', 'curl.*bash', 'wget.*sh', // pipe to shell
+    'python', 'python3', 'perl', 'ruby', // script execution
+    'nc ', 'ncat ', 'netcat', // network tools
+    'eval ', 'exec ', // code execution
+    '>(', '<(', // process substitution
+    '`', // backtick command substitution
 ];
 
-// SAFE commands - these can run autonomously without confirmation
-export const SAFE_COMMAND_PATTERNS = [
-    // System info
-    /^(df|free|top|htop|uptime|uname|lsb_release|cat|less|head|tail|grep|awk|sed)/,
-    /^(ps|pgrep|pstree|lsof|netstat|ss|ip|ifconfig|route|arp)/,
-    // Logs & Diagnostics
-    /^(journalctl|dmesg|last|who|w|vmstat|iostat|mpstat|sar)/,
-    // Proxmox specific - READ operations
-    /^(qm (config|status|list|showcmd|guest|agent))/,
-    /^(pct (config|status|list|exec))/,
-    /^(pvecm (status|nodes|expected))/,
-    /^(pvesh get)/,
-    /^(pveversion|proxmox-backup-client status)/,
-    // ZFS - READ operations
-    /^(zpool (status|list|iostat|history))/,
-    /^(zfs (list|get))/,
-    // Package management - INFO only
-    /^(apt (list|search|show|policy)|apt-cache|dpkg (-l|-L|-s|--list))/,
-    // Service status - READ only
-    /^(systemctl (status|is-active|is-enabled|list-units|list-timers))/,
-    // Network diagnostics
-    /^(ping|traceroute|tracepath|nslookup|dig|host|mtr|curl -I|wget --spider)/,
-    // File info (not modification)
-    /^(ls|find|locate|which|whereis|file|stat|du|wc)/,
-    // Hardware info
-    /^(lspci|lsusb|lsblk|lscpu|lsmem|dmidecode|smartctl)/,
+// SAFE command prefixes - whitelist approach (deny by default)
+export const SAFE_COMMAND_PREFIXES = [
+    'cat', 'ls', 'df', 'du', 'free', 'uptime', 'uname', 'hostname',
+    'whoami', 'date', 'ps', 'top', 'htop', 'systemctl status',
+    'journalctl', 'ip', 'ss', 'netstat', 'lsblk', 'lscpu', 'lsof',
+    'mount', 'findmnt', 'head', 'tail', 'wc', 'grep', 'find',
+    'stat', 'file', 'which', 'dpkg -l', 'apt list',
+    'qm list', 'qm status', 'qm config',
+    'pct list', 'pct status', 'pct config',
+    'pvesm', 'pvecm', 'pveversion',
+    // Additional read-only commands
+    'lsb_release', 'less', 'pgrep', 'pstree', 'ifconfig', 'route', 'arp',
+    'dmesg', 'last', 'who', 'w', 'vmstat', 'iostat', 'mpstat', 'sar',
+    'pvesh get', 'proxmox-backup-client status',
+    'zpool status', 'zpool list', 'zpool iostat', 'zpool history',
+    'zfs list', 'zfs get',
+    'apt search', 'apt show', 'apt policy', 'apt-cache', 'dpkg -L', 'dpkg -s', 'dpkg --list',
+    'systemctl is-active', 'systemctl is-enabled', 'systemctl list-units', 'systemctl list-timers',
+    'ping', 'traceroute', 'tracepath', 'nslookup', 'dig', 'host', 'mtr',
+    'locate', 'whereis', 'lspci', 'lsusb', 'lsmem', 'dmidecode', 'smartctl',
+    'qm showcmd', 'qm guest', 'qm agent',
+    'pct exec',
+    'pvecm status', 'pvecm nodes', 'pvecm expected',
 ];
 
 export function isCommandSafe(cmd: string): boolean {
-    const lower = cmd.toLowerCase().trim();
+    const trimmed = cmd.trim();
+    const lower = trimmed.toLowerCase();
 
     // Always block dangerous patterns
     if (lower.includes('> /dev/')) return false;
     if (lower.includes(':(){:|:&};:')) return false;
     if (lower.includes('| sh') || lower.includes('| bash')) return false;
     if (lower.includes('$(') || lower.includes('`')) return false;
+    if (lower.includes('>(') || lower.includes('<(')) return false;
+    if (lower.includes('curl') && (lower.includes('| ') || lower.includes('bash'))) return false;
+    if (lower.includes('wget') && (lower.includes('| ') || lower.includes('| sh'))) return false;
 
     // Check explicit blocked list
     if (BLOCKED_COMMANDS.some(blocked => lower.includes(blocked))) {
         return false;
     }
 
-    // Check if matches safe patterns
-    for (const pattern of SAFE_COMMAND_PATTERNS) {
-        if (pattern.test(cmd)) {
+    // Whitelist approach: only allow commands that start with a known safe prefix
+    for (const prefix of SAFE_COMMAND_PREFIXES) {
+        if (lower === prefix || lower.startsWith(prefix + ' ') || lower.startsWith(prefix + '\t')) {
             return true;
         }
     }
 
-    // Default: allow if no blocked pattern matched and seems like a read operation
-    const seemsSafe = !lower.includes('rm ') &&
-        !lower.includes('mv ') &&
-        !lower.includes('cp ') &&
-        !lower.includes('chmod') &&
-        !lower.includes('chown') &&
-        !lower.includes('kill') &&
-        !lower.includes('pkill');
-
-    return seemsSafe;
+    // Default: DENY if not explicitly whitelisted
+    return false;
 }
 
 /** Human-readable cron description */

@@ -116,6 +116,30 @@ app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
+// Login rate limiting
+const loginAttempts = new Map<string, { count: number; resetTime: number }>();
+
+function checkLoginRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = loginAttempts.get(ip);
+  if (!entry || now > entry.resetTime) {
+    loginAttempts.set(ip, { count: 1, resetTime: now + 900000 }); // 15 min window
+    return true;
+  }
+  if (entry.count >= 10) return false; // max 10 attempts per 15 min
+  entry.count++;
+  return true;
+}
+
 // CORS headers for dev (Vite dev server on different port)
 if (!isProd) {
   app.use((req, res, next) => {
@@ -138,6 +162,12 @@ setupDrRoutes(app, requireAuth);
 // ─── Auth routes ─────────────────────────────────────────────────────────────
 
 app.post('/api/auth/login', async (req: Request, res: Response) => {
+  const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+  if (!checkLoginRateLimit(clientIp)) {
+    res.status(429).json({ error: 'Too many login attempts. Try again later.' });
+    return;
+  }
+
   const { username, password } = req.body;
   if (!username || !password) {
     res.status(400).json({ error: 'Username and password required' });
@@ -182,7 +212,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
     const cookieOpts = {
       httpOnly: true,
-      secure: false,
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax' as const,
       maxAge: SESSION_DURATION_HOURS * 60 * 60 * 1000, // milliseconds
       path: '/',
@@ -764,16 +794,6 @@ app.get('/api/configs/:id', requireAuth, (req: AuthRequest, res: Response) => {
   }
 });
 
-app.post('/api/configs/backup/:serverId', requireAuth, async (req: AuthRequest, res: Response) => {
-  try {
-    const { runConfigBackup } = await import('./lib/actions/backup.js');
-    runConfigBackup(parseInt(req.params.serverId)).catch(console.error);
-    res.json({ success: true, message: 'Backup started' });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.delete('/api/configs/:id', requireAuth, (req: AuthRequest, res: Response) => {
   try {
     const db = getDb();
@@ -819,6 +839,46 @@ app.get('/api/organs', requireAuth, (req: AuthRequest, res: Response) => {
     // Fetch scheduler job next runs as organ health
     const jobs = db.prepare('SELECT * FROM jobs WHERE enabled = 1 ORDER BY next_run ASC LIMIT 20').all() as any[];
     res.json({ logs, state, jobs });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Organs content (read/write organ markdown files) ─────────────────────────
+
+const ALLOWED_ORGANS: Record<string, string> = {
+  'soul': 'src/lib/organs/soul/SOUL.md',
+  'heart': 'src/lib/organs/heart/HEARTBEAT.md',
+  'brain': 'src/lib/organs/brain/MEMORY.md',
+  'user': 'src/lib/organs/brain/USER.md',
+  'tools': 'src/lib/organs/hands/TOOLS.md',
+};
+
+app.get('/api/organs/content', requireAuth, async (req: AuthRequest, res: Response) => {
+  const organ = req.query.organ as string | undefined;
+  if (!organ || !ALLOWED_ORGANS[organ]) {
+    res.status(400).json({ error: 'Invalid organ' }); return;
+  }
+  try {
+    const filePath = path.resolve(ROOT, ALLOWED_ORGANS[organ]);
+    try { await fs.promises.access(filePath); } catch { res.json({ content: '' }); return; }
+    const content = await fs.promises.readFile(filePath, 'utf-8');
+    res.json({ content });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/organs/content', requireAuth, async (req: AuthRequest, res: Response) => {
+  const { organ, content } = req.body;
+  if (!organ || !ALLOWED_ORGANS[organ]) {
+    res.status(400).json({ error: 'Invalid organ' }); return;
+  }
+  try {
+    const filePath = path.resolve(ROOT, ALLOWED_ORGANS[organ]);
+    await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.promises.writeFile(filePath, content, 'utf-8');
+    res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

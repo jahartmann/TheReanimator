@@ -167,10 +167,10 @@ export default function StoragePage() {
         {servers.length > 0 && (
           <div className={`flex items-center gap-3 p-3 rounded-lg border text-sm ${
             allOk
-              ? 'bg-green-50 border-green-200 text-green-800'
+              ? 'bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800 text-green-800 dark:text-green-300'
               : criticalCount > 0
-                ? 'bg-red-50 border-red-200 text-red-800'
-                : 'bg-amber-50 border-amber-200 text-amber-800'
+                ? 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800 text-red-600 dark:text-red-400'
+                : 'bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300'
           }`}>
             {allOk
               ? <CheckCircle2 className="h-4 w-4 shrink-0" />

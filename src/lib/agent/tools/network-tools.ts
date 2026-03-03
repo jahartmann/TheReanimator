@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { createSSHClient } from '@/lib/ssh';
-import { getServerByIdOrName } from './shared';
+import { getServerByIdOrName, shellEscape } from './shared';
+
+// Validate that target is a safe hostname or IP (no shell metacharacters)
+const VALID_TARGET_REGEX = /^[a-zA-Z0-9.\-_:[\]]+$/;
 
 export const networkTools = {
 
@@ -13,21 +16,27 @@ export const networkTools = {
         }),
         execute: async ({ serverId, target, testType = 'ping' }: { serverId: number, target: string, testType?: string }) => {
             try {
+                // Validate target - must be a hostname or IP, no shell metacharacters
+                if (!VALID_TARGET_REGEX.test(target)) {
+                    return { success: false, error: `Invalid target "${target}". Must be a valid hostname or IP address (no special characters).` };
+                }
+
                 const server = getServerByIdOrName(serverId);
                 if (!server) return { success: false, error: `Server ${serverId} not found.` };
 
                 const client = createSSHClient(server);
                 await client.connect();
+                const escapedTarget = shellEscape(target);
                 let cmd = '';
                 switch (testType) {
                     case 'ping':
-                        cmd = `ping -c 4 ${target}`;
+                        cmd = `ping -c 4 ${escapedTarget}`;
                         break;
                     case 'traceroute':
-                        cmd = `traceroute -m 10 ${target} 2>/dev/null || tracepath ${target}`;
+                        cmd = `traceroute -m 10 ${escapedTarget} 2>/dev/null || tracepath ${escapedTarget}`;
                         break;
                     case 'dns':
-                        cmd = `nslookup ${target} || dig ${target}`;
+                        cmd = `nslookup ${escapedTarget} || dig ${escapedTarget}`;
                         break;
                 }
                 const output = await client.exec(cmd, 30000);

@@ -2,7 +2,7 @@
  * Migrations page — lists all VM migration tasks with live status polling.
  */
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { usePolling } from '../hooks/useApi';
 import { ArrowRight, Plus, RefreshCw, MoveRight, Server, CheckCircle2, XCircle, Loader2, Clock } from 'lucide-react';
@@ -153,13 +153,24 @@ function MigrationRow({ m }: { m: MigrationTask }) {
 
 // ─── MigrationsPage ───────────────────────────────────────────────────────────
 
+const TERMINAL = ['completed', 'failed', 'cancelled'];
+
 export default function MigrationsPage() {
-  // Poll at 3s — keeps the list fresh while migrations are running without
-  // significant overhead (lightweight DB query). Falls back gracefully if stale.
+  // Start with polling enabled; disable once all migrations reach a terminal state.
+  const [hasActive, setHasActive] = useState(true);
+
   const { data, loading, error, refetch } = usePolling<MigrationTask[]>(
     '/api/migrations',
-    3000
+    3000,
+    hasActive
   );
+
+  // Update state after each fetch — if no active tasks remain, stop polling
+  useEffect(() => {
+    if (data) {
+      setHasActive(data.some(m => !TERMINAL.includes(m.status)));
+    }
+  }, [data]);
 
   const migrations = data ?? [];
 
