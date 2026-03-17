@@ -1230,6 +1230,145 @@ app.post('/api/bulk-command', requireAuth, async (req: AuthRequest, res: Respons
   }
 });
 
+// --- Log & Network Monitor API routes ---
+
+app.get('/api/logs/sources', async (req, res) => {
+  try {
+    const { getLogSources } = await import('./lib/actions/logs.js');
+    const sources = await getLogSources(Number(req.query.serverId));
+    res.json(sources);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/logs/analysis', async (req, res) => {
+  try {
+    const { getAnalysisResults } = await import('./lib/actions/logs.js');
+    const results = await getAnalysisResults(Number(req.query.serverId));
+    res.json(results);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/logs/analyze', async (req, res) => {
+  try {
+    const { triggerLogAnalysis } = await import('./lib/actions/logs.js');
+    const result = await triggerLogAnalysis(req.body.serverId, req.body.timeRange);
+    res.json(result);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/logs/settings', async (req, res) => {
+  try {
+    const { getAnalysisSettings } = await import('./lib/actions/logs.js');
+    const settings = await getAnalysisSettings();
+    res.json(settings);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/logs/settings', async (req, res) => {
+  try {
+    const { updateAnalysisSettings } = await import('./lib/actions/logs.js');
+    const result = await updateAnalysisSettings(req.body);
+    res.json(result);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/network/nmap-check', async (req, res) => {
+  try {
+    const { checkNmapAvailable } = await import('./lib/actions/network-scan.js');
+    const available = await checkNmapAvailable(Number(req.query.serverId));
+    res.json({ available });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/network/scan-ports', async (req, res) => {
+  try {
+    const { scanPorts } = await import('./lib/actions/network-scan.js');
+    const ports = await scanPorts(req.body.serverId);
+    res.json(ports);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/network/scan-vm-ports', async (req, res) => {
+  try {
+    const { scanVMPorts } = await import('./lib/actions/network-scan.js');
+    const ports = await scanVMPorts(req.body.serverId, req.body.vmId);
+    res.json(ports);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/network/arp', async (req, res) => {
+  try {
+    const { getARPTable } = await import('./lib/actions/network-scan.js');
+    const table = await getARPTable(req.body.serverId);
+    res.json(table);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/network/connections', async (req, res) => {
+  try {
+    const { getConnections } = await import('./lib/actions/network-scan.js');
+    const conns = await getConnections(req.body.serverId);
+    res.json(conns);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/network/subnet-scan', async (req, res) => {
+  try {
+    const { scanSubnet } = await import('./lib/actions/network-scan.js');
+    const result = await scanSubnet(req.body.serverId, req.body.subnet);
+    res.json(result);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/network/install-nmap', async (req, res) => {
+  try {
+    const { installNmap } = await import('./lib/actions/network-scan.js');
+    const result = await installNmap(req.body.serverId);
+    res.json(result);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/anomalies', async (req, res) => {
+  try {
+    const { getAnomalies } = await import('./lib/actions/anomaly.js');
+    const serverId = req.query.serverId ? Number(req.query.serverId) : undefined;
+    const anomalies = await getAnomalies(serverId, { status: req.query.status as string, severity: req.query.severity as string });
+    res.json(anomalies);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/anomalies/baseline', async (req, res) => {
+  try {
+    const { getBaseline } = await import('./lib/actions/anomaly.js');
+    const baseline = await getBaseline(Number(req.query.serverId));
+    res.json(baseline);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/anomalies/baseline', async (req, res) => {
+  try {
+    const { saveBaseline } = await import('./lib/actions/anomaly.js');
+    const result = await saveBaseline(req.body.serverId);
+    res.json(result);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/anomalies/check', async (req, res) => {
+  try {
+    const { runAnomalyCheck } = await import('./lib/actions/anomaly.js');
+    const result = await runAnomalyCheck(req.body.serverId);
+    res.json(result);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/anomalies/bulk-update', async (req, res) => {
+  try {
+    const { bulkUpdateAnomalies } = await import('./lib/actions/anomaly.js');
+    const result = await bulkUpdateAnomalies(req.body.ids, req.body.status);
+    res.json(result);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 // ─── Serve SPA in production ──────────────────────────────────────────────────
 
 if (isProd && fs.existsSync(DIST)) {
