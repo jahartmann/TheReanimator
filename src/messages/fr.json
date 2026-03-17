@@ -45,6 +45,7 @@
     "configs": "Configurations",
     "agent": "Chat",
     "monitoring": "Monitoring",
+    "logs": "Journaux",
     "bulkCommands": "Commandes en vrac",
     "users": "Utilisateur",
     "administration": "Administration",

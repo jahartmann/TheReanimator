@@ -45,6 +45,7 @@
     "configs": "configuraciones",
     "agent": "Chat",
     "monitoring": "Monitoreo",
+    "logs": "Registros",
     "bulkCommands": "Comandos masivos",
     "users": "usuario",
     "administration": "Administración",

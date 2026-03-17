@@ -78,6 +78,7 @@ const StoragePage = React.lazy(() => import('./pages/Storage'));
 const DisasterRecoveryPage = React.lazy(() => import('./pages/DisasterRecovery'));
 const OptimizerPage = React.lazy(() => import('./pages/Optimizer'));
 const HistoryPage = React.lazy(() => import('./pages/History'));
+const LogsPage = React.lazy(() => import('./pages/Logs'));
 
 // ─── Page spinner ─────────────────────────────────────────────────────────────
 
@@ -254,6 +255,7 @@ function AppRoutes() {
         <Route path="/tags" element={<TagsPage />} />
         <Route path="/storage" element={<StoragePage />} />
         <Route path="/history" element={<HistoryPage />} />
+        <Route path="/logs" element={<LogsPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/organs" element={<OrgansPage />} />
         <Route path="/console" element={<ConsolePage />} />

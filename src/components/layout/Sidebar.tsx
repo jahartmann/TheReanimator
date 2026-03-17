@@ -3,7 +3,7 @@
 import { getAISettings } from '@/lib/actions/ai';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { LayoutDashboard, Server, FolderCog, ArrowRightLeft, Tag as TagIcon, HardDrive, Users, Terminal, Activity, ListTodo, TrendingUp, Sparkles, Wrench, HeartPulse, ShieldCheck, Shield, Monitor, Disc2, KeyRound } from 'lucide-react';
+import { LayoutDashboard, Server, FolderCog, ArrowRightLeft, Tag as TagIcon, HardDrive, Users, Terminal, Activity, ListTodo, TrendingUp, Sparkles, Wrench, HeartPulse, ShieldCheck, Shield, Monitor, Disc2, KeyRound, ScrollText } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { getCurrentUser, logout, User as UserType } from '@/lib/actions/userAuth';
 import { APP_VERSION, IS_BETA } from '@/lib/constants';
@@ -17,6 +17,7 @@ import { NotificationBell } from '@/components/NotificationBell';
 const mainNav = [
     { key: 'dashboard', href: '/', icon: LayoutDashboard },
     { key: 'monitoring', href: '/monitoring', icon: Activity },
+    { key: 'logs', href: '/logs', icon: ScrollText },
     { key: 'servers', href: '/servers', icon: Server },
     { key: 'console', href: '/console', icon: Monitor },
     { key: 'agent', href: '/agent', icon: Sparkles },
