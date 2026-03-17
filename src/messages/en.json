@@ -1820,5 +1820,32 @@
     "confirmDelete": "Delete this entry?",
     "lastAccessed": "Last accessed",
     "importance": "Importance"
+  },
+  "logs": {
+    "title": "Log Monitor",
+    "tabs": { "live": "Live Logs", "analysis": "AI Analysis", "network": "Network", "anomalies": "Anomalies" },
+    "selectServer": "Select a server in the sidebar",
+    "search": "Search (regex)...",
+    "allSeverities": "All severities",
+    "entries": "entries",
+    "jumpToBottom": "Jump to bottom",
+    "sidebar": { "title": "Log Monitor", "servers": "Servers", "sources": "Sources" },
+    "analysis": {
+      "title": "AI Log Analysis", "lastRun": "Last analysis", "analyzing": "Analyzing...",
+      "analyzeNow": "Analyze now", "noFindings": "No findings.",
+      "explanation": "Explanation", "logLines": "Affected logs", "recommendation": "Recommendation", "history": "History"
+    },
+    "network": {
+      "ports": "Ports", "arp": "ARP/Neighbors", "connections": "Connections",
+      "searchPorts": "Search port or process...", "scan": "Scan",
+      "nmapMissing": "nmap is not installed. Enhanced scans unavailable.",
+      "install": "Install", "confirmInstall": "Install nmap on this server?"
+    },
+    "anomaly": {
+      "all": "All", "acknowledge": "Acknowledge", "resolve": "Resolve",
+      "saveBaseline": "Save baseline", "check": "Check",
+      "noAnomalies": "No anomalies detected.",
+      "noBaseline": "Save a baseline first."
+    }
   }
 }

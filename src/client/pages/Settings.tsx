@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useApi, apiCall } from '../hooks/useApi';
-import { Save, Loader2, Trash2, UserCheck, RefreshCw } from 'lucide-react';
+import { Save, Loader2, Trash2, UserCheck, RefreshCw, ScrollText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,6 +14,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 
 // ─── Telegram trusted users card ──────────────────────────────────────────────
 
@@ -145,6 +147,195 @@ function TelegramTrustCard() {
   );
 }
 
+// ─── Log Analysis & Network Monitoring settings card ──────────────────────────
+
+interface LogSettings {
+  log_analysis_enabled: boolean;
+  log_analysis_interval: string;
+  log_retention_days: string;
+  log_network_scan_interval: string;
+  log_anomaly_severities: string;
+}
+
+const ANOMALY_SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;
+type Severity = typeof ANOMALY_SEVERITIES[number];
+
+function LogSettingsCard() {
+  const { data, loading } = useApi<LogSettings>('/api/logs/settings');
+  const [form, setForm] = useState<LogSettings>({
+    log_analysis_enabled: false,
+    log_analysis_interval: '15',
+    log_retention_days: '30',
+    log_network_scan_interval: '60',
+    log_anomaly_severities: 'high,critical',
+  });
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    if (data) setForm(data);
+  }, [data]);
+
+  function setField<K extends keyof LogSettings>(key: K, value: LogSettings[K]) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function toggleSeverity(severity: Severity) {
+    const current = form.log_anomaly_severities
+      ? form.log_anomaly_severities.split(',').filter(Boolean)
+      : [];
+    const updated = current.includes(severity)
+      ? current.filter((s) => s !== severity)
+      : [...current, severity];
+    setField('log_anomaly_severities', updated.join(','));
+  }
+
+  function isSeverityChecked(severity: Severity) {
+    return form.log_anomaly_severities
+      ? form.log_anomaly_severities.split(',').includes(severity)
+      : false;
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setMsg('');
+    try {
+      await apiCall('/api/logs/settings', { method: 'POST', body: JSON.stringify(form) });
+      setMsg('Saved!');
+      setTimeout(() => setMsg(''), 3000);
+    } catch (e: any) {
+      setMsg(`Error: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading && !data) {
+    return (
+      <Card>
+        <CardContent className="p-8 flex items-center justify-center">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <ScrollText className="h-4 w-4" />
+          Log Analysis &amp; Network Monitoring
+        </CardTitle>
+        <CardDescription>Configure automated log analysis, retention, and anomaly detection</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {/* Enable toggle */}
+        <div className="flex items-center justify-between">
+          <div>
+            <Label className="text-sm font-medium">Log Analysis Enabled</Label>
+            <p className="text-xs text-muted-foreground mt-0.5">Run AI-powered log analysis automatically</p>
+          </div>
+          <Switch
+            checked={form.log_analysis_enabled}
+            onCheckedChange={(v) => setField('log_analysis_enabled', v)}
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          {/* Analysis interval */}
+          <div className="space-y-2">
+            <Label>Analysis Interval</Label>
+            <Select
+              value={form.log_analysis_interval}
+              onValueChange={(v) => setField('log_analysis_interval', v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select interval..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="5">Every 5 minutes</SelectItem>
+                <SelectItem value="15">Every 15 minutes</SelectItem>
+                <SelectItem value="30">Every 30 minutes</SelectItem>
+                <SelectItem value="60">Every hour</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Network scan interval */}
+          <div className="space-y-2">
+            <Label>Network Scan Interval</Label>
+            <Select
+              value={form.log_network_scan_interval}
+              onValueChange={(v) => setField('log_network_scan_interval', v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select interval..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="5">Every 5 minutes</SelectItem>
+                <SelectItem value="15">Every 15 minutes</SelectItem>
+                <SelectItem value="30">Every 30 minutes</SelectItem>
+                <SelectItem value="60">Every hour</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* Retention days */}
+        <div className="space-y-2">
+          <Label>Log Retention (days)</Label>
+          <Input
+            type="number"
+            min={1}
+            max={365}
+            value={form.log_retention_days}
+            onChange={(e) => setField('log_retention_days', e.target.value)}
+            placeholder="30"
+            className="w-40"
+          />
+        </div>
+
+        {/* Anomaly notification severities */}
+        <div className="space-y-2">
+          <Label>Anomaly Notification Severities</Label>
+          <p className="text-xs text-muted-foreground">Notify when anomalies of selected severity are detected</p>
+          <div className="flex flex-wrap gap-4 mt-1">
+            {ANOMALY_SEVERITIES.map((severity) => (
+              <div key={severity} className="flex items-center gap-2">
+                <Checkbox
+                  id={`severity-${severity}`}
+                  checked={isSeverityChecked(severity)}
+                  onCheckedChange={() => toggleSeverity(severity)}
+                />
+                <label
+                  htmlFor={`severity-${severity}`}
+                  className="text-sm capitalize cursor-pointer select-none"
+                >
+                  {severity}
+                </label>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Save */}
+        <div className="flex items-center gap-3 pt-1">
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            Save Log Settings
+          </Button>
+          {msg && (
+            <span className={`text-sm ${msg.startsWith('Error') ? 'text-destructive' : 'text-green-600'}`}>
+              {msg}
+            </span>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SettingsPage() {
   const { t } = useTranslation('settings');
   const { data, loading, refetch } = useApi<Record<string, string>>('/api/settings');
@@ -197,6 +388,7 @@ export default function SettingsPage() {
           <TabsTrigger value="ai">AI</TabsTrigger>
           <TabsTrigger value="smtp">SMTP</TabsTrigger>
           <TabsTrigger value="telegram">Telegram</TabsTrigger>
+          <TabsTrigger value="logs">Logs</TabsTrigger>
         </TabsList>
 
         <TabsContent value="ai" className="space-y-4 mt-4">
@@ -322,6 +514,10 @@ export default function SettingsPage() {
           </Card>
 
           <TelegramTrustCard />
+        </TabsContent>
+
+        <TabsContent value="logs" className="space-y-4 mt-4">
+          <LogSettingsCard />
         </TabsContent>
       </Tabs>
     </div>

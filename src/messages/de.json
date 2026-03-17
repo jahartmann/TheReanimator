@@ -1743,5 +1743,32 @@
     "confirmDelete": "Eintrag wirklich löschen?",
     "lastAccessed": "Zuletzt abgerufen",
     "importance": "Wichtigkeit"
+  },
+  "logs": {
+    "title": "Log Monitor",
+    "tabs": { "live": "Live Logs", "analysis": "KI-Analyse", "network": "Netzwerk", "anomalies": "Anomalien" },
+    "selectServer": "Wähle einen Server in der Sidebar",
+    "search": "Suchen (regex)...",
+    "allSeverities": "Alle Stufen",
+    "entries": "Einträge",
+    "jumpToBottom": "Nach unten springen",
+    "sidebar": { "title": "Log Monitor", "servers": "Server", "sources": "Quellen" },
+    "analysis": {
+      "title": "KI Log-Analyse", "lastRun": "Letzte Analyse", "analyzing": "Analysiere...",
+      "analyzeNow": "Jetzt analysieren", "noFindings": "Keine Findings gefunden.",
+      "explanation": "Erklärung", "logLines": "Betroffene Logs", "recommendation": "Empfehlung", "history": "Verlauf"
+    },
+    "network": {
+      "ports": "Ports", "arp": "ARP/Neighbors", "connections": "Verbindungen",
+      "searchPorts": "Port oder Prozess suchen...", "scan": "Scannen",
+      "nmapMissing": "nmap ist nicht installiert. Erweiterte Scans nicht verfügbar.",
+      "install": "Installieren", "confirmInstall": "nmap auf diesem Server installieren?"
+    },
+    "anomaly": {
+      "all": "Alle", "acknowledge": "Bestätigen", "resolve": "Lösen",
+      "saveBaseline": "Baseline speichern", "check": "Prüfen",
+      "noAnomalies": "Keine Anomalien erkannt.",
+      "noBaseline": "Speichere zuerst eine Baseline."
+    }
   }
 }

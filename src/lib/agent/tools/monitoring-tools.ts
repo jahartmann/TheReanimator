@@ -286,6 +286,24 @@ export const monitoringTools = {
         },
     },
 
+    analyzeLogsNow: {
+        description: 'Trigger on-demand AI log analysis for a server.',
+        parameters: z.object({
+            serverId: z.number().describe('Server ID'),
+            minutes: z.number().optional().describe('Analyze last N minutes (default: 60)'),
+        }),
+        execute: async ({ serverId, minutes = 60 }: { serverId: number; minutes?: number }) => {
+            try {
+                const { triggerLogAnalysis } = await import('@/lib/actions/logs');
+                const end = new Date();
+                const start = new Date(end.getTime() - minutes * 60 * 1000);
+                return await triggerLogAnalysis(serverId, { start: start.toISOString(), end: end.toISOString() });
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        },
+    },
+
     getMonitorStatus: {
         description: 'Zeigt den aktuellen Gesamtstatus aller Monitoring-Checks.',
         parameters: z.object({}),

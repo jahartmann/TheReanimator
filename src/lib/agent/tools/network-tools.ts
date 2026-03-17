@@ -80,4 +80,38 @@ export const networkTools = {
             }
         },
     },
+
+    scanPorts: {
+        description: 'Scan open ports on a server (ss -tulnp).',
+        parameters: z.object({
+            serverId: z.number().describe('Server ID'),
+        }),
+        execute: async ({ serverId }: { serverId: number }) => {
+            const { scanPorts } = await import('@/lib/actions/network-scan');
+            return await scanPorts(serverId);
+        },
+    },
+
+    scanSubnet: {
+        description: 'Scan subnet for hosts and open ports (nmap or ARP).',
+        parameters: z.object({
+            serverId: z.number().describe('Server ID to scan from'),
+            subnet: z.string().optional().describe('Subnet CIDR (auto-detect if empty)'),
+        }),
+        execute: async ({ serverId, subnet }: { serverId: number; subnet?: string }) => {
+            const { scanSubnet } = await import('@/lib/actions/network-scan');
+            return await scanSubnet(serverId, subnet);
+        },
+    },
+
+    getAnomalies: {
+        description: 'List detected network anomalies for a server.',
+        parameters: z.object({
+            serverId: z.number().describe('Server ID'),
+        }),
+        execute: async ({ serverId }: { serverId: number }) => {
+            const { getAnomalies } = await import('@/lib/actions/anomaly');
+            return await getAnomalies(serverId);
+        },
+    },
 };
