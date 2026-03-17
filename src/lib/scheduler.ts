@@ -176,6 +176,8 @@ export function initScheduler() {
     initInfrastructureMonitoring(); // Hourly infrastructure change detection
     initHeartbeat();                    // Heartbeat file every 30s
     initSystemAudit();                  // Nightly Comprehensive Audit (User Request)
+    initLogAnalysis();                  // Periodic AI log analysis
+    initNetworkScanning();              // Periodic network scans + anomaly checks
 
     // Initialize default reflexes
     try {
@@ -704,6 +706,136 @@ function initSystemAudit() {
         }
     });
     scheduledTasks.push(task);
+}
+
+// Periodic AI log analysis — configurable interval, reads 'log_analysis_enabled' setting
+function initLogAnalysis() {
+    try {
+        const enabledRow = db.prepare("SELECT value FROM settings WHERE key = 'log_analysis_enabled'").get() as { value: string } | undefined;
+        if (enabledRow?.value !== 'true') {
+            console.log('[Scheduler] Log Analysis disabled (log_analysis_enabled != true). Skipping.');
+            return;
+        }
+
+        const intervalRow = db.prepare("SELECT value FROM settings WHERE key = 'log_analysis_interval'").get() as { value: string } | undefined;
+        const interval = intervalRow?.value || '*/15 * * * *';
+
+        if (!cron.validate(interval)) {
+            console.warn(`[Scheduler] Invalid log_analysis_interval: "${interval}". Skipping Log Analysis.`);
+            return;
+        }
+
+        console.log(`[Scheduler] Starting Log Analysis (${interval})...`);
+        const task = cron.schedule(interval, async () => {
+            console.log('[Scheduler] Running periodic log analysis...');
+            const servers = db.prepare("SELECT id, name, ssh_host FROM servers WHERE status != 'offline'").all() as any[];
+
+            for (const server of servers) {
+                try {
+                    const { triggerLogAnalysis } = await import('@/lib/actions/logs');
+                    const result = await triggerLogAnalysis(server.id);
+
+                    if (result.findingCount > 0) {
+                        // Check for critical findings in the stored result
+                        const row = db.prepare(
+                            'SELECT findings_json FROM log_analysis_results WHERE id = ?'
+                        ).get(result.id) as { findings_json: string } | undefined;
+
+                        if (row) {
+                            const findings: Array<{ severity: string }> = JSON.parse(row.findings_json || '[]');
+                            const criticalFindings = findings.filter(f => f.severity === 'critical');
+
+                            if (criticalFindings.length > 0) {
+                                console.log(`[Log Analysis] ${server.name}: ${criticalFindings.length} critical finding(s) — sending notification`);
+                                try {
+                                    const { sendNotification } = await import('@/lib/notifications');
+                                    await sendNotification(
+                                        'log_analysis_critical',
+                                        `Log Analysis: ${criticalFindings.length} critical finding(s) on ${server.name}`
+                                    );
+                                } catch (notifErr) {
+                                    console.error(`[Log Analysis] Failed to send notification for ${server.name}:`, notifErr);
+                                }
+                            }
+                        }
+
+                        console.log(`[Log Analysis] ${server.name}: ${result.findingCount} finding(s)`);
+                    }
+                } catch (e) {
+                    console.error(`[Log Analysis] Failed for server ${server.name} (${server.id}):`, e);
+                }
+            }
+        });
+        scheduledTasks.push(task);
+    } catch (e) {
+        console.error('[Scheduler] Failed to initialize Log Analysis:', e);
+    }
+}
+
+// Periodic network scans + anomaly detection — runs scans first, then anomaly check
+function initNetworkScanning() {
+    try {
+        const intervalRow = db.prepare("SELECT value FROM settings WHERE key = 'network_scan_interval'").get() as { value: string } | undefined;
+        const interval = intervalRow?.value || '*/30 * * * *';
+
+        if (!cron.validate(interval)) {
+            console.warn(`[Scheduler] Invalid network_scan_interval: "${interval}". Skipping Network Scanning.`);
+            return;
+        }
+
+        console.log(`[Scheduler] Starting Network Scanning (${interval})...`);
+        const task = cron.schedule(interval, async () => {
+            console.log('[Scheduler] Running periodic network scans...');
+            const servers = db.prepare("SELECT id, name, ssh_host FROM servers WHERE status != 'offline'").all() as any[];
+
+            // Run all scans first (in parallel per server) before anomaly checks
+            await Promise.allSettled(servers.map(async (server) => {
+                try {
+                    const { scanPorts, getARPTable } = await import('@/lib/actions/network-scan');
+                    await Promise.allSettled([
+                        scanPorts(server.id),
+                        getARPTable(server.id),
+                    ]);
+                    console.log(`[Network Scan] ${server.name}: port + ARP scan complete`);
+                } catch (e) {
+                    console.error(`[Network Scan] Failed for server ${server.name} (${server.id}):`, e);
+                }
+            }));
+
+            // After ALL scans complete, run anomaly checks for each server
+            console.log('[Scheduler] Running anomaly checks after network scans...');
+            for (const server of servers) {
+                try {
+                    const { runAnomalyCheck } = await import('@/lib/actions/anomaly');
+                    const anomalies = await runAnomalyCheck(server.id);
+
+                    const severeAnomalies = anomalies.filter(a => a.severity === 'critical' || a.severity === 'high');
+                    if (severeAnomalies.length > 0) {
+                        const cooldownKey = `network-anomaly-${server.id}`;
+                        if (shouldSendNotification(cooldownKey)) {
+                            console.log(`[Anomaly Check] ${server.name}: ${severeAnomalies.length} critical/high anomaly(ies) — sending notification`);
+                            try {
+                                const { sendNotification } = await import('@/lib/notifications');
+                                await sendNotification(
+                                    'network_anomaly',
+                                    `Network Anomaly: ${severeAnomalies.length} critical/high anomaly(ies) on ${server.name} — types: ${[...new Set(severeAnomalies.map(a => a.type))].join(', ')}`
+                                );
+                            } catch (notifErr) {
+                                console.error(`[Anomaly Check] Failed to send notification for ${server.name}:`, notifErr);
+                            }
+                        }
+                    } else if (anomalies.length > 0) {
+                        console.log(`[Anomaly Check] ${server.name}: ${anomalies.length} low/medium anomaly(ies) (no alert)`);
+                    }
+                } catch (e) {
+                    console.error(`[Anomaly Check] Failed for server ${server.name} (${server.id}):`, e);
+                }
+            }
+        });
+        scheduledTasks.push(task);
+    } catch (e) {
+        console.error('[Scheduler] Failed to initialize Network Scanning:', e);
+    }
 }
 
 function loadJobs() {
