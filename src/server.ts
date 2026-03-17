@@ -1250,6 +1250,7 @@ const httpServer = createServer(app);
 
 const wss = new WebSocketServer({ noServer: true });
 const wssVnc = new WebSocketServer({ noServer: true });
+const wssLogs = new WebSocketServer({ noServer: true });
 
 httpServer.on('upgrade', (req, socket, head) => {
   const { pathname } = parse(req.url || '', true);
@@ -1257,6 +1258,8 @@ httpServer.on('upgrade', (req, socket, head) => {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   } else if (pathname?.startsWith('/ws/vnc/')) {
     wssVnc.handleUpgrade(req, socket, head, (ws) => wssVnc.emit('connection', ws, req));
+  } else if (pathname?.startsWith('/ws/logs/')) {
+    wssLogs.handleUpgrade(req, socket, head, (ws) => wssLogs.emit('connection', ws, req));
   } else {
     socket.destroy();
   }
@@ -1274,6 +1277,13 @@ wssVnc.on('connection', (ws, req) => {
   const match = pathname?.match(/^\/ws\/vnc\/(\d+)-(\d+)$/);
   if (!match) { ws.close(4000, 'Invalid path'); return; }
   handleVncConnection(ws, req, parseInt(match[1]), parseInt(match[2]), query);
+});
+
+wssLogs.on('connection', (ws, req) => {
+  const { pathname } = parse(req.url || '', true);
+  const match = pathname?.match(/^\/ws\/logs\/(\d+)$/);
+  if (!match) { ws.close(4000, 'Invalid path'); return; }
+  handleLogConnection(ws, req, parseInt(match[1]));
 });
 
 // ─── Terminal WebSocket handler ───────────────────────────────────────────────
@@ -1515,6 +1525,323 @@ async function getProxmoxAuth(serverInfo: any, https: any): Promise<{ headers: a
   return { headers: {}, ticket: null };
 }
 
+// ─── Log Streaming WebSocket handler ──────────────────────────────────────────
+
+interface LogStreamState {
+  sshClient: InstanceType<typeof SshClient>;
+  streams: Map<string, any>;
+  paused: boolean;
+  buffer: any[];
+  filters: { grep?: string; priority?: number; unit?: string };
+  idleTimer: ReturnType<typeof setTimeout>;
+}
+
+const LOG_IDLE_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+const LOG_BUFFER_MAX = 5000;
+
+function handleLogConnection(ws: any, req: any, serverId: number) {
+  // ── Auth (same pattern as terminal handler) ──
+  const cookies = parseCookies(req.headers.cookie);
+  if (!cookies.session || !cookies.session_expires) {
+    ws.close(4001, 'Unauthorized'); return;
+  }
+  try {
+    if (new Date(cookies.session_expires) < new Date()) {
+      ws.close(4001, 'Session expired'); return;
+    }
+  } catch {
+    ws.close(4001, 'Invalid session'); return;
+  }
+
+  let db: any;
+  try {
+    db = getDb();
+    const session = db.prepare('SELECT id FROM sessions WHERE id = ?').get(cookies.session);
+    if (!session) { ws.close(4001, 'Invalid session token'); return; }
+  } catch (e) {
+    console.error('[Logs] DB auth check failed:', e);
+    ws.close(4002, 'Auth failed'); return;
+  }
+
+  // ── Server lookup ──
+  let serverInfo: any;
+  try {
+    serverInfo = db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId);
+  } catch { ws.close(4004, 'Server lookup failed'); return; }
+  if (!serverInfo) { ws.close(4004, 'Server not found'); return; }
+
+  let sshHost = serverInfo.ssh_host;
+  if (!sshHost && serverInfo.url) {
+    try { sshHost = new URL(serverInfo.url).hostname; } catch {}
+  }
+  if (!sshHost) { ws.close(4006, 'No SSH host'); return; }
+
+  const sshKey = serverInfo.ssh_key;
+  const isPrivateKey = sshKey && sshKey.trim().startsWith('-----BEGIN');
+
+  const connectConfig: any = {
+    host: sshHost,
+    port: serverInfo.ssh_port || 22,
+    username: serverInfo.ssh_user || 'root',
+    readyTimeout: 15000,
+    keepaliveInterval: 20000,
+    keepaliveCountMax: 10,
+  };
+  if (isPrivateKey) { connectConfig.privateKey = sshKey; }
+  else if (sshKey) { connectConfig.password = sshKey; }
+
+  // ── State ──
+  const sshClient = new SshClient();
+  const state: LogStreamState = {
+    sshClient,
+    streams: new Map(),
+    paused: false,
+    buffer: [],
+    filters: {},
+    idleTimer: setTimeout(() => ws.close(4009, 'Idle timeout'), LOG_IDLE_TIMEOUT),
+  };
+
+  const send = (obj: any) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+
+  const resetIdleTimer = () => {
+    clearTimeout(state.idleTimer);
+    state.idleTimer = setTimeout(() => ws.close(4009, 'Idle timeout'), LOG_IDLE_TIMEOUT);
+  };
+
+  // ── SSH ready → wait for subscribe messages ──
+  sshClient.on('ready', () => {
+    console.log(`[Logs] SSH connected: server=${serverId}`);
+    send({ type: 'status', status: 'connected' });
+  });
+
+  sshClient.on('error', (err: any) => {
+    console.error(`[Logs] SSH error: server=${serverId}`, err.message);
+    send({ type: 'error', source: 'ssh', message: err.message });
+    ws.close(4008, 'SSH error');
+  });
+  sshClient.on('close', () => send({ type: 'status', status: 'disconnected' }));
+
+  // ── Build command for a log source ──
+  function buildCommand(source: string, filters: { grep?: string; priority?: number; unit?: string }): string {
+    switch (source) {
+      case 'journalctl': {
+        let cmd = 'journalctl -f -o json --no-pager -n 50';
+        if (filters.priority !== undefined && filters.priority >= 0 && filters.priority <= 7) {
+          cmd += ` -p ${filters.priority}`;
+        }
+        if (filters.unit) {
+          cmd += ` -u ${filters.unit.replace(/[;&|`$]/g, '')}`;
+        }
+        return cmd;
+      }
+      case 'syslog':
+        return 'tail -F /var/log/syslog 2>/dev/null || tail -F /var/log/messages 2>/dev/null';
+      case 'auth':
+        return 'tail -F /var/log/auth.log 2>/dev/null || tail -F /var/log/secure 2>/dev/null';
+      case 'kern':
+        return 'dmesg -w --time-format iso 2>/dev/null || dmesg -w 2>/dev/null';
+      case 'pveproxy':
+        return 'tail -F /var/log/pveproxy/access.log 2>/dev/null';
+      case 'pve-firewall':
+        return 'tail -F /var/log/pve-firewall.log 2>/dev/null';
+      default:
+        // Treat as a file path if it starts with /
+        if (source.startsWith('/')) {
+          const safePath = source.replace(/[;&|`$]/g, '');
+          return `tail -F ${safePath} 2>/dev/null`;
+        }
+        return `journalctl -f -o json --no-pager -n 50 -u ${source.replace(/[;&|`$]/g, '')}`;
+    }
+  }
+
+  // ── Parse and emit a log line ──
+  function processLogLine(source: string, line: string) {
+    if (!line.trim()) return;
+
+    let entry: any;
+
+    if (source === 'journalctl') {
+      try {
+        const j = JSON.parse(line);
+        entry = {
+          type: 'log',
+          source: 'journalctl',
+          timestamp: j.__REALTIME_TIMESTAMP
+            ? new Date(parseInt(j.__REALTIME_TIMESTAMP) / 1000).toISOString()
+            : new Date().toISOString(),
+          service: j._SYSTEMD_UNIT || j.SYSLOG_IDENTIFIER || 'unknown',
+          severity: priorityToSeverity(parseInt(j.PRIORITY ?? '6')),
+          message: j.MESSAGE || '',
+        };
+      } catch {
+        // Non-JSON journalctl output
+        entry = {
+          type: 'log',
+          source: 'journalctl',
+          timestamp: new Date().toISOString(),
+          service: 'journalctl',
+          severity: guessSeverity(line),
+          message: line,
+        };
+      }
+    } else {
+      entry = {
+        type: 'log',
+        source,
+        timestamp: new Date().toISOString(),
+        service: source,
+        severity: guessSeverity(line),
+        message: line,
+      };
+    }
+
+    // Server-side grep filtering
+    if (state.filters.grep) {
+      try {
+        const re = new RegExp(state.filters.grep, 'i');
+        if (!re.test(entry.message) && !re.test(entry.service)) return;
+      } catch {
+        if (!entry.message.toLowerCase().includes(state.filters.grep.toLowerCase())) return;
+      }
+    }
+
+    if (state.paused) {
+      if (state.buffer.length < LOG_BUFFER_MAX) state.buffer.push(entry);
+    } else {
+      send(entry);
+    }
+  }
+
+  // ── Start streaming a source ──
+  function startSource(source: string, filters: any) {
+    if (state.streams.has(source)) return; // already running
+
+    const cmd = buildCommand(source, filters);
+    // ssh2 Client.exec() runs a command on the remote server over SSH — not child_process.exec
+    sshClient.exec(cmd, (err: any, stream: any) => {
+      if (err) {
+        send({ type: 'error', source, message: `Failed to start ${source}: ${err.message}` });
+        return;
+      }
+      state.streams.set(source, stream);
+      let partial = '';
+
+      stream.on('data', (data: Buffer) => {
+        partial += data.toString('utf-8');
+        const lines = partial.split('\n');
+        partial = lines.pop() || '';
+        for (const line of lines) {
+          processLogLine(source, line);
+        }
+      });
+
+      stream.stderr.on('data', (data: Buffer) => {
+        const msg = data.toString('utf-8').trim();
+        if (msg) send({ type: 'error', source, message: msg });
+      });
+
+      stream.on('close', () => {
+        state.streams.delete(source);
+      });
+    });
+  }
+
+  // ── Stop a source ──
+  function stopSource(source: string) {
+    const stream = state.streams.get(source);
+    if (stream) {
+      try { stream.close(); } catch {}
+      state.streams.delete(source);
+    }
+  }
+
+  // ── Stop all sources ──
+  function stopAllSources() {
+    for (const [, stream] of state.streams) {
+      try { stream.close(); } catch {}
+    }
+    state.streams.clear();
+  }
+
+  // ── Message handler ──
+  ws.on('message', (rawMsg: Buffer) => {
+    resetIdleTimer();
+    try {
+      const msg = JSON.parse(rawMsg.toString());
+
+      switch (msg.action) {
+        case 'subscribe': {
+          stopAllSources();
+          const sources: string[] = msg.sources || ['journalctl'];
+          state.filters = msg.filters || {};
+          for (const src of sources) {
+            startSource(src, state.filters);
+          }
+          break;
+        }
+
+        case 'updateFilter': {
+          state.filters = msg.filters || {};
+          // Restart all sources with new filters
+          const currentSources = [...state.streams.keys()];
+          const newSources: string[] = msg.sources || currentSources;
+          stopAllSources();
+          for (const src of newSources) {
+            startSource(src, state.filters);
+          }
+          break;
+        }
+
+        case 'pause':
+          state.paused = true;
+          state.buffer = [];
+          break;
+
+        case 'resume':
+          state.paused = false;
+          // Flush buffer
+          for (const entry of state.buffer) {
+            send(entry);
+          }
+          state.buffer = [];
+          break;
+
+        default:
+          send({ type: 'error', source: 'server', message: `Unknown action: ${msg.action}` });
+      }
+    } catch {}
+  });
+
+  // ── Cleanup ──
+  const cleanup = () => {
+    clearTimeout(state.idleTimer);
+    stopAllSources();
+    try { sshClient.end(); } catch {}
+  };
+  ws.on('close', () => { console.log(`[Logs] WS closed: server=${serverId}`); cleanup(); });
+  ws.on('error', () => cleanup());
+
+  sshClient.connect(connectConfig);
+}
+
+// ── Log helper functions ──
+
+function priorityToSeverity(p: number): string {
+  if (p <= 3) return 'error';
+  if (p === 4) return 'warning';
+  if (p <= 6) return 'info';
+  return 'debug';
+}
+
+function guessSeverity(line: string): string {
+  const lower = line.toLowerCase();
+  if (/\b(emerg|alert|crit|fatal|panic)\b/.test(lower)) return 'error';
+  if (/\b(err|error|fail|failed|failure)\b/.test(lower)) return 'error';
+  if (/\b(warn|warning)\b/.test(lower)) return 'warning';
+  if (/\b(debug|trace)\b/.test(lower)) return 'debug';
+  return 'info';
+}
+
 // ─── Startup ──────────────────────────────────────────────────────────────────
 
 async function startServices() {
@@ -1579,6 +1906,7 @@ const shutdown = () => {
   console.log('[Server] Shutting down...');
   wss.clients.forEach((ws) => ws.close(1001, 'Server shutting down'));
   wssVnc.clients.forEach((ws) => ws.close(1001, 'Server shutting down'));
+  wssLogs.clients.forEach((ws) => ws.close(1001, 'Server shutting down'));
   httpServer.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 10000);
 };
