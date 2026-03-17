@@ -18,9 +18,11 @@ New `/logs` page for the Reanimator platform providing live log streaming, AI-po
 ## Tab 1: Live Logs
 
 ### Transport
-- WebSocket via `server.ts` at `/ws/logs/{serverId}`
-- SSH connection to server runs `journalctl -f` or `tail -f` on selected log sources
+- WebSocket via `src/server.ts` at `/ws/logs/{serverId}`
+- Requires new `WebSocketServer` instance (`wssLogs`) + routing branch in `httpServer.on('upgrade')` handler (same as `wss` for terminal, `wssVnc` for VNC)
+- SSH connection uses **direct `SshClient`** (not pool) — long-lived streaming sessions, same pattern as terminal handler. `withSSH()` is only for one-shot operations (scans, fetches).
 - Auth: session cookie + DB token validation on WS upgrade (same pattern as terminal/VNC)
+- Idle timeout: 30 min (longer than terminal's 10 min, since log monitoring sessions are passive)
 
 ### Features
 - **Full depth** — no 100-line limit, virtualized scrolling (only visible rows rendered)
@@ -30,7 +32,7 @@ New `/logs` page for the Reanimator platform providing live log streaming, AI-po
 - **Pause/Resume** button to freeze the stream while still buffering
 - **Auto-scroll** with "Jump to bottom" button when user scrolls up
 - **Download:** CSV, JSON, plain text — filtered or complete
-- **Multi-source merging:** when multiple log sources are selected, entries are merged chronologically with source indicator
+- **Multi-source merging:** when multiple log sources are selected, entries are merged by arrival order with source indicator badge. journalctl provides precise timestamps (`__REALTIME_TIMESTAMP`); non-journalctl sources (tail -F) use arrival time since syslog timestamps lack year and timezone precision. Each line shows its source label for disambiguation.
 
 ### WebSocket Protocol
 ```
@@ -97,14 +99,19 @@ New settings in `settings` table:
 **When nmap is installed (enhanced scanning):**
 | Command | Data |
 |---------|------|
-| `nmap -sV -T4 <subnet>` | Port scan + service version detection |
+| `nmap -sV -T4 <subnet>` | Port scan + service version detection (requires root) |
 | `nmap -sn <subnet>` | Host discovery (ping scan) |
-| `nmap -O <host>` | OS fingerprinting |
+| `nmap -sT <subnet>` | TCP connect scan (unprivileged fallback for -sV) |
+| `nmap -O <host>` | OS fingerprinting (requires root) |
+
+**nmap privilege handling:**
+- Check if SSH user is root (`id -u`). If root: use `-sV` and `-O`. If non-root: fall back to `-sT` (TCP connect) and skip `-O`.
+- Graceful degradation: root → full scan, non-root → limited scan, no nmap → ss/ip only
 
 **nmap availability:**
 - Check via `which nmap` on connection
 - If not installed: show banner with "Install nmap for enhanced scanning" + install button
-- Install via `apt-get install -y nmap` (with user confirmation)
+- Install via package manager: detect OS from `/etc/os-release` → `apt-get install -y nmap` (Debian/Ubuntu/Proxmox) or `yum install -y nmap` (RHEL/CentOS) or `dnf install -y nmap` (Fedora)
 - Graceful fallback: all `ss`/`ip` features work without nmap
 
 ### UI Components
@@ -145,7 +152,7 @@ For VMs/containers on a Proxmox node:
 - "Save current state as baseline" button per server
 - Baseline stored in `network_baseline` DB table: ports, IPs, MACs, connection counts
 - Baseline auto-updates option: mark reviewed anomalies as "accepted" → updates baseline
-- Baseline versioning: keep last 10 baselines for comparison
+- Baseline versioning: keep last 10 baselines for comparison. `saveBaseline()` enforces this by deleting oldest entries beyond 10 per server.
 
 ### UI
 - **Anomaly list** with severity badges, grouped by server
@@ -162,7 +169,7 @@ For VMs/containers on a Proxmox node:
 **`src/lib/actions/logs.ts`**
 - `getLogSources(serverId)` — list available log files on server
 - `fetchLogs(serverId, source, options)` — fetch historical logs with filters
-- `downloadLogs(serverId, source, format, filters)` — generate downloadable file
+- `downloadLogs(serverId, source, format, filters)` — streaming download via dedicated API route (like file-stream pattern). Max download window: 7 days. Size guard: 50MB limit with warning.
 - `triggerLogAnalysis(serverId, timeRange)` — on-demand AI analysis
 - `getAnalysisResults(serverId, options)` — fetch past analysis findings
 - `getAnalysisSettings()` / `updateAnalysisSettings(settings)` — settings CRUD
@@ -187,7 +194,7 @@ For VMs/containers on a Proxmox node:
 
 ### WebSocket Endpoint
 
-**`server.ts` → `/ws/logs/{serverId}`**
+**`src/server.ts` → `/ws/logs/{serverId}`**
 - Same auth pattern as `/ws/terminal/` and `/ws/vnc/`
 - SSH connection to server, runs log commands based on subscribed sources
 - Parses structured output (journalctl JSON) and unstructured (tail -f) into unified format
@@ -205,6 +212,8 @@ CREATE TABLE IF NOT EXISTS network_scans (
   result_json TEXT NOT NULL,
   scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+-- Retention: DELETE FROM network_scans WHERE scanned_at < datetime('now', '-7 days')
+-- Run in scheduler cleanup or on each insert
 
 -- Network baseline for anomaly detection
 CREATE TABLE IF NOT EXISTS network_baseline (
@@ -244,8 +253,7 @@ CREATE TABLE IF NOT EXISTS log_analysis_results (
 | Job | Default Schedule | Purpose |
 |-----|-----------------|---------|
 | `logAnalysis` | Configurable (default `*/15 * * * *`) | Fetch + analyze recent logs per server |
-| `networkScan` | `*/30 * * * *` (every 30 min) | Run port scan + ARP on all servers |
-| `anomalyCheck` | `*/30 * * * *` (after networkScan) | Compare scan results against baseline |
+| `networkScan` | `*/30 * * * *` (every 30 min) | Run port scan + ARP on all servers. On completion, triggers `anomalyCheck` in callback — no separate cron entry. |
 
 ### New Agent Tools
 
@@ -280,14 +288,14 @@ src/components/logs/
 
 ## Key Technical Decisions
 
-1. **WebSocket for live logs** — matches existing terminal/VNC patterns in server.ts
+1. **WebSocket for live logs** — matches existing terminal/VNC patterns in src/server.ts
 2. **Hybrid network scanning** — ss/ip always works, nmap enhances when available
 3. **Hybrid anomaly detection** — rules for speed/reliability, AI for context/assessment
 4. **Virtualized scrolling** — essential for performance with thousands of log lines
 5. **Server-side filtering** — reduce WebSocket bandwidth by filtering on the server before sending
 6. **Existing provider system** for AI — reuses multi-provider setup (Ollama/Anthropic/OpenAI)
 7. **Existing notification system** for alerts — reuses Telegram/SMTP + cooldown
-8. **SSH pool** — all SSH operations use withSSH() from existing pool
+8. **SSH pool** — one-shot operations (scans, fetches) use `withSSH()`. Live streaming (WebSocket logs) uses direct `SshClient` (same as terminal/VNC).
 
 ## Settings Integration
 
