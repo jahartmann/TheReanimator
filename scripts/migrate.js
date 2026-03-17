@@ -927,6 +927,68 @@ db.exec(`
   );
 `);
 
+// ====== NETWORK SCANS & ANOMALY DETECTION ======
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS network_scans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    scan_type TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS network_baseline (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    baseline_json TEXT NOT NULL,
+    version INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS anomalies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    ai_assessment TEXT,
+    status TEXT DEFAULT 'new',
+    detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    resolved_at DATETIME
+  );
+
+  CREATE TABLE IF NOT EXISTS log_analysis_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    findings_json TEXT NOT NULL,
+    log_range_start DATETIME,
+    log_range_end DATETIME,
+    analyzed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+// Indexes for network/anomaly tables
+db.exec(`CREATE INDEX IF NOT EXISTS idx_network_scans_server ON network_scans(server_id, scanned_at)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_anomalies_server ON anomalies(server_id, status)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_log_analysis_server ON log_analysis_results(server_id, analyzed_at)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_network_baseline_server ON network_baseline(server_id)`);
+
+// Default settings for log analysis and network scanning
+const logSettings = [
+  ['log_analysis_enabled', 'true'],
+  ['log_analysis_interval', '*/15 * * * *'],
+  ['log_analysis_retention_days', '30'],
+  ['network_scan_interval', '*/30 * * * *'],
+  ['anomaly_notification_severities', 'high,critical'],
+];
+
+for (const [key, value] of logSettings) {
+  try {
+    db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)").run(key, value);
+  } catch (e) { /* setting may exist */ }
+}
+
 console.log('Database migrations completed.');
 db.close();
 process.exit(0);
