@@ -9,6 +9,9 @@ import { useTranslation } from 'react-i18next';
 import { ScrollText, BarChart3, Network, AlertTriangle } from 'lucide-react';
 import { LogsSidebar } from '@/components/logs/LogsSidebar';
 import { LiveLogViewer } from '@/components/logs/LiveLogViewer';
+import { LogAnalysisTab } from '@/components/logs/LogAnalysisTab';
+import { NetworkTab } from '@/components/logs/NetworkTab';
+import { AnomalyTab } from '@/components/logs/AnomalyTab';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -28,20 +31,6 @@ const TABS: TabDef[] = [
   { key: 'network', label: 'Network', icon: Network },
   { key: 'anomalies', label: 'Anomalies', icon: AlertTriangle },
 ];
-
-// ─── Placeholder component for upcoming tabs ────────────────────────────────
-
-function TabPlaceholder({ tab }: { tab: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
-      <div className="h-16 w-16 rounded-full bg-muted/50 flex items-center justify-center">
-        <BarChart3 className="h-8 w-8 text-muted-foreground/50" />
-      </div>
-      <p className="text-sm font-medium capitalize">{tab}</p>
-      <p className="text-xs">Coming soon</p>
-    </div>
-  );
-}
 
 // ─── Main page ──────────────────────────────────────────────────────────────
 
@@ -71,11 +60,11 @@ export default function LogsPage() {
       case 'live':
         return <LiveLogViewer serverId={selectedServer} sources={selectedSources} />;
       case 'analysis':
-        return <TabPlaceholder tab="analysis" />;
+        return <LogAnalysisTab serverId={selectedServer} />;
       case 'network':
-        return <TabPlaceholder tab="network" />;
+        return <NetworkTab serverId={selectedServer} />;
       case 'anomalies':
-        return <TabPlaceholder tab="anomalies" />;
+        return <AnomalyTab serverId={selectedServer} />;
       default:
         return null;
     }
